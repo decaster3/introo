@@ -108,6 +108,15 @@ app.get('/health', async (req, res) => {
   }
 });
 
+// Debug endpoint - remove after debugging
+app.get('/debug/env', (req, res) => {
+  res.json({
+    FRONTEND_URL: process.env.FRONTEND_URL || 'NOT SET',
+    NODE_ENV: process.env.NODE_ENV || 'NOT SET',
+    PORT: process.env.PORT || 'NOT SET',
+  });
+});
+
 // Global error handler
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   console.error('Unhandled error:', err.message);
