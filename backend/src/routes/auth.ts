@@ -14,12 +14,18 @@ router.get('/google', passport.authenticate('google', {
 // Google OAuth callback
 router.get(
   '/google/callback',
+  (req, res, next) => {
+    console.log('OAuth callback received, redirecting to:', process.env.FRONTEND_URL);
+    next();
+  },
   passport.authenticate('google', { session: false, failureRedirect: '/auth/failure' }),
   (req, res) => {
     const user = req.user as any;
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    console.log('Auth successful, redirecting to:', frontendUrl);
     
     if (!user) {
-      res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=auth_failed`);
+      res.redirect(`${frontendUrl}/login?error=auth_failed`);
       return;
     }
 
@@ -30,7 +36,7 @@ router.get(
     res.cookie('token', token, cookieConfig);
 
     // Redirect to frontend home page
-    res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/`);
+    res.redirect(`${frontendUrl}/`);
   }
 );
 

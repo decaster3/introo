@@ -64,12 +64,15 @@ export interface AuthenticatedRequest extends Request {
 }
 
 export function configurePassport() {
+  const callbackURL = process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3001/auth/google/callback';
+  console.log('Configuring Passport with callbackURL:', callbackURL);
+  
   passport.use(
     new GoogleStrategy(
       {
         clientID: process.env.GOOGLE_CLIENT_ID || '',
         clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
-        callbackURL: process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3001/auth/google/callback',
+        callbackURL,
         scope: ['profile', 'email', 'https://www.googleapis.com/auth/calendar.readonly'],
         accessType: 'offline',
         prompt: 'consent', // Always show consent screen to get refresh token
