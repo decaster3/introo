@@ -1,0 +1,92 @@
+You are building a working MVP frontend for "Spaces", a community warm intro marketplace.
+
+Goal: Generate a complete Vite + React + TypeScript app with mocked data and a full demo flow:
+1) User clicks "Connect calendar" (fake connect)
+2) App shows extracted companies/relationships (mocked)
+3) User creates an Intro Request (free text + bid)
+4) App parses the text into a normalized query (simple regex/keywords)
+5) App calculates matches (introducers) with scoring and explanation
+6) Introducer can submit an Offer for a request
+7) Requester can Accept an offer
+8) Requester can mark outcome as "Intro sent"
+
+Constraints:
+- Frontend only, no backend.
+- Use react-router-dom for navigation.
+- Use local in-memory mocked data. Persist in localStorage so refresh keeps state.
+- No external UI kit required. Use simple clean CSS.
+- No authentication required. Provide a simple "Switch user" dropdown to simulate different users (requester/introducer).
+- Provide clear components and a minimal but nice layout.
+
+Tech:
+- Vite + React + TypeScript
+- react-router-dom
+- No Tailwind required
+- Use a small local state store (either Zustand or a simple custom store hook). Prefer a custom store using React context + reducer to avoid extra deps.
+
+Pages required:
+- /connect : fake calendar connect
+- /dashboard : show connected status, relationship graph summary
+- /request/new : create request
+- /request/:id : request details, offers, accept, outcome
+- /feed : introducer feed of requests
+
+Core entities (in mock data):
+User: id, name
+Company: id, domain, name, industry, sizeBucket, geo
+RelationshipEdge: userId, companyId, meetingsCount, lastSeenAt (ISO), strengthScore (computed)
+IntroRequest: id, requesterId, rawText, normalizedQuery, bidAmount, currency, status, createdAt
+IntroOffer: id, requestId, introducerId, message, status, createdAt
+IntroOutcome: requestId, status (none|intro_sent), updatedAt
+
+NLP normalization for MVP:
+- Extract domain if present (regex)
+- Industry keywords mapping: saas, fintech, healthcare, security
+- Size bucket keywords mapping: 1-10, 11-50, 51-200, 200-1000, 1000+
+- Geo keywords: US, EU, UK
+Return a NormalizedQuery object:
+{ targetDomain?: string, industry?: string, sizeBucket?: string, geo?: string, role?: string }
+
+Matching algorithm:
+- strengthScore for edge:
+  meetingsWeight = ln(1 + meetingsCount)
+  recencyWeight = exp(-daysSinceLast / 30)
+  strength = meetingsWeight * recencyWeight
+- matchMultiplier:
+  if targetDomain exact match: 3.0
+  else if industry + sizeBucket match: 1.5
+  else if industry match: 1.2
+  else: 1.0
+- finalScore = strength * matchMultiplier
+Return top 5 matches with explanation:
+"3 meetings, last seen 12 days ago, company stripe.com"
+
+UI behaviors:
+- Connect calendar sets connection status in store.
+- Dashboard shows relationship edges grouped by company with strength and last seen.
+- Create Request page: textarea for raw text, bid input, currency select, submit.
+- After submit, navigate to Matches view embedded in Request detail.
+- Feed page shows all open requests and allows current user to submit an offer (modal or inline form).
+- Request detail shows offers; requester can accept one offer; then can mark outcome "Intro sent".
+
+Data:
+Provide at least 6 companies and 4 users with realistic relationships:
+- Users: Rinat (requester), Alex, Maya, John
+- Companies: stripe.com, hubspot.com, notion.so, okta.com, salesforce.com, datadog.com
+- Relationships: each introducer has a few strong edges.
+
+Project structure:
+- src/mock/* mocked seed data
+- src/lib/nlp.ts
+- src/lib/matching.ts
+- src/store/* context store with reducer + localStorage persistence
+- src/pages/* pages
+- src/components/* reusable components
+- src/styles.css minimal styling
+- Router in src/main.tsx
+
+Deliverables:
+- Full file tree with all files content.
+- App should run with: npm install, npm run dev.
+
+Now generate the complete codebase with all files.
