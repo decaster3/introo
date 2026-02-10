@@ -5,6 +5,3 @@ dockerfilePath = "Dockerfile"
 [deploy]
 healthcheckPath = "/"
 healthcheckTimeout = 100
-
-[[services]]
-internalPort = 8080

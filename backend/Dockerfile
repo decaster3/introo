@@ -40,7 +40,9 @@ COPY --from=builder /app/dist ./dist
 COPY start.sh ./
 RUN chmod +x start.sh
 
-EXPOSE 3001
+# Railway sets PORT env var, default to 8080
+ENV PORT=8080
+EXPOSE 8080
 
 # Use startup script
 CMD ["./start.sh"]
