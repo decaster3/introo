@@ -1,4 +1,4 @@
-const API_BASE = '';
+const API_BASE = import.meta.env.VITE_API_URL || '';
 
 async function request<T>(
   endpoint: string,
@@ -26,7 +26,7 @@ export const authApi = {
   getStatus: () => request<{ authenticated: boolean }>('/auth/status'),
   getMe: () => request<{ user: User }>('/auth/me'),
   logout: () => request<{ success: boolean }>('/auth/logout', { method: 'POST' }),
-  getGoogleAuthUrl: () => '/auth/google',
+  getGoogleAuthUrl: () => `${API_BASE}/auth/google`,
 };
 
 // Users

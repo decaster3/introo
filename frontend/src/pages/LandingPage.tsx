@@ -13,7 +13,8 @@ export function LandingPage() {
   }, [isAuthenticated, isLoading, navigate]);
 
   const handleGetStarted = () => {
-    window.location.href = '/auth/google';
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+    window.location.href = `${apiUrl}/auth/google`;
   };
 
   return (
