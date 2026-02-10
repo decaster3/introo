@@ -7,4 +7,4 @@ healthcheckPath = "/"
 healthcheckTimeout = 100
 
 [[services]]
-port = 80
+internalPort = 8080

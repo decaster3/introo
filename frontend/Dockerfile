@@ -19,9 +19,17 @@ FROM nginx:alpine
 # Copy built assets
 COPY --from=build /app/dist /usr/share/nginx/html
 
-# Copy nginx config
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Copy nginx config template and startup script
+COPY nginx.conf.template /etc/nginx/nginx.conf.template
+COPY start.sh /start.sh
+RUN chmod +x /start.sh
 
-EXPOSE 80
+# Remove default nginx config
+RUN rm -f /etc/nginx/conf.d/default.conf
 
-CMD ["nginx", "-g", "daemon off;"]
+# Default port (Railway will override with PORT env var)
+ENV PORT=8080
+
+EXPOSE 8080
+
+CMD ["/start.sh"]
