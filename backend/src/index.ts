@@ -1,12 +1,8 @@
-console.log('=== Backend starting ===');
-
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import passport from 'passport';
 import rateLimit from 'express-rate-limit';
-
-console.log('Core modules loaded');
 
 import { configurePassport } from './middleware/auth.js';
 import { securityHeaders, httpsRedirect } from './middleware/security.js';
@@ -20,11 +16,8 @@ import spacesRoutes from './routes/spaces.js';
 import signalsRoutes from './routes/signals.js';
 import prisma from './lib/prisma.js';
 
-console.log('All modules loaded');
-
 const app = express();
 const PORT = process.env.PORT || 3001;
-console.log(`Using port: ${PORT}`);
 
 // Environment variable validation
 const requiredEnvVars = ['DATABASE_URL'];
