@@ -172,7 +172,7 @@ process.on('uncaughtException', (error) => {
 
 // Start server
 verifyDatabaseConnection().then(() => {
-  server = app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+  server = app.listen(Number(PORT), '0.0.0.0', () => {
+    console.log(`Server running on port ${PORT}`);
   });
 });
