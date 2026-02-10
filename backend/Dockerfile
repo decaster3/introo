@@ -1,7 +1,7 @@
-FROM node:20-alpine AS builder
+FROM node:20-slim AS builder
 
 # Install OpenSSL for Prisma
-RUN apk add --no-cache openssl
+RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -18,10 +18,10 @@ COPY . .
 RUN npm run build
 
 # Production stage
-FROM node:20-alpine AS production
+FROM node:20-slim AS production
 
 # Install OpenSSL for Prisma
-RUN apk add --no-cache openssl
+RUN apt-get update && apt-get install -y openssl ca-certificates wget && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
