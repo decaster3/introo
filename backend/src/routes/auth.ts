@@ -40,7 +40,7 @@ router.get(
     res.cookie('token', token, cookieConfig);
 
     // Redirect to frontend home page
-    res.redirect(`${frontendUrl}/`);
+    res.redirect(`${frontendUrl}/home`);
   }
 );
 
