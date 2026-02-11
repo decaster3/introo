@@ -6,10 +6,16 @@ import { cookieConfig } from '../middleware/security.js';
 const router = Router();
 
 // Initiate Google OAuth
-router.get('/google', passport.authenticate('google', {
-  accessType: 'offline',
-  prompt: 'consent',
-}));
+router.get('/google', (req, res, next) => {
+  const callbackURL = process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3001/auth/google/callback';
+  console.log('Initiating OAuth with callbackURL:', callbackURL);
+  
+  passport.authenticate('google', {
+    accessType: 'offline',
+    prompt: 'consent',
+    callbackURL, // Explicitly pass callback URL
+  })(req, res, next);
+});
 
 // Google OAuth callback
 router.get(
