@@ -9,8 +9,9 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Build with production settings (mock mode disabled)
+# Build with production settings
 ENV VITE_USE_MOCK=false
+ENV VITE_API_URL=https://backend-production-7e155.up.railway.app
 RUN npm run build
 
 # Production image with nginx
