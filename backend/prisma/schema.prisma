@@ -8,24 +8,44 @@ datasource db {
 }
 
 model User {
-  id                 String         @id @default(cuid())
-  email              String         @unique
+  id                 String            @id @default(cuid())
+  email              String            @unique
   name               String
   avatar             String?
   googleAccessToken  String?
   googleRefreshToken String?
   calendarSyncedAt   DateTime?
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
   contacts           Contact[]
-  introOffers        IntroOffer[]   @relation("Introducer")
-  introRequests      IntroRequest[] @relation("Requester")
+  introOffers        IntroOffer[]      @relation("Introducer")
+  introRequests      IntroRequest[]    @relation("Requester")
   spaceMemberships   SpaceMember[]
-  ownedSpaces        Space[]        @relation("SpaceOwner")
+  ownedSpaces        Space[]           @relation("SpaceOwner")
   relationships      Relationship[]
   signals            Signal[]
+  calendarAccounts   CalendarAccount[]
 
   @@map("users")
+}
+
+model CalendarAccount {
+  id                 String    @id @default(cuid())
+  userId             String
+  email              String
+  name               String?
+  googleAccessToken  String
+  googleRefreshToken String?
+  lastSyncedAt       DateTime?
+  isActive           Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contacts           Contact[]
+
+  @@unique([userId, email])
+  @@index([userId])
+  @@map("calendar_accounts")
 }
 
 model Space {
@@ -78,26 +98,31 @@ model Company {
 }
 
 model Contact {
-  id              String   @id @default(cuid())
-  email           String
-  name            String?
-  title           String?
-  userId          String
-  companyId       String?
-  meetingsCount   Int      @default(1)
-  lastSeenAt      DateTime @default(now())
-  lastEventTitle  String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  isApproved      Boolean  @default(false)
-  company         Company? @relation(fields: [companyId], references: [id])
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  meetings        Meeting[]
+  id                String           @id @default(cuid())
+  email             String
+  name              String?
+  title             String?
+  avatarUrl         String?
+  userId            String
+  companyId         String?
+  meetingsCount     Int              @default(1)
+  lastSeenAt        DateTime         @default(now())
+  lastEventTitle    String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  isApproved        Boolean          @default(false)
+  source            String           @default("manual")
+  sourceAccountId   String?
+  company           Company?         @relation(fields: [companyId], references: [id])
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceAccount     CalendarAccount? @relation(fields: [sourceAccountId], references: [id], onDelete: SetNull)
+  meetings          Meeting[]
 
   @@unique([userId, email])
   @@index([userId])
   @@index([companyId])
   @@index([lastSeenAt])
+  @@index([sourceAccountId])
   @@map("contacts")
 }
 

@@ -73,7 +73,11 @@ export function configurePassport() {
         clientID: process.env.GOOGLE_CLIENT_ID || '',
         clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
         callbackURL,
-        scope: ['profile', 'email', 'https://www.googleapis.com/auth/calendar.readonly'],
+        scope: [
+          'profile',
+          'email',
+          'https://www.googleapis.com/auth/calendar.readonly',
+        ],
         accessType: 'offline',
         prompt: 'consent', // Always show consent screen to get refresh token
       } as any,

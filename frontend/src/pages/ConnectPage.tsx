@@ -1,68 +1,112 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppState, useAppActions } from '../store';
+import { API_BASE } from '../lib/api';
+import type { CalendarAccount } from '../store/types';
 
-const integrations = [
-  { 
-    id: 'google', 
-    name: 'Google Calendar', 
-    icon: '📅', 
-    description: 'Connect your Google Workspace calendar',
-    connected: false 
-  },
-  { 
-    id: 'outlook', 
-    name: 'Outlook Calendar', 
-    icon: '📆', 
-    description: 'Connect your Microsoft 365 calendar',
-    connected: false 
-  },
+const comingSoonIntegrations = [
   { 
     id: 'linkedin', 
     name: 'LinkedIn', 
     icon: '💼', 
     description: 'Import your professional connections',
-    connected: false,
-    comingSoon: true 
   },
   { 
     id: 'gmail', 
     name: 'Gmail', 
     icon: '✉️', 
     description: 'Analyze your email communications',
-    connected: false,
-    comingSoon: true 
   },
 ];
 
 export function ConnectPage() {
-  const { isCalendarConnected } = useAppState();
+  const { isCalendarConnected, contacts, currentUser } = useAppState();
   const { syncCalendar } = useAppActions();
   const navigate = useNavigate();
-  const [syncingId, setSyncingId] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [connectedIds, setConnectedIds] = useState<string[]>(
-    isCalendarConnected ? ['google'] : []
-  );
+  const [calendarAccounts, setCalendarAccounts] = useState<CalendarAccount[]>([]);
+  const [loadingAccounts, setLoadingAccounts] = useState(true);
+  
+  // Consider connected if we have contacts (they must have come from somewhere)
+  const hasContacts = Array.isArray(contacts) && contacts.length > 0;
+  const effectivelyConnected = isCalendarConnected || hasContacts;
 
-  const handleConnect = async (integrationId: string) => {
-    setSyncingId(integrationId);
-    setError(null);
+  // Fetch calendar accounts on mount
+  useEffect(() => {
+    fetchCalendarAccounts();
+  }, []);
+
+  const fetchCalendarAccounts = async () => {
     try {
-      await syncCalendar();
-      setConnectedIds(prev => [...prev, integrationId]);
-      // Don't navigate immediately, let user see the connected state
-    } catch (err: any) {
-      setError(err.message || 'Failed to sync calendar');
+      const res = await fetch(`${API_BASE}/api/calendar/accounts`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setCalendarAccounts(data);
+      }
+    } catch (e) {
+      console.error('Failed to fetch calendar accounts:', e);
     } finally {
-      setSyncingId(null);
+      setLoadingAccounts(false);
     }
   };
 
-  const connectedCount = connectedIds.length;
+  const handleConnect = async () => {
+    setSyncing(true);
+    setError(null);
+    try {
+      await syncCalendar();
+      await fetchCalendarAccounts();
+    } catch (err: any) {
+      setError(err.message || 'Failed to sync calendar');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleAddAnotherCalendar = () => {
+    // Redirect to Google OAuth with prompt to select account
+    const apiUrl = API_BASE || '';
+    window.location.href = `${apiUrl}/auth/google?prompt=select_account`;
+  };
+
+  const handleSyncAccount = async (accountId: string) => {
+    setSyncing(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/calendar/accounts/${accountId}/sync`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.message || 'Failed to sync');
+      }
+      await fetchCalendarAccounts();
+    } catch (err: any) {
+      setError(err.message || 'Failed to sync calendar');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleRemoveAccount = async (accountId: string) => {
+    if (!confirm('Remove this calendar? Contacts from this calendar will remain.')) return;
+    try {
+      await fetch(`${API_BASE}/api/calendar/accounts/${accountId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      await fetchCalendarAccounts();
+    } catch (err: any) {
+      setError(err.message || 'Failed to remove calendar');
+    }
+  };
+
+  const connectedCount = calendarAccounts.length + (effectivelyConnected ? 1 : 0);
 
   return (
-    <div className="crm-page">
+    <div className="crm-page connect-page">
       <div className="crm-header">
         <div className="crm-title">
           <h1>Connect Your Data</h1>
@@ -77,8 +121,7 @@ export function ConnectPage() {
         )}
       </div>
 
-      <div className="crm-layout">
-        <div className="crm-content">
+      <div className="connect-content">
           {error && (
             <div className="connect-error-banner">
               <span>⚠️</span> {error}
@@ -86,54 +129,120 @@ export function ConnectPage() {
             </div>
           )}
 
-          <div className="integrations-grid">
-            {integrations.map(integration => {
-              const isConnected = connectedIds.includes(integration.id);
-              const isSyncing = syncingId === integration.id;
-              
-              return (
-                <div 
-                  key={integration.id} 
-                  className={`integration-card ${isConnected ? 'connected' : ''} ${integration.comingSoon ? 'coming-soon' : ''}`}
-                >
-                  <div className="integration-header">
-                    <span className="integration-icon">{integration.icon}</span>
-                    {isConnected && <span className="connected-badge">✓ Connected</span>}
-                    {integration.comingSoon && <span className="coming-soon-badge">Coming Soon</span>}
-                  </div>
-                  <div className="integration-info">
-                    <h3>{integration.name}</h3>
-                    <p>{integration.description}</p>
-                  </div>
-                  <div className="integration-action">
-                    {isConnected ? (
-                      <button className="btn-secondary" disabled>
-                        Connected
-                      </button>
-                    ) : integration.comingSoon ? (
-                      <button className="btn-secondary" disabled>
-                        Coming Soon
-                      </button>
-                    ) : (
-                      <button 
-                        className="btn-primary"
-                        onClick={() => handleConnect(integration.id)}
-                        disabled={isSyncing}
-                      >
-                        {isSyncing ? (
-                          <>
-                            <span className="loading-spinner small"></span>
-                            Connecting...
-                          </>
-                        ) : (
-                          'Connect'
-                        )}
-                      </button>
+          {/* Google Calendar Section */}
+          <div className="calendar-section">
+            <div className="section-header">
+              <span className="section-icon">📅</span>
+              <div className="section-header-text">
+                <h3>Google Calendar</h3>
+                <p>Connect your Google Workspace calendars to discover your network</p>
+              </div>
+            </div>
+
+            {loadingAccounts ? (
+              <div className="loading-state">Loading calendars...</div>
+            ) : (
+              <>
+                {/* Connected calendars list */}
+                {(effectivelyConnected || calendarAccounts.length > 0) && (
+                  <div className="connected-calendars">
+                    {effectivelyConnected && calendarAccounts.length === 0 && (
+                      <div className="calendar-account-card">
+                        <div className="account-info">
+                          <span className="account-icon">📅</span>
+                          <div>
+                            <span className="account-email">{currentUser?.email || 'Primary Calendar'}</span>
+                            <span className="account-meta">{contacts.length} contacts</span>
+                          </div>
+                        </div>
+                        <div className="account-actions">
+                          <button 
+                            className="btn-text" 
+                            onClick={handleConnect}
+                            disabled={syncing}
+                          >
+                            {syncing ? 'Syncing...' : 'Sync'}
+                          </button>
+                        </div>
+                      </div>
                     )}
+                    {calendarAccounts.map(account => (
+                      <div key={account.id} className="calendar-account-card">
+                        <div className="account-info">
+                          <span className="account-icon">📅</span>
+                          <div>
+                            <span className="account-email">{account.email}</span>
+                            <span className="account-meta">
+                              {account.contactsCount} contacts
+                              {account.lastSyncedAt && ` • Last synced ${new Date(account.lastSyncedAt).toLocaleDateString()}`}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="account-actions">
+                          <button 
+                            className="btn-text" 
+                            onClick={() => handleSyncAccount(account.id)}
+                            disabled={syncing}
+                          >
+                            Sync
+                          </button>
+                          <button 
+                            className="btn-text danger" 
+                            onClick={() => handleRemoveAccount(account.id)}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
+                )}
+
+                {/* Add calendar button */}
+                <div className="add-calendar-section">
+                  {!effectivelyConnected && calendarAccounts.length === 0 ? (
+                    <button 
+                      className="btn-primary"
+                      onClick={handleConnect}
+                      disabled={syncing}
+                    >
+                      {syncing ? 'Connecting...' : 'Connect Google Calendar'}
+                    </button>
+                  ) : (
+                    <button 
+                      className="btn-secondary"
+                      onClick={handleAddAnotherCalendar}
+                    >
+                      + Add Another Google Account
+                    </button>
+                  )}
                 </div>
-              );
-            })}
+              </>
+            )}
+          </div>
+
+          {/* Coming Soon Integrations */}
+          <div className="integrations-grid coming-soon-section">
+            {comingSoonIntegrations.map(integration => (
+              <div 
+                key={integration.id} 
+                className="integration-card coming-soon"
+              >
+                <div className="integration-header">
+                  <span className="integration-icon">{integration.icon}</span>
+                  <span className="coming-soon-badge">Coming Soon</span>
+                </div>
+                <div className="integration-info">
+                  <h3>{integration.name}</h3>
+                  <p>{integration.description}</p>
+                </div>
+                <div className="integration-action">
+                  <button className="btn-secondary" disabled>
+                    Coming Soon
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
 
           <div className="connect-info-section">
@@ -156,7 +265,6 @@ export function ConnectPage() {
               </div>
             </div>
           </div>
-        </div>
       </div>
     </div>
   );

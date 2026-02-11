@@ -17,7 +17,7 @@ interface DisplayContact {
   id: string;
   name: string;
   email: string;
-  avatar: string;
+  avatarUrl?: string | null;
   title: string;
   company: string;
   companyDomain: string;
@@ -52,6 +52,141 @@ interface SignalMatch {
     triggerType: string;
   };
   entity: any;
+}
+
+// Person Avatar component - uses multiple sources to find avatars
+function PersonAvatar({ email, name, avatarUrl: providedAvatarUrl, size = 48 }: { 
+  email?: string; 
+  name?: string; 
+  avatarUrl?: string | null;
+  size?: number;
+}) {
+  const [imageError, setImageError] = useState(false);
+  const [fallbackToExternal, setFallbackToExternal] = useState(false);
+  
+  const initials = name 
+    ? name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()
+    : '?';
+  
+  // Use UI Avatars as fallback (generates nice letter avatars)
+  const fallbackUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(name || email || '?')}&background=1d1d24&color=ff6b4a&size=${size * 2}`;
+  
+  // Priority order:
+  // 1. Provided avatarUrl (from Google Contacts)
+  // 2. Unavatar.io (aggregates Gravatar, social networks, etc.)
+  // 3. UI Avatars (letter initials)
+  
+  let avatarSrc: string;
+  if (providedAvatarUrl && !imageError) {
+    // Use the provided avatar URL from Google
+    avatarSrc = providedAvatarUrl;
+  } else if (email && !fallbackToExternal) {
+    // Try unavatar.io
+    avatarSrc = `https://unavatar.io/${email}?fallback=${encodeURIComponent(fallbackUrl)}`;
+  } else {
+    // Use initials fallback
+    avatarSrc = fallbackUrl;
+  }
+  
+  const handleError = () => {
+    if (providedAvatarUrl && !imageError) {
+      // First failure was with provided URL, try unavatar
+      setImageError(true);
+    } else if (!fallbackToExternal) {
+      // Unavatar failed, use fallback
+      setFallbackToExternal(true);
+    }
+  };
+  
+  // If no email and no provided avatar, show initials div
+  if (!email && !providedAvatarUrl) {
+    return (
+      <div style={{ 
+        width: size, 
+        height: size, 
+        background: '#1d1d24', 
+        borderRadius: '50%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: '#ff6b4a',
+        fontWeight: 700,
+        fontSize: size * 0.35,
+        flexShrink: 0
+      }}>
+        {initials}
+      </div>
+    );
+  }
+  
+  return (
+    <div style={{ 
+      width: size, 
+      height: size, 
+      borderRadius: '50%',
+      flexShrink: 0,
+      overflow: 'hidden',
+      background: '#1d1d24'
+    }}>
+      <img 
+        src={avatarSrc}
+        alt={name || 'Person'}
+        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+        onError={handleError}
+        referrerPolicy="no-referrer"
+      />
+    </div>
+  );
+}
+
+// Company Logo component with fallback - uses Google Favicons API (same as onboarding)
+function CompanyLogo({ domain, name, size = 48 }: { domain?: string; name?: string; size?: number }) {
+  const [hasError, setHasError] = useState(false);
+  
+  const fallbackLetter = name ? name.charAt(0).toUpperCase() : '?';
+  
+  // If no domain or image failed to load, show letter fallback
+  if (!domain || hasError) {
+    return (
+      <div style={{ 
+        width: size, 
+        height: size, 
+        background: '#1d1d24', 
+        borderRadius: '8px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: '#ff6b4a',
+        fontWeight: 700,
+        fontSize: size * 0.4,
+        flexShrink: 0
+      }}>
+        {fallbackLetter}
+      </div>
+    );
+  }
+  
+  return (
+    <div style={{ 
+      width: size, 
+      height: size, 
+      background: '#1d1d24', 
+      borderRadius: '8px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+      overflow: 'hidden',
+      padding: size > 24 ? '8px' : '2px'
+    }}>
+      <img 
+        src={`https://www.google.com/s2/favicons?domain=${domain}&sz=128`}
+        alt={name || 'Company'}
+        style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+        onError={() => setHasError(true)}
+      />
+    </div>
+  );
 }
 
 // Date range options
@@ -142,7 +277,7 @@ export function NetworkPage() {
         id: c.id,
         name: c.name || c.email.split('@')[0], // Fallback to email prefix
         email: c.email,
-        avatar: '', // No fake avatars - use initials instead
+        avatarUrl: c.avatarUrl, // Pass through Google photo URL if available
         title: c.title || '', // Only show if we actually have it
         company: c.company?.name || '',
         companyDomain: c.company?.domain || c.email.split('@')[1] || '',
@@ -575,6 +710,13 @@ export function NetworkPage() {
         {/* Filter Sidebar */}
         {showFilters && (
           <aside className="crm-filters">
+            {/* Mobile close button */}
+            <div className="filters-header-mobile">
+              <h3>Filters</h3>
+              <button className="filters-close-btn" onClick={() => setShowFilters(false)}>
+                Done
+              </button>
+            </div>
             {/* Last Contact Date */}
             <div className="filter-section">
               <h3 className="filter-title">Last Contact</h3>
@@ -785,9 +927,7 @@ export function NetworkPage() {
                   {paginatedContacts.map(contact => (
                     <Link to={`/contact/${contact.id}`} key={contact.id} className="contact-card">
                       <div className="contact-card-header">
-                        <div className="contact-card-avatar contact-initials">
-                          {contact.name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()}
-                        </div>
+                        <PersonAvatar email={contact.email} name={contact.name} avatarUrl={contact.avatarUrl} size={48} />
                         <span className={`strength-indicator ${contact.connectionStrength}`} title={`${contact.connectionStrength} connection`} />
                       </div>
                       <div className="contact-card-body">
@@ -896,21 +1036,7 @@ export function NetworkPage() {
                         }}
                         onClick={() => setExpandedCompany(expandedCompany === company ? null : company)}
                       >
-                        <div style={{ 
-                          width: '48px', 
-                          height: '48px', 
-                          background: '#1d1d24', 
-                          borderRadius: '8px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          color: '#ff6b4a',
-                          fontWeight: 700,
-                          fontSize: '1.25rem',
-                          flexShrink: 0
-                        }}>
-                          {company ? company.charAt(0).toUpperCase() : '?'}
-                        </div>
+                        <CompanyLogo domain={domain} name={company} size={48} />
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ color: '#f5f5f7', fontWeight: 600, fontSize: '1rem' }}>
                             {company || 'Unknown Company'}
@@ -937,9 +1063,7 @@ export function NetworkPage() {
                         <div className="company-contacts">
                           {contacts.map(contact => (
                             <Link to={`/contact/${contact.id}`} key={contact.id} className="company-contact-row">
-                              <div className="contact-row-avatar contact-initials">
-                                {contact.name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()}
-                              </div>
+                              <PersonAvatar email={contact.email} name={contact.name} avatarUrl={contact.avatarUrl} size={36} />
                               <div className="contact-row-info">
                                 <span className="contact-row-name">{contact.name}</span>
                                 <span className="contact-row-email">{contact.email}</span>

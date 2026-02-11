@@ -96,6 +96,20 @@ export function Layout({ children }: LayoutProps) {
       <main className="main-content">
         {children}
       </main>
+
+      {/* Mobile Bottom Navigation */}
+      <nav className="mobile-nav">
+        {navItems.map((item) => (
+          <Link
+            key={item.path}
+            to={item.path}
+            className={`mobile-nav-item ${location.pathname === item.path ? 'active' : ''}`}
+          >
+            <span className="mobile-nav-icon">{item.icon}</span>
+            <span className="mobile-nav-label">{item.label}</span>
+          </Link>
+        ))}
+      </nav>
     </div>
   );
 }

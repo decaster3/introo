@@ -291,8 +291,248 @@ export async function getCalendarSyncStatus(userId: string) {
     select: { calendarSyncedAt: true, googleAccessToken: true },
   });
 
+  const accounts = await prisma.calendarAccount.findMany({
+    where: { userId, isActive: true },
+    select: { id: true, email: true, lastSyncedAt: true },
+  });
+
   return {
-    isConnected: !!user?.googleAccessToken,
+    isConnected: !!user?.googleAccessToken || accounts.length > 0,
     lastSyncedAt: user?.calendarSyncedAt,
+    accountsCount: accounts.length,
+  };
+}
+
+// Get all calendar accounts for a user
+export async function getCalendarAccounts(userId: string) {
+  const accounts = await prisma.calendarAccount.findMany({
+    where: { userId },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      lastSyncedAt: true,
+      isActive: true,
+      createdAt: true,
+      _count: {
+        select: { contacts: true },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  return accounts.map(a => ({
+    id: a.id,
+    email: a.email,
+    name: a.name,
+    lastSyncedAt: a.lastSyncedAt,
+    isActive: a.isActive,
+    contactsCount: a._count.contacts,
+  }));
+}
+
+// Sync a specific calendar account
+export async function syncCalendarAccount(userId: string, accountId: string): Promise<{
+  contactsFound: number;
+  companiesFound: number;
+}> {
+  const account = await prisma.calendarAccount.findFirst({
+    where: { id: accountId, userId },
+  });
+
+  if (!account) {
+    throw new Error('Calendar account not found');
+  }
+
+  // Decrypt tokens
+  const accessToken = decryptToken(account.googleAccessToken);
+  const refreshToken = account.googleRefreshToken ? decryptToken(account.googleRefreshToken) : null;
+
+  if (!accessToken) {
+    throw new Error('Calendar access expired. Please reconnect this account.');
+  }
+
+  // Set up OAuth2 client
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET
+  );
+
+  oauth2Client.setCredentials({
+    access_token: accessToken,
+    refresh_token: refreshToken,
+  });
+
+  // Handle token refresh
+  oauth2Client.on('tokens', async (tokens) => {
+    if (tokens.access_token) {
+      const encryptedAccess = encryptToken(tokens.access_token);
+      const encryptedRefresh = tokens.refresh_token 
+        ? encryptToken(tokens.refresh_token) 
+        : account.googleRefreshToken;
+      
+      await prisma.calendarAccount.update({
+        where: { id: accountId },
+        data: {
+          googleAccessToken: encryptedAccess,
+          googleRefreshToken: encryptedRefresh,
+        },
+      });
+    }
+  });
+
+  const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+
+  // Fetch events from the past 12 months
+  const now = new Date();
+  const oneYearAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+
+  const contactsMap = new Map<string, CalendarContact>();
+  let pageToken: string | undefined;
+
+  do {
+    const response = await calendar.events.list({
+      calendarId: 'primary',
+      timeMin: oneYearAgo.toISOString(),
+      timeMax: now.toISOString(),
+      maxResults: 250,
+      singleEvents: true,
+      orderBy: 'startTime',
+      pageToken,
+    });
+
+    const events = response.data.items || [];
+
+    for (const event of events) {
+      const attendees = event.attendees || [];
+      const eventDate = new Date(event.start?.dateTime || event.start?.date || now);
+      const eventTitle = event.summary || 'Untitled meeting';
+      
+      let duration: number | undefined;
+      if (event.start?.dateTime && event.end?.dateTime) {
+        const start = new Date(event.start.dateTime);
+        const end = new Date(event.end.dateTime);
+        duration = Math.round((end.getTime() - start.getTime()) / 60000);
+      }
+
+      for (const attendee of attendees) {
+        const email = attendee.email?.toLowerCase();
+        if (!email || email === account.email.toLowerCase() || !isBusinessEmail(email)) {
+          continue;
+        }
+
+        const domain = extractDomain(email);
+        const existing = contactsMap.get(email);
+        
+        const meetingInfo: MeetingInfo = {
+          title: eventTitle,
+          date: eventDate,
+          duration,
+        };
+
+        if (existing) {
+          existing.meetingsCount++;
+          existing.meetings.push(meetingInfo);
+          if (eventDate > existing.lastSeenAt) {
+            existing.lastSeenAt = eventDate;
+            existing.lastEventTitle = eventTitle;
+            existing.name = attendee.displayName || existing.name;
+          }
+        } else {
+          contactsMap.set(email, {
+            email,
+            name: attendee.displayName || undefined,
+            domain,
+            meetingsCount: 1,
+            lastSeenAt: eventDate,
+            lastEventTitle: eventTitle,
+            meetings: [meetingInfo],
+          });
+        }
+      }
+    }
+
+    pageToken = response.data.nextPageToken || undefined;
+  } while (pageToken);
+
+  const contacts = Array.from(contactsMap.values());
+  const domainsSet = new Set(contacts.map(c => c.domain));
+
+  // Upsert companies
+  const companyMap = new Map<string, string>();
+  for (const domain of domainsSet) {
+    const company = await prisma.company.upsert({
+      where: { domain },
+      update: {},
+      create: {
+        domain,
+        name: normalizeCompanyName(domain),
+      },
+    });
+    companyMap.set(domain, company.id);
+  }
+
+  // Upsert contacts with source tracking
+  for (const contact of contacts) {
+    const companyId = companyMap.get(contact.domain);
+
+    const dbContact = await prisma.contact.upsert({
+      where: {
+        userId_email: { userId, email: contact.email },
+      },
+      update: {
+        name: contact.name,
+        meetingsCount: contact.meetingsCount,
+        lastSeenAt: contact.lastSeenAt,
+        lastEventTitle: contact.lastEventTitle,
+        companyId,
+        isApproved: true,
+        source: 'google_calendar',
+        sourceAccountId: accountId,
+      },
+      create: {
+        userId,
+        email: contact.email,
+        name: contact.name,
+        companyId,
+        meetingsCount: contact.meetingsCount,
+        lastSeenAt: contact.lastSeenAt,
+        lastEventTitle: contact.lastEventTitle,
+        isApproved: true,
+        source: 'google_calendar',
+        sourceAccountId: accountId,
+      },
+    });
+
+    // Refresh meetings
+    await prisma.meeting.deleteMany({
+      where: { contactId: dbContact.id },
+    });
+
+    const recentMeetings = contact.meetings
+      .sort((a, b) => b.date.getTime() - a.date.getTime())
+      .slice(0, 10);
+
+    for (const meeting of recentMeetings) {
+      await prisma.meeting.create({
+        data: {
+          contactId: dbContact.id,
+          title: meeting.title,
+          date: meeting.date,
+          duration: meeting.duration,
+        },
+      });
+    }
+  }
+
+  // Update account sync timestamp
+  await prisma.calendarAccount.update({
+    where: { id: accountId },
+    data: { lastSyncedAt: now },
+  });
+
+  return {
+    contactsFound: contacts.length,
+    companiesFound: domainsSet.size,
   };
 }

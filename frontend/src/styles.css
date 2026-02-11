@@ -406,6 +406,20 @@ body {
    ============================================ */
 
 /* Connect Page - Integrations Grid */
+/* Connect page scrollable */
+.connect-page {
+  height: auto !important;
+  min-height: 100%;
+  overflow-y: visible;
+}
+
+.connect-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
 .connect-error-banner {
   display: flex;
   align-items: center;
@@ -506,6 +520,125 @@ body {
 
 .integration-action button {
   width: 100%;
+}
+
+/* Calendar Section */
+.calendar-section {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.section-icon {
+  font-size: 2rem;
+  flex-shrink: 0;
+}
+
+.section-header-text {
+  flex: 1;
+}
+
+.section-header h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.section-header p {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.connected-calendars {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.calendar-account-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+.account-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.account-icon {
+  font-size: 1.25rem;
+}
+
+.account-info > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.account-email {
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+.account-meta {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.account-status {
+  font-size: 0.75rem;
+  color: var(--success);
+}
+
+.account-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.account-actions .btn-text {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.account-actions .btn-text.danger {
+  color: var(--error);
+}
+
+.account-actions .btn-text.danger:hover {
+  color: #ff5555;
+}
+
+.add-calendar-section {
+  margin-top: 1rem;
+}
+
+.add-calendar-section .btn-primary {
+  width: auto;
+}
+
+.coming-soon-section {
+  margin-top: 1rem;
+}
+
+.coming-soon-section h4 {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.75rem;
 }
 
 /* Connect Info Section */
@@ -6757,8 +6890,8 @@ body {
   transition: background 0.15s;
   text-decoration: none;
   color: inherit;
-  display: flex;
-  flex-direction: row;
+  display: grid;
+  grid-template-columns: 44px 1fr 120px 200px;
   align-items: center;
   padding: 1rem 1.25rem;
   gap: 1rem;
@@ -6807,10 +6940,11 @@ body {
 .contact-card-email,
 .contact-row-email {
   color: var(--text-muted);
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: right;
 }
 
 .contact-card-company {
@@ -6876,12 +7010,8 @@ body {
 }
 
 .contact-card-footer {
-  flex-shrink: 0;
   text-align: right;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.25rem;
+  overflow: hidden;
 }
 
 .last-contacted {
@@ -8795,6 +8925,11 @@ body {
   max-height: calc(100vh - 200px);
 }
 
+/* Hide mobile header on desktop */
+.filters-header-mobile {
+  display: none;
+}
+
 .filter-section {
   padding-bottom: 1rem;
   margin-bottom: 1rem;
@@ -10043,12 +10178,12 @@ body {
   flex-direction: column;
   align-items: flex-end;
   gap: 0.25rem;
-  min-width: 100px;
+  text-align: right;
 }
 
 .contact-card-stats .stats-meetings {
   font-size: 0.8rem;
-  color: var(--accent);
+  color: var(--text-primary);
   font-weight: 500;
 }
 
@@ -10385,5 +10520,623 @@ body {
     height: auto;
     min-height: 100vh;
     overflow: auto;
+  }
+}
+
+/* ============================================
+   Mobile Responsive Styles
+   ============================================ */
+
+@media (max-width: 768px) {
+  /* Main layout */
+  .app-layout {
+    flex-direction: column;
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .main-content {
+    padding: 1rem;
+  }
+
+  /* CRM/Network page */
+  .crm-page {
+    padding: 1rem;
+    height: auto;
+  }
+
+  .crm-header {
+    flex-direction: column;
+    gap: 1rem;
+    align-items: stretch;
+  }
+
+  .crm-header-actions {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .crm-title h1 {
+    font-size: 1.5rem;
+  }
+
+  /* Contact cards - stack layout on mobile */
+  .contact-card {
+    grid-template-columns: 44px 1fr;
+    grid-template-rows: auto auto;
+    gap: 0.5rem 0.75rem;
+    padding: 0.75rem 1rem;
+  }
+
+  .contact-card-header {
+    grid-row: span 2;
+    align-self: start;
+  }
+
+  .contact-card-body {
+    grid-column: 2;
+  }
+
+  .contact-card-stats {
+    grid-column: 2;
+    flex-direction: row;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 0.25rem;
+  }
+
+  .contact-card-footer {
+    display: none;
+  }
+
+  /* Search and controls */
+  .crm-toolbar {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .crm-controls {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .sort-controls {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .sort-btn {
+    flex: 1;
+    text-align: center;
+  }
+
+  /* View tabs */
+  .view-tabs {
+    width: 100%;
+    justify-content: space-around;
+  }
+
+  .tab-btn {
+    flex: 1;
+    justify-content: center;
+    padding: 0.5rem;
+    font-size: 0.85rem;
+  }
+
+  /* Filter toggle */
+  .filter-toggle-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Filters panel */
+  .crm-filters {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    max-height: 100vh;
+    z-index: 1000;
+    background: var(--bg-secondary);
+    border-radius: 0;
+    padding: 1rem;
+    padding-top: 0;
+    overflow-y: auto;
+  }
+
+  .filters-header-mobile {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 0;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--border-subtle);
+    position: sticky;
+    top: 0;
+    background: var(--bg-secondary);
+    z-index: 10;
+  }
+
+  .filters-header-mobile h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+  }
+
+  .filters-close-btn {
+    background: var(--accent-primary);
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius-md);
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  /* Pagination */
+  .pagination {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: center;
+  }
+
+  .pagination-pages {
+    order: 3;
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Spaces grid */
+  .spaces-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .space-card-simple {
+    padding: 1rem;
+  }
+
+  /* Connect page */
+  .connect-content {
+    gap: 1.5rem;
+  }
+
+  .calendar-section {
+    padding: 1rem;
+  }
+
+  .calendar-account-card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+
+  .account-actions {
+    justify-content: flex-end;
+  }
+
+  .integrations-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .info-cards {
+    grid-template-columns: 1fr;
+  }
+
+  /* Home page */
+  .home-page {
+    padding: 1rem;
+  }
+
+  .home-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .quick-actions {
+    flex-direction: column;
+  }
+
+  .profile-summary {
+    padding: 0.75rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .profile-stats {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .stat-item {
+    min-width: auto;
+  }
+
+  .stat-value {
+    font-size: 1.1rem;
+  }
+
+  .stat-label {
+    font-size: 0.6rem;
+  }
+
+  /* Ask input section - full width on mobile */
+  .ask-section {
+    padding: 0;
+    background: transparent;
+    border: none;
+    margin: 0 -1rem 1rem -1rem;
+    width: calc(100% + 2rem);
+  }
+
+  .ask-input-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+    padding: 0 1rem;
+  }
+
+  .ask-avatar {
+    display: none;
+  }
+
+  .ask-input-row input {
+    width: 100%;
+    font-size: 1rem;
+    padding: 1rem;
+    border-radius: var(--radius-md);
+  }
+
+  .ask-actions {
+    flex-direction: row;
+    gap: 0.5rem;
+    padding: 0 1rem;
+  }
+
+  .ask-actions select {
+    flex: 1;
+  }
+
+  .ask-actions button {
+    flex-shrink: 0;
+  }
+
+  /* Community/space tag in request cards */
+  .request-space-tag {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.5rem;
+  }
+
+  .request-space-tag .space-emoji {
+    font-size: 0.75rem;
+  }
+
+  .request-space-tag .space-name {
+    font-size: 0.7rem;
+  }
+
+  /* Page headers */
+  .page-header {
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .page-header h1 {
+    font-size: 1.5rem;
+  }
+
+  .subtitle {
+    font-size: 0.9rem;
+  }
+
+  /* New request page */
+  .new-request-page {
+    padding: 1rem;
+  }
+
+  .compose-form {
+    padding: 1rem;
+  }
+
+  .compose-form textarea {
+    font-size: 1rem;
+    min-height: 100px;
+  }
+
+  .form-row {
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .form-group {
+    width: 100%;
+  }
+
+  /* Preview/form action buttons */
+  .preview-actions,
+  .form-actions {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .preview-actions .btn-secondary,
+  .preview-actions .btn-primary,
+  .form-actions .btn-secondary,
+  .form-actions .btn-primary {
+    width: 100%;
+    justify-content: center;
+    padding: 0.875rem 1rem;
+  }
+
+  /* Request cards */
+  .request-card {
+    padding: 0.875rem;
+  }
+
+  .request-card-header {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .request-text {
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+
+  .request-card-footer {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  /* Feed section */
+  .feed-section {
+    margin-bottom: 1.5rem;
+  }
+
+  .feed-section.suggested {
+    padding: 1rem;
+  }
+
+  .section-content {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+
+  .section-header {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  /* Space detail page */
+  /* Space Detail Page Mobile */
+  .space-detail-page {
+    padding: 0.75rem;
+  }
+
+  .space-detail-header {
+    margin-bottom: 1rem;
+  }
+
+  .back-link {
+    font-size: 0.85rem;
+    margin-bottom: 0.75rem;
+    display: inline-block;
+  }
+
+  .space-detail-hero {
+    flex-direction: column;
+    text-align: center;
+    padding: 1rem;
+    gap: 0.75rem;
+    max-width: 100%;
+  }
+
+  .space-hero-emoji {
+    font-size: 2.5rem;
+  }
+
+  .space-hero-info h1 {
+    font-size: 1.25rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .space-hero-desc {
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .space-hero-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+    width: 100%;
+    margin-top: 0.5rem;
+  }
+
+  .hero-stat {
+    padding: 0.5rem;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+  }
+
+  .hero-stat-value {
+    font-size: 1rem;
+  }
+
+  .hero-stat-label {
+    font-size: 0.6rem;
+  }
+
+  .owner-badge-large {
+    font-size: 0.7rem;
+    padding: 0.4rem 0.75rem;
+  }
+
+  .space-stats {
+    flex-wrap: wrap;
+  }
+
+  /* Space tabs - 2x2 grid on mobile */
+  .space-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.25rem;
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .space-tabs .tab-btn {
+    font-size: 0.8rem;
+    padding: 0.6rem 0.5rem;
+    text-align: center;
+    justify-content: center;
+    white-space: nowrap;
+  }
+
+  .space-section {
+    padding: 0.875rem;
+    margin-bottom: 1rem;
+  }
+
+  .space-section-header {
+    margin-bottom: 0.75rem;
+  }
+
+  .space-section-header h2 {
+    font-size: 0.85rem;
+  }
+
+  .section-badge {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.5rem;
+  }
+
+  /* Request form */
+  .request-form-card {
+    padding: 1rem;
+  }
+
+  /* Modals */
+  .modal-content,
+  .modal-simple {
+    width: 95%;
+    max-height: 90vh;
+    margin: 1rem;
+  }
+
+  .modal-body {
+    padding: 1rem;
+  }
+
+  /* Buttons */
+  .btn-primary,
+  .btn-secondary {
+    padding: 0.625rem 1rem;
+    font-size: 0.875rem;
+  }
+
+  /* Empty states */
+  .empty-network,
+  .empty-state {
+    padding: 2rem 1rem;
+  }
+
+  .empty-network h2 {
+    font-size: 1.25rem;
+  }
+}
+
+/* Mobile Bottom Navigation */
+.mobile-nav {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-subtle);
+  padding: 0.75rem 0;
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  z-index: 1000;
+}
+
+.mobile-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  text-decoration: none;
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  padding: 0.25rem;
+  transition: color 0.2s;
+}
+
+.mobile-nav-item.active {
+  color: var(--accent-primary);
+}
+
+.mobile-nav-icon {
+  font-size: 1.25rem;
+}
+
+.mobile-nav-label {
+  font-weight: 500;
+}
+
+@media (max-width: 768px) {
+  .mobile-nav {
+    display: flex;
+    justify-content: space-around;
+  }
+
+  /* Add padding to main content for bottom nav */
+  .main-content {
+    padding-bottom: 70px;
+  }
+}
+
+/* Extra small screens */
+@media (max-width: 480px) {
+  .main-content {
+    padding: 0.75rem;
+  }
+
+  .crm-page {
+    padding: 0.75rem;
+  }
+
+  .crm-title h1 {
+    font-size: 1.25rem;
+  }
+
+  .contact-card {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .contact-card-avatar {
+    width: 36px;
+    height: 36px;
+  }
+
+  .contact-card-name {
+    font-size: 0.85rem;
+  }
+
+  .tab-btn {
+    font-size: 0.75rem;
+    padding: 0.4rem;
+  }
+
+  .btn-primary,
+  .btn-secondary {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
   }
 }

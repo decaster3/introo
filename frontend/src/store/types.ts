@@ -12,17 +12,29 @@ export interface Contact {
   email: string;
   name?: string | null;
   title?: string | null;
+  avatarUrl?: string | null;
   isApproved?: boolean;
   meetingsCount: number;
   lastSeenAt: string;
   lastEventTitle?: string;
   meetings?: Meeting[];
+  source?: string;
+  sourceAccountEmail?: string;
   company?: {
     id: string;
     domain: string;
     name: string;
     logo?: string | null;
   } | null;
+}
+
+export interface CalendarAccount {
+  id: string;
+  email: string;
+  name?: string;
+  lastSyncedAt?: string;
+  isActive: boolean;
+  contactsCount: number;
 }
 
 export interface AppState {

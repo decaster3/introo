@@ -108,6 +108,7 @@ export interface Contact {
   email: string;
   name?: string | null;
   title?: string | null;
+  avatarUrl?: string | null;
   companyId?: string | null;
   company?: Company | null;
   meetingsCount: number;
