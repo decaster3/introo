@@ -62,8 +62,8 @@ export const securityHeaders: RequestHandler = (req: Request, res: Response, nex
  */
 export const cookieConfig = {
   httpOnly: true,
-  secure: true, // Required for sameSite: 'none'
-  sameSite: 'none' as const, // Allow cross-domain cookies (frontend and backend on different domains)
+  secure: isProduction, // Only require HTTPS in production
+  sameSite: isProduction ? 'none' as const : 'lax' as const, // Cross-domain in prod, same-site in dev
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
   path: '/',
 };
