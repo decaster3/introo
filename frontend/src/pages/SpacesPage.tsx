@@ -81,19 +81,36 @@ export function SpacesPage() {
     }
   };
 
+  const [joinError, setJoinError] = useState('');
+  const [joining, setJoining] = useState(false);
+
   const joinSpace = async () => {
     if (!joinCode.trim()) return;
+    setJoinError('');
+    setJoining(true);
     try {
-      const res = await fetch(`${API_BASE}/api/spaces/join/${joinCode}`, {
+      const res = await fetch(`${API_BASE}/api/spaces/join/${joinCode.trim()}`, {
         method: 'POST',
         credentials: 'include',
       });
-      if (!res.ok) throw new Error('Invalid code');
+      const data = await res.json();
+      if (!res.ok) {
+        setJoinError(data.error || 'Failed to join space');
+        return;
+      }
+      if (data.pending) {
+        setJoinError('Your request is pending approval');
+        setJoinCode('');
+        return;
+      }
       setJoinCode('');
       setShowJoin(false);
       fetchSpaces();
     } catch (e) {
       console.error('Failed to join space:', e);
+      setJoinError('Failed to join space. Please try again.');
+    } finally {
+      setJoining(false);
     }
   };
 
@@ -329,7 +346,7 @@ export function SpacesPage() {
 
       {/* Join Space Modal */}
       {showJoin && (
-        <div className="modal-overlay" onClick={() => setShowJoin(false)}>
+        <div className="modal-overlay" onClick={() => { setShowJoin(false); setJoinError(''); }}>
           <div className="modal-simple" onClick={e => e.stopPropagation()}>
             <h2>Join a Space</h2>
             <div className="form-group">
@@ -338,12 +355,19 @@ export function SpacesPage() {
                 type="text"
                 placeholder="Paste invite code"
                 value={joinCode}
-                onChange={(e) => setJoinCode(e.target.value)}
+                onChange={(e) => { setJoinCode(e.target.value); setJoinError(''); }}
               />
             </div>
+            {joinError && (
+              <div className="form-error" style={{ color: '#ff6b4a', fontSize: '0.875rem', marginBottom: '1rem' }}>
+                {joinError}
+              </div>
+            )}
             <div className="modal-actions">
-              <button className="btn-secondary" onClick={() => setShowJoin(false)}>Cancel</button>
-              <button className="btn-primary" onClick={joinSpace} disabled={!joinCode.trim()}>Join</button>
+              <button className="btn-secondary" onClick={() => { setShowJoin(false); setJoinError(''); }}>Cancel</button>
+              <button className="btn-primary" onClick={joinSpace} disabled={!joinCode.trim() || joining}>
+                {joining ? 'Joining...' : 'Join'}
+              </button>
             </div>
           </div>
         </div>
