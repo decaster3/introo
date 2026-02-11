@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppState } from '../store';
 import { calculateStrengthScore } from '../lib/matching';
+import { PersonAvatar } from '../components';
+import { openOfferIntroEmail } from '../lib/offerIntro';
 
 function timeAgo(date: Date): string {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -97,11 +99,12 @@ export function DashboardPage() {
         <div className="profile-cover"></div>
         <div className="profile-main">
           <div className="profile-avatar-section">
-            {currentUser?.avatar ? (
-              <img src={currentUser.avatar} alt={currentUser.name} className="profile-avatar-large" referrerPolicy="no-referrer" />
-            ) : (
-              <div className="profile-avatar-large fallback">{currentUser?.name.charAt(0)}</div>
-            )}
+            <PersonAvatar 
+              email={currentUser?.email} 
+              name={currentUser?.name} 
+              avatarUrl={currentUser?.avatar}
+              size={80}
+            />
             <div className="online-indicator"></div>
           </div>
           <div className="profile-info">
@@ -137,11 +140,12 @@ export function DashboardPage() {
         <div className="members-grid">
           {(showAllMembers ? members : members.slice(0, 8)).map(member => (
             <div key={member.id} className="member-bubble">
-              {member.avatar ? (
-                <img src={member.avatar} alt={member.name} className="member-avatar" referrerPolicy="no-referrer" />
-              ) : (
-                <div className="member-avatar fallback">{member.name.charAt(0)}</div>
-              )}
+              <PersonAvatar 
+                email={member.email} 
+                name={member.name} 
+                avatarUrl={member.avatar}
+                size={48}
+              />
               <span className="member-name">{member.name.split(' ')[0]}</span>
             </div>
           ))}
@@ -186,11 +190,12 @@ export function DashboardPage() {
       {/* Create a Post / Ask */}
       <div className="social-card create-post-card">
         <div className="create-post-content">
-          {currentUser?.avatar ? (
-            <img src={currentUser.avatar} alt="" className="create-post-avatar" referrerPolicy="no-referrer" />
-          ) : (
-            <div className="create-post-avatar fallback">{currentUser?.name.charAt(0)}</div>
-          )}
+          <PersonAvatar 
+            email={currentUser?.email} 
+            name={currentUser?.name} 
+            avatarUrl={currentUser?.avatar}
+            size={40}
+          />
           <Link to="/request/new" className="create-post-input">
             Who do you want to meet?
           </Link>
@@ -225,11 +230,12 @@ export function DashboardPage() {
               return (
                 <Link to={`/request/${request.id}`} key={request.id} className="post-item your-post">
                   <div className="post-header">
-                    {currentUser?.avatar ? (
-                      <img src={currentUser.avatar} alt="" className="post-avatar" referrerPolicy="no-referrer" />
-                    ) : (
-                      <div className="post-avatar fallback">{currentUser?.name.charAt(0)}</div>
-                    )}
+                    <PersonAvatar 
+                      email={currentUser?.email} 
+                      name={currentUser?.name} 
+                      avatarUrl={currentUser?.avatar}
+                      size={36}
+                    />
                     <div className="post-meta">
                       <span className="post-author">You</span>
                       <span className="post-time">{timeAgo(new Date(request.createdAt))}</span>
@@ -321,11 +327,12 @@ export function DashboardPage() {
               return (
                 <div key={request.id} className="post-item ask-post">
                   <div className="post-header">
-                    {requester?.avatar ? (
-                      <img src={requester.avatar} alt="" className="post-avatar" referrerPolicy="no-referrer" />
-                    ) : (
-                      <div className="post-avatar fallback">{requester?.name.charAt(0)}</div>
-                    )}
+                    <PersonAvatar 
+                      email={requester?.email} 
+                      name={requester?.name} 
+                      avatarUrl={requester?.avatar}
+                      size={36}
+                    />
                     <div className="post-meta">
                       <span className="post-author">{requester?.name}</span>
                       <span className="post-time">{timeAgo(new Date(request.createdAt))}</span>
@@ -354,11 +361,19 @@ export function DashboardPage() {
                     {hasOffer ? (
                       <span className="action-done">✓ You offered to help</span>
                     ) : (
-                      <Link to={`/request/${request.id}`} className="action-btn primary">
+                      <button 
+                        className="action-btn primary"
+                        onClick={() => requester?.email && openOfferIntroEmail({
+                          requesterEmail: requester.email,
+                          requesterName: requester.name || 'there',
+                          targetCompany: request.normalizedQuery?.targetCompany || matchedCompany?.name || 'the company',
+                          senderName: currentUser?.name,
+                        })}
+                      >
                         🤝 Offer to Intro
-                      </Link>
+                      </button>
                     )}
-                    <button className="action-btn secondary" disabled>💬 Comment</button>
+                    <Link to={`/request/${request.id}`} className="action-btn secondary">View Details</Link>
                   </div>
                 </div>
               );

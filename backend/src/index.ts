@@ -108,15 +108,17 @@ app.get('/health', async (req, res) => {
   }
 });
 
-// Debug endpoint - remove after debugging
-app.get('/debug/env', (req, res) => {
-  res.json({
-    FRONTEND_URL: process.env.FRONTEND_URL || 'NOT SET',
-    GOOGLE_CALLBACK_URL: process.env.GOOGLE_CALLBACK_URL || 'NOT SET',
-    NODE_ENV: process.env.NODE_ENV || 'NOT SET',
-    PORT: process.env.PORT || 'NOT SET',
+// Debug endpoint - development only
+if (!isProduction) {
+  app.get('/debug/env', (req, res) => {
+    res.json({
+      FRONTEND_URL: process.env.FRONTEND_URL || 'NOT SET',
+      GOOGLE_CALLBACK_URL: process.env.GOOGLE_CALLBACK_URL || 'NOT SET',
+      NODE_ENV: process.env.NODE_ENV || 'NOT SET',
+      PORT: process.env.PORT || 'NOT SET',
+    });
   });
-});
+}
 
 // Global error handler
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {

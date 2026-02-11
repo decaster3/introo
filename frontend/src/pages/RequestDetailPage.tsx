@@ -3,6 +3,8 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAppState, useAppDispatch } from '../store';
 import { Contact } from './HomePage';
 import { API_BASE } from '../lib/api';
+import { PersonAvatar } from '../components';
+import { openOfferIntroEmail } from '../lib/offerIntro';
 
 function timeAgo(date: Date): string {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -28,8 +30,6 @@ export function RequestDetailPage() {
   const navigate = useNavigate();
   const { currentUser, requests, offers, users, contacts: storeContacts } = useAppState();
   const dispatch = useAppDispatch();
-  const [showOfferForm, setShowOfferForm] = useState(false);
-  const [offerMessage, setOfferMessage] = useState('');
   const [userSpaceMap, setUserSpaceMap] = useState<Record<string, { id: string; name: string; emoji: string }>>({});
   const [deleting, setDeleting] = useState(false);
 
@@ -41,7 +41,7 @@ export function RequestDetailPage() {
         id: c.id,
         name: c.name || 'Unknown',
         email: c.email,
-        avatar: `https://i.pravatar.cc/150?u=${c.email}`,
+        avatar: '', // Not used - we use PersonAvatar component instead
         title: c.title || '',
         company: c.company?.name || '',
         companyDomain: c.company?.domain || '',
@@ -74,7 +74,8 @@ export function RequestDetailPage() {
     [offers, id]
   );
   
-  const requester = request ? users.find((u) => u.id === request.requesterId) : null;
+  // Use embedded requester from API response, fall back to users store lookup
+  const requester = request?.requester ?? (request ? users.find((u) => u.id === request.requesterId) : null);
   const isMyRequest = request?.requesterId === currentUser?.id;
 
   // Find matching contacts for suggestions
@@ -93,25 +94,6 @@ export function RequestDetailPage() {
       </div>
     );
   }
-
-  const handleSubmitOffer = () => {
-    if (!offerMessage.trim()) return;
-
-    dispatch({
-      type: 'ADD_OFFER',
-      payload: {
-        id: `offer-${Date.now()}`,
-        requestId: request.id,
-        introducerId: currentUser?.id || '',
-        message: offerMessage,
-        status: 'pending',
-        createdAt: new Date().toISOString(),
-      },
-    });
-
-    setOfferMessage('');
-    setShowOfferForm(false);
-  };
 
   const handleAcceptOffer = (offerId: string) => {
     dispatch({ type: 'UPDATE_OFFER_STATUS', payload: { offerId, status: 'accepted' } });
@@ -171,11 +153,12 @@ export function RequestDetailPage() {
           <div className="detail-card">
             <div className="detail-card-header">
               <div className="requester-row">
-                {requester?.avatar ? (
-                  <img src={requester.avatar} alt="" className="detail-avatar" referrerPolicy="no-referrer" />
-                ) : (
-                  <div className="detail-avatar fallback">{requester?.name?.charAt(0)}</div>
-                )}
+                <PersonAvatar 
+                  email={requester?.email} 
+                  name={requester?.name} 
+                  avatarUrl={requester?.avatar}
+                  size={48}
+                />
                 <div className="requester-details">
                   <span className="requester-name">{isMyRequest ? 'You' : requester?.name}</span>
                   {!isMyRequest && requester?.id && userSpaceMap[requester.id] && (
@@ -220,7 +203,11 @@ export function RequestDetailPage() {
               <div className="matching-list">
                 {matchingContacts.map(contact => (
                   <div key={contact.id} className="matching-contact">
-                    <img src={contact.avatar} alt="" className="matching-avatar" />
+                    <PersonAvatar 
+                      email={contact.email} 
+                      name={contact.name} 
+                      size={40}
+                    />
                     <div className="matching-info">
                       <span className="matching-name">{contact.name}</span>
                       <span className="matching-title">{contact.title} at {contact.company}</span>
@@ -233,32 +220,22 @@ export function RequestDetailPage() {
               </div>
 
               {!alreadyOffered && request.status === 'open' && (
-                <button className="btn-primary full-width" onClick={() => setShowOfferForm(true)}>
-                  Offer to Introduce
+                <button 
+                  className="btn-primary full-width" 
+                  onClick={() => requester?.email && openOfferIntroEmail({
+                    requesterEmail: requester.email,
+                    requesterName: requester.name || 'there',
+                    targetCompany: request.normalizedQuery?.targetCompany || 'the company',
+                    contactName: matchingContacts[0]?.name,
+                    senderName: currentUser?.name,
+                  })}
+                >
+                  Offer Intro
                 </button>
               )}
             </div>
           )}
 
-          {/* Offer Form */}
-          {showOfferForm && (
-            <div className="offer-form-card">
-              <h3>Make an Offer</h3>
-              <p className="form-hint">Describe your connection and how you can help</p>
-              <textarea
-                value={offerMessage}
-                onChange={(e) => setOfferMessage(e.target.value)}
-                placeholder="I know [Name] at [Company]. We worked together at... I can introduce you because..."
-                rows={4}
-              />
-              <div className="form-actions">
-                <button className="btn-secondary" onClick={() => setShowOfferForm(false)}>Cancel</button>
-                <button className="btn-primary" onClick={handleSubmitOffer} disabled={!offerMessage.trim()}>
-                  Submit Offer
-                </button>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Offers Sidebar */}
@@ -272,8 +249,17 @@ export function RequestDetailPage() {
             {requestOffers.length === 0 ? (
               <div className="no-offers">
                 <p>No offers yet</p>
-                {!isMyRequest && !alreadyOffered && request.status === 'open' && !showOfferForm && (
-                  <button className="btn-secondary" onClick={() => setShowOfferForm(true)}>
+                {!isMyRequest && !alreadyOffered && request.status === 'open' && (
+                  <button 
+                    className="btn-secondary" 
+                    onClick={() => requester?.email && openOfferIntroEmail({
+                      requesterEmail: requester.email,
+                      requesterName: requester.name || 'there',
+                      targetCompany: request.normalizedQuery?.targetCompany || 'the company',
+                      contactName: matchingContacts[0]?.name,
+                      senderName: currentUser?.name,
+                    })}
+                  >
                     Be the first to help
                   </button>
                 )}
@@ -288,11 +274,12 @@ export function RequestDetailPage() {
                     <div key={offer.id} className={`offer-card ${offer.status}`}>
                       <div className="offer-header">
                         <div className="offer-user">
-                          {introducer?.avatar ? (
-                            <img src={introducer.avatar} alt="" className="offer-avatar" />
-                          ) : (
-                            <div className="offer-avatar fallback">{introducer?.name?.charAt(0)}</div>
-                          )}
+                          <PersonAvatar 
+                            email={introducer?.email} 
+                            name={introducer?.name} 
+                            avatarUrl={introducer?.avatar}
+                            size={36}
+                          />
                           <div className="offer-user-info">
                             <span className="offer-user-name">{isMyOffer ? 'You' : introducer?.name}</span>
                             <span className="offer-time">{timeAgo(new Date(offer.createdAt))}</span>

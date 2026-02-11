@@ -74,7 +74,7 @@ router.get('/:id', async (req, res) => {
         requests: {
           include: {
             requester: {
-              select: { id: true, name: true, avatar: true },
+              select: { id: true, name: true, avatar: true, email: true },
             },
             offers: {
               include: {

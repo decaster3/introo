@@ -3,13 +3,9 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAppState, useAppDispatch } from '../store';
 import { Contact } from './HomePage';
 import { API_BASE } from '../lib/api';
-
-function calculateStrength(lastSeenAt: string, meetingsCount: number): 'strong' | 'medium' | 'weak' {
-  const daysSince = Math.floor((Date.now() - new Date(lastSeenAt).getTime()) / (1000 * 60 * 60 * 24));
-  if (daysSince <= 7 && meetingsCount >= 3) return 'strong';
-  if (daysSince <= 30 && meetingsCount >= 2) return 'medium';
-  return 'weak';
-}
+import { CompanyLogo, Pagination, PersonAvatar } from '../components';
+import { calculateStrength } from '../types';
+import { openOfferIntroEmail } from '../lib/offerIntro';
 
 interface SpaceRequest {
   id: string;
@@ -22,6 +18,7 @@ interface SpaceRequest {
   requester: {
     id: string;
     name: string;
+    email: string;
     avatar: string | null;
   };
   offers: {
@@ -95,6 +92,8 @@ interface SpaceCompany {
   }[];
 }
 
+const COMPANIES_PER_PAGE = 20;
+
 export function SpaceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -114,7 +113,7 @@ export function SpaceDetailPage() {
         id: c.id,
         name: c.name || 'Unknown',
         email: c.email,
-        avatar: `https://i.pravatar.cc/150?u=${c.email}`,
+        avatar: '', // Not used - we use PersonAvatar component instead
         title: c.title || '',
         company: c.company?.name || '',
         companyDomain: c.company?.domain || '',
@@ -141,6 +140,8 @@ export function SpaceDetailPage() {
   const [selectedIndustries, setSelectedIndustries] = useState<string[]>([]);
   const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
   const [expandedCompany, setExpandedCompany] = useState<string | null>(null);
+  const [hideMyContacts, setHideMyContacts] = useState(true); // Default to showing only others' contacts
+  const [currentPage, setCurrentPage] = useState(1);
   
   // Intro request modal state
   const [showIntroModal, setShowIntroModal] = useState(false);
@@ -151,7 +152,22 @@ export function SpaceDetailPage() {
 
   // Filter and sort companies
   const filteredCompanies = useMemo(() => {
-    let companies = [...spaceCompanies];
+    // First, filter out my contacts if hideMyContacts is enabled
+    let companies = spaceCompanies.map(company => {
+      if (!hideMyContacts || !currentUser) return company;
+      
+      // Filter out contacts that belong to the current user
+      const filteredContacts = company.contacts.filter(c => c.userId !== currentUser.id);
+      
+      // Only include company if it still has contacts after filtering
+      if (filteredContacts.length === 0) return null;
+      
+      return {
+        ...company,
+        contacts: filteredContacts,
+        contactCount: filteredContacts.length,
+      };
+    }).filter((c): c is SpaceCompany => c !== null);
 
     // Text search
     if (reachSearchQuery) {
@@ -189,7 +205,19 @@ export function SpaceDetailPage() {
       }
       return a.name.localeCompare(b.name);
     });
-  }, [spaceCompanies, reachSearchQuery, reachSortBy, selectedContactCounts, selectedIndustries, selectedSizes]);
+  }, [spaceCompanies, reachSearchQuery, reachSortBy, selectedContactCounts, selectedIndustries, selectedSizes, hideMyContacts, currentUser]);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [reachSearchQuery, reachSortBy, selectedContactCounts, selectedIndustries, selectedSizes, hideMyContacts]);
+
+  // Paginated companies
+  const totalPages = Math.ceil(filteredCompanies.length / COMPANIES_PER_PAGE);
+  const paginatedCompanies = useMemo(() => {
+    const startIndex = (currentPage - 1) * COMPANIES_PER_PAGE;
+    return filteredCompanies.slice(startIndex, startIndex + COMPANIES_PER_PAGE);
+  }, [filteredCompanies, currentPage]);
 
   const toggleContactCount = (count: string) => {
     setSelectedContactCounts(prev =>
@@ -230,6 +258,17 @@ export function SpaceDetailPage() {
     setIntroMessage(`Looking for an intro to someone at ${company} in ${role}.`);
     setIntroOffer('$100 for a successful intro');
     setShowIntroModal(true);
+  };
+
+  // Offer intro via email
+  const offerIntro = (request: SpaceRequest, contactName?: string) => {
+    openOfferIntroEmail({
+      requesterEmail: request.requester.email,
+      requesterName: request.requester.name,
+      targetCompany: request.normalizedQuery?.targetCompany || 'the company',
+      contactName,
+      senderName: currentUser?.name,
+    });
   };
 
   // Submit intro request
@@ -617,11 +656,12 @@ export function SpaceDetailPage() {
                       <div key={req.id} className="request-card suggestion">
                         <div className="request-card-header">
                           <div className="requester-info">
-                            {req.requester.avatar ? (
-                              <img src={req.requester.avatar} alt="" className="requester-avatar" referrerPolicy="no-referrer" />
-                            ) : (
-                              <div className="requester-avatar fallback">{req.requester.name.charAt(0)}</div>
-                            )}
+                            <PersonAvatar 
+                              email={req.requester.email} 
+                              name={req.requester.name} 
+                              avatarUrl={req.requester.avatar}
+                              size={40}
+                            />
                             <span className="requester-name">{req.requester.name}</span>
                           </div>
                           {req.bidAmount > 0 && <span className="bounty-badge">${req.bidAmount}</span>}
@@ -631,7 +671,11 @@ export function SpaceDetailPage() {
                           <div className="suggestion-box">
                             <div className="suggestion-label">You know:</div>
                             <div className="contact-suggestion">
-                              <img src={matchingContact.avatar} alt="" className="contact-avatar" />
+                              <PersonAvatar 
+                                email={matchingContact.email} 
+                                name={matchingContact.name} 
+                                size={32}
+                              />
                               <div className="contact-info">
                                 <span className="contact-name">{matchingContact.name}</span>
                                 <span className="contact-title">{matchingContact.title} at {matchingContact.company}</span>
@@ -644,7 +688,12 @@ export function SpaceDetailPage() {
                         )}
                         <div className="request-actions">
                           <Link to={`/request/${req.id}`} className="btn-secondary">View Details</Link>
-                          <button className="btn-primary">Offer Intro</button>
+                          <button 
+                            className="btn-primary"
+                            onClick={() => offerIntro(req, matchingContact?.name)}
+                          >
+                            Offer Intro
+                          </button>
                         </div>
                       </div>
                     );
@@ -669,11 +718,12 @@ export function SpaceDetailPage() {
                     <div key={req.id} className="request-card community">
                       <div className="request-card-header">
                         <div className="requester-info">
-                          {req.requester.avatar ? (
-                            <img src={req.requester.avatar} alt="" className="requester-avatar" referrerPolicy="no-referrer" />
-                          ) : (
-                            <div className="requester-avatar fallback">{req.requester.name.charAt(0)}</div>
-                          )}
+                          <PersonAvatar 
+                            email={req.requester.email} 
+                            name={req.requester.name} 
+                            avatarUrl={req.requester.avatar}
+                            size={40}
+                          />
                           <span className="requester-name">{req.requester.name}</span>
                         </div>
                         {req.bidAmount > 0 && <span className="bounty-badge">${req.bidAmount}</span>}
@@ -815,6 +865,14 @@ export function SpaceDetailPage() {
                         A-Z
                       </button>
                     </div>
+                    <label className="hide-my-contacts-toggle">
+                      <input
+                        type="checkbox"
+                        checked={hideMyContacts}
+                        onChange={() => setHideMyContacts(!hideMyContacts)}
+                      />
+                      <span>Hide my contacts</span>
+                    </label>
                   </div>
                 </div>
 
@@ -858,15 +916,13 @@ export function SpaceDetailPage() {
                   </div>
                 ) : (
                   <div className="companies-list">
-                    {filteredCompanies.map(company => (
+                    {paginatedCompanies.map(company => (
                       <div key={company.id} className="company-card">
                         <div 
                           className="company-row"
                           onClick={() => setExpandedCompany(expandedCompany === company.domain ? null : company.domain)}
                         >
-                          <div className="company-logo">
-                            {company.name.charAt(0)}
-                          </div>
+                          <CompanyLogo domain={company.domain} name={company.name} size={48} />
                           <div className="company-info">
                             <div className="company-name">{company.name}</div>
                             <div className="company-domain">{company.domain}</div>
@@ -891,31 +947,48 @@ export function SpaceDetailPage() {
                         
                         {expandedCompany === company.domain && (
                           <div className="company-contacts">
-                            {company.contacts.map((contact) => (
-                              <div key={contact.id} className="company-contact-row">
-                                <div className="contact-row-avatar-placeholder">
-                                  {contact.name.charAt(0)}
+                            {company.contacts.map((contact) => {
+                              const isMyContact = currentUser && contact.userId === currentUser.id;
+                              return (
+                                <div key={contact.id} className="company-contact-row">
+                                  <div className="contact-row-avatar-placeholder">
+                                    {contact.name.charAt(0)}
+                                  </div>
+                                  <div className="contact-row-info">
+                                    <span className="contact-row-name">{contact.name}</span>
+                                    <span className="contact-row-title">
+                                      {isMyContact 
+                                        ? (contact.title || contact.email)
+                                        : (contact.title || 'Request intro to see details')
+                                      }
+                                    </span>
+                                    <span className="contact-row-via">via {contact.userName}</span>
+                                  </div>
+                                  {!isMyContact && (
+                                    <button 
+                                      className="btn-text-small"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        openIntroModal(company.name, contact.title || 'Contact', company.domain);
+                                      }}
+                                    >
+                                      Request Intro
+                                    </button>
+                                  )}
                                 </div>
-                                <div className="contact-row-info">
-                                  <span className="contact-row-name">{contact.name}</span>
-                                  <span className="contact-row-title">{contact.title || contact.email}</span>
-                                  <span className="contact-row-via">via {contact.userName}</span>
-                                </div>
-                                <button 
-                                  className="btn-text-small"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    openIntroModal(company.name, contact.title || 'Contact', company.domain);
-                                  }}
-                                >
-                                  Request Intro
-                                </button>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
                       </div>
                     ))}
+                    
+                    {/* Pagination */}
+                    <Pagination 
+                      currentPage={currentPage}
+                      totalPages={totalPages}
+                      onPageChange={setCurrentPage}
+                    />
                   </div>
                 )}
               </div>
@@ -955,11 +1028,12 @@ export function SpaceDetailPage() {
                 {space.members.map(member => (
                   <div key={member.id} className="member-card">
                     <div className="member-card-avatar">
-                      {member.user.avatar ? (
-                        <img src={member.user.avatar} alt="" referrerPolicy="no-referrer" />
-                      ) : (
-                        <span>{member.user.name.charAt(0)}</span>
-                      )}
+                      <PersonAvatar 
+                        email={member.user.email} 
+                        name={member.user.name} 
+                        avatarUrl={member.user.avatar}
+                        size={48}
+                      />
                     </div>
                     <div className="member-card-info">
                       <span className="member-card-name">
@@ -1028,11 +1102,12 @@ export function SpaceDetailPage() {
                     <div key={member.id} className="admin-list-item">
                       <div className="admin-item-main">
                         <div className="admin-item-avatar">
-                          {member.user.avatar ? (
-                            <img src={member.user.avatar} alt="" referrerPolicy="no-referrer" />
-                          ) : (
-                            <span>{member.user.name.charAt(0)}</span>
-                          )}
+                          <PersonAvatar 
+                            email={member.user.email} 
+                            name={member.user.name} 
+                            avatarUrl={member.user.avatar}
+                            size={40}
+                          />
                         </div>
                         <div className="admin-item-info">
                           <span className="admin-item-name">{member.user.name}</span>
@@ -1077,11 +1152,12 @@ export function SpaceDetailPage() {
                       <div key={member.id} className="admin-list-item">
                         <div className="admin-item-main">
                           <div className="admin-item-avatar">
-                            {member.user.avatar ? (
-                              <img src={member.user.avatar} alt="" referrerPolicy="no-referrer" />
-                            ) : (
-                              <span>{member.user.name.charAt(0)}</span>
-                            )}
+                            <PersonAvatar 
+                              email={member.user.email} 
+                              name={member.user.name} 
+                              avatarUrl={member.user.avatar}
+                              size={40}
+                            />
                           </div>
                           <div className="admin-item-info">
                             <span className="admin-item-name">{member.user.name}</span>

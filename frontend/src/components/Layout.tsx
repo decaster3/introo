@@ -1,5 +1,6 @@
 import { Link, useLocation, Navigate } from 'react-router-dom';
 import { useAppState, useAppActions } from '../store';
+import { PersonAvatar } from './PersonAvatar';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -76,11 +77,12 @@ export function Layout({ children }: LayoutProps) {
           </div>
 
           <div className="user-info">
-            {currentUser?.avatar ? (
-              <img src={currentUser.avatar} alt="" className="user-avatar-img" referrerPolicy="no-referrer" />
-            ) : (
-              <div className="user-avatar">{currentUser?.name?.charAt(0)}</div>
-            )}
+            <PersonAvatar 
+              email={currentUser?.email} 
+              name={currentUser?.name} 
+              avatarUrl={currentUser?.avatar}
+              size={40}
+            />
             <div className="user-details">
               <span className="user-name">{currentUser?.name}</span>
               <span className="user-stats">{userRequestsCount} requests</span>

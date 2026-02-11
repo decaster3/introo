@@ -2,8 +2,10 @@ import { useMemo, useState, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useAppState, useAppDispatch } from '../store';
 import { SignalBuilderModal, Signal } from '../components/SignalBuilderModal';
+import { PersonAvatar, CompanyLogo, Pagination } from '../components';
 import type { Contact as StoreContact } from '../store/types';
 import { API_BASE } from '../lib/api';
+import { calculateStrength } from '../types';
 
 interface DisplayMeeting {
   id: string;
@@ -29,13 +31,6 @@ interface DisplayContact {
   connectionStrength: 'strong' | 'medium' | 'weak';
 }
 
-function calculateStrength(lastSeenAt: string, meetingsCount: number): 'strong' | 'medium' | 'weak' {
-  const daysSince = Math.floor((Date.now() - new Date(lastSeenAt).getTime()) / (1000 * 60 * 60 * 24));
-  if (daysSince <= 7 && meetingsCount >= 3) return 'strong';
-  if (daysSince <= 30 && meetingsCount >= 2) return 'medium';
-  return 'weak';
-}
-
 interface SignalMatch {
   id: string;
   signalId: string;
@@ -54,141 +49,7 @@ interface SignalMatch {
   entity: any;
 }
 
-// Person Avatar component - uses multiple sources to find avatars
-function PersonAvatar({ email, name, avatarUrl: providedAvatarUrl, size = 48 }: { 
-  email?: string; 
-  name?: string; 
-  avatarUrl?: string | null;
-  size?: number;
-}) {
-  const [imageError, setImageError] = useState(false);
-  const [fallbackToExternal, setFallbackToExternal] = useState(false);
-  
-  const initials = name 
-    ? name.split(' ').map(n => n[0]).slice(0, 2).join('').toUpperCase()
-    : '?';
-  
-  // Use UI Avatars as fallback (generates nice letter avatars)
-  const fallbackUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(name || email || '?')}&background=1d1d24&color=ff6b4a&size=${size * 2}`;
-  
-  // Priority order:
-  // 1. Provided avatarUrl (from Google Contacts)
-  // 2. Unavatar.io (aggregates Gravatar, social networks, etc.)
-  // 3. UI Avatars (letter initials)
-  
-  let avatarSrc: string;
-  if (providedAvatarUrl && !imageError) {
-    // Use the provided avatar URL from Google
-    avatarSrc = providedAvatarUrl;
-  } else if (email && !fallbackToExternal) {
-    // Try unavatar.io
-    avatarSrc = `https://unavatar.io/${email}?fallback=${encodeURIComponent(fallbackUrl)}`;
-  } else {
-    // Use initials fallback
-    avatarSrc = fallbackUrl;
-  }
-  
-  const handleError = () => {
-    if (providedAvatarUrl && !imageError) {
-      // First failure was with provided URL, try unavatar
-      setImageError(true);
-    } else if (!fallbackToExternal) {
-      // Unavatar failed, use fallback
-      setFallbackToExternal(true);
-    }
-  };
-  
-  // If no email and no provided avatar, show initials div
-  if (!email && !providedAvatarUrl) {
-    return (
-      <div style={{ 
-        width: size, 
-        height: size, 
-        background: '#1d1d24', 
-        borderRadius: '50%',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: '#ff6b4a',
-        fontWeight: 700,
-        fontSize: size * 0.35,
-        flexShrink: 0
-      }}>
-        {initials}
-      </div>
-    );
-  }
-  
-  return (
-    <div style={{ 
-      width: size, 
-      height: size, 
-      borderRadius: '50%',
-      flexShrink: 0,
-      overflow: 'hidden',
-      background: '#1d1d24'
-    }}>
-      <img 
-        src={avatarSrc}
-        alt={name || 'Person'}
-        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-        onError={handleError}
-        referrerPolicy="no-referrer"
-      />
-    </div>
-  );
-}
-
-// Company Logo component with fallback - uses Google Favicons API (same as onboarding)
-function CompanyLogo({ domain, name, size = 48 }: { domain?: string; name?: string; size?: number }) {
-  const [hasError, setHasError] = useState(false);
-  
-  const fallbackLetter = name ? name.charAt(0).toUpperCase() : '?';
-  
-  // If no domain or image failed to load, show letter fallback
-  if (!domain || hasError) {
-    return (
-      <div style={{ 
-        width: size, 
-        height: size, 
-        background: '#1d1d24', 
-        borderRadius: '8px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: '#ff6b4a',
-        fontWeight: 700,
-        fontSize: size * 0.4,
-        flexShrink: 0
-      }}>
-        {fallbackLetter}
-      </div>
-    );
-  }
-  
-  return (
-    <div style={{ 
-      width: size, 
-      height: size, 
-      background: '#1d1d24', 
-      borderRadius: '8px',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      flexShrink: 0,
-      overflow: 'hidden',
-      padding: size > 24 ? '8px' : '2px'
-    }}>
-      <img 
-        src={`https://www.google.com/s2/favicons?domain=${domain}&sz=128`}
-        alt={name || 'Company'}
-        style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-        onError={() => setHasError(true)}
-      />
-    </div>
-  );
-}
-
+// CompanyLogo and PersonAvatar are imported from ../components
 // Date range options
 const dateRangeOptions = [
   { label: 'Any time', value: 'all' },
@@ -947,58 +808,11 @@ export function NetworkPage() {
                 </div>
 
                 {/* Pagination */}
-                {totalPages > 1 && (
-                  <div className="pagination">
-                    <button 
-                      className="pagination-btn"
-                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                      disabled={currentPage === 1}
-                    >
-                      ← Previous
-                    </button>
-                    <div className="pagination-pages">
-                      {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                        let page: number;
-                        if (totalPages <= 5) {
-                          page = i + 1;
-                        } else if (currentPage <= 3) {
-                          page = i + 1;
-                        } else if (currentPage >= totalPages - 2) {
-                          page = totalPages - 4 + i;
-                        } else {
-                          page = currentPage - 2 + i;
-                        }
-                        return (
-                          <button
-                            key={page}
-                            className={`pagination-page ${currentPage === page ? 'active' : ''}`}
-                            onClick={() => setCurrentPage(page)}
-                          >
-                            {page}
-                          </button>
-                        );
-                      })}
-                      {totalPages > 5 && currentPage < totalPages - 2 && (
-                        <>
-                          <span className="pagination-ellipsis">...</span>
-                          <button
-                            className="pagination-page"
-                            onClick={() => setCurrentPage(totalPages)}
-                          >
-                            {totalPages}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                    <button 
-                      className="pagination-btn"
-                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                      disabled={currentPage === totalPages}
-                    >
-                      Next →
-                    </button>
-                  </div>
-                )}
+                <Pagination 
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  onPageChange={setCurrentPage}
+                />
                 </>
               )}
             </>
@@ -1084,58 +898,11 @@ export function NetworkPage() {
                 </div>
 
                 {/* Company Pagination */}
-                {totalCompanyPages > 1 && (
-                  <div className="pagination">
-                    <button 
-                      className="pagination-btn"
-                      onClick={() => setCompanyPage(p => Math.max(1, p - 1))}
-                      disabled={companyPage === 1}
-                    >
-                      ← Previous
-                    </button>
-                    <div className="pagination-pages">
-                      {Array.from({ length: Math.min(5, totalCompanyPages) }, (_, i) => {
-                        let page: number;
-                        if (totalCompanyPages <= 5) {
-                          page = i + 1;
-                        } else if (companyPage <= 3) {
-                          page = i + 1;
-                        } else if (companyPage >= totalCompanyPages - 2) {
-                          page = totalCompanyPages - 4 + i;
-                        } else {
-                          page = companyPage - 2 + i;
-                        }
-                        return (
-                          <button
-                            key={page}
-                            className={`pagination-page ${companyPage === page ? 'active' : ''}`}
-                            onClick={() => setCompanyPage(page)}
-                          >
-                            {page}
-                          </button>
-                        );
-                      })}
-                      {totalCompanyPages > 5 && companyPage < totalCompanyPages - 2 && (
-                        <>
-                          <span className="pagination-ellipsis">...</span>
-                          <button
-                            className="pagination-page"
-                            onClick={() => setCompanyPage(totalCompanyPages)}
-                          >
-                            {totalCompanyPages}
-                          </button>
-                        </>
-                      )}
-                    </div>
-                    <button 
-                      className="pagination-btn"
-                      onClick={() => setCompanyPage(p => Math.min(totalCompanyPages, p + 1))}
-                      disabled={companyPage === totalCompanyPages}
-                    >
-                      Next →
-                    </button>
-                  </div>
-                )}
+                <Pagination 
+                  currentPage={companyPage}
+                  totalPages={totalCompanyPages}
+                  onPageChange={setCompanyPage}
+                />
                 </>
               )}
             </>

@@ -1,41 +1,29 @@
-import type { IntroRequest, IntroOffer, IntroOutcome, RelationshipEdge, User, Company } from '../types';
+import type {
+  User,
+  Company,
+  Contact,
+  Meeting,
+  CalendarAccount,
+  IntroRequest,
+  IntroRequestWithDetails,
+  IntroOffer,
+  IntroOutcome,
+  RelationshipEdge,
+} from '../types';
 
-export interface Meeting {
-  id: string;
-  title: string;
-  date: string;
-  duration?: number;
-}
-
-export interface Contact {
-  id: string;
-  email: string;
-  name?: string | null;
-  title?: string | null;
-  avatarUrl?: string | null;
-  isApproved?: boolean;
-  meetingsCount: number;
-  lastSeenAt: string;
-  lastEventTitle?: string;
-  meetings?: Meeting[];
-  source?: string;
-  sourceAccountEmail?: string;
-  company?: {
-    id: string;
-    domain: string;
-    name: string;
-    logo?: string | null;
-  } | null;
-}
-
-export interface CalendarAccount {
-  id: string;
-  email: string;
-  name?: string;
-  lastSyncedAt?: string;
-  isActive: boolean;
-  contactsCount: number;
-}
+// Re-export for convenience
+export type {
+  User,
+  Company,
+  Contact,
+  Meeting,
+  CalendarAccount,
+  IntroRequest,
+  IntroRequestWithDetails,
+  IntroOffer,
+  IntroOutcome,
+  RelationshipEdge,
+};
 
 export interface AppState {
   // Auth state
@@ -47,7 +35,7 @@ export interface AppState {
   // App state
   isCalendarConnected: boolean;
   relationships: RelationshipEdge[];
-  requests: IntroRequest[];
+  requests: IntroRequestWithDetails[];
   offers: IntroOffer[];
   outcomes: IntroOutcome[];
   contacts: Contact[];
@@ -65,9 +53,9 @@ export type AppAction =
   | { type: 'CONNECT_CALENDAR' }
   | { type: 'SET_CALENDAR_CONNECTED'; payload: boolean }
   | { type: 'SET_RELATIONSHIPS'; payload: RelationshipEdge[] }
-  | { type: 'SET_REQUESTS'; payload: IntroRequest[] }
-  | { type: 'ADD_REQUEST'; payload: IntroRequest }
-  | { type: 'UPDATE_REQUEST_STATUS'; payload: { requestId: string; status: IntroRequest['status'] } }
+  | { type: 'SET_REQUESTS'; payload: IntroRequestWithDetails[] }
+  | { type: 'ADD_REQUEST'; payload: IntroRequestWithDetails }
+  | { type: 'UPDATE_REQUEST_STATUS'; payload: { requestId: string; status: IntroRequestWithDetails['status'] } }
   | { type: 'REMOVE_REQUEST'; payload: string }
   | { type: 'SET_OFFERS'; payload: IntroOffer[] }
   | { type: 'ADD_OFFER'; payload: IntroOffer }

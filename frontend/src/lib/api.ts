@@ -1,3 +1,30 @@
+import type {
+  User,
+  Company,
+  Contact,
+  RelationshipWithDetails,
+  IntroRequest,
+  IntroRequestWithDetails,
+  IntroOffer,
+  IntroOfferWithDetails,
+  NormalizedQuery,
+  CreateIntroRequest,
+} from '../types';
+
+// Re-export types for convenience
+export type {
+  User,
+  Company,
+  Contact,
+  RelationshipWithDetails,
+  IntroRequest,
+  IntroRequestWithDetails,
+  IntroOffer,
+  IntroOfferWithDetails,
+  NormalizedQuery,
+  CreateIntroRequest,
+};
+
 export const API_BASE = import.meta.env.VITE_API_URL || '';
 
 async function request<T>(
@@ -85,90 +112,182 @@ export const offersApi = {
   getMine: () => request<IntroOfferWithDetails[]>('/api/offers/mine'),
 };
 
-// Types
-export interface User {
+// Spaces
+export const spacesApi = {
+  getAll: () => request<Space[]>('/api/spaces'),
+  getById: (id: string) => request<Space>(`/api/spaces/${id}`),
+  create: (data: { name: string; description?: string; emoji?: string; isPrivate?: boolean }) => 
+    request<Space>('/api/spaces', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  delete: (id: string) => request<{ success: boolean }>(`/api/spaces/${id}`, {
+    method: 'DELETE',
+  }),
+  join: (code: string) => request<{ space: Space; membership: SpaceMember }>(`/api/spaces/join/${code}`, {
+    method: 'POST',
+  }),
+  leave: (id: string) => request<{ success: boolean }>(`/api/spaces/${id}/leave`, {
+    method: 'POST',
+  }),
+  getReach: (id: string) => request<SpaceReachResponse>(`/api/spaces/${id}/reach`),
+  getPending: (id: string) => request<SpaceMember[]>(`/api/spaces/${id}/pending`),
+  
+  // Member management
+  inviteMember: (spaceId: string, email: string) => request<SpaceMember>(`/api/spaces/${spaceId}/members`, {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  }),
+  approveMember: (spaceId: string, memberId: string) => request<SpaceMember>(`/api/spaces/${spaceId}/members/${memberId}/approve`, {
+    method: 'POST',
+  }),
+  rejectMember: (spaceId: string, memberId: string) => request<{ success: boolean }>(`/api/spaces/${spaceId}/members/${memberId}/reject`, {
+    method: 'POST',
+  }),
+  removeMember: (spaceId: string, memberId: string) => request<{ success: boolean }>(`/api/spaces/${spaceId}/members/${memberId}`, {
+    method: 'DELETE',
+  }),
+  
+  // Request management
+  deleteRequest: (spaceId: string, requestId: string) => request<{ success: boolean }>(`/api/spaces/${spaceId}/requests/${requestId}`, {
+    method: 'DELETE',
+  }),
+};
+
+// Signals
+export const signalsApi = {
+  getAll: () => request<Signal[]>('/api/signals'),
+  create: (data: CreateSignal) => request<Signal>('/api/signals', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+  delete: (id: string) => request<{ success: boolean }>(`/api/signals/${id}`, {
+    method: 'DELETE',
+  }),
+  toggle: (id: string, isActive: boolean) => request<Signal>(`/api/signals/${id}/toggle`, {
+    method: 'POST',
+    body: JSON.stringify({ isActive }),
+  }),
+  getMatches: () => request<SignalMatch[]>('/api/signals/matches'),
+  markMatchAsRead: (matchId: string) => request<SignalMatch>(`/api/signals/matches/${matchId}/read`, {
+    method: 'POST',
+  }),
+  markAllAsRead: () => request<{ success: boolean }>('/api/signals/matches/read-all', {
+    method: 'POST',
+  }),
+};
+
+// Signal types
+export interface Signal {
   id: string;
   name: string;
-  avatar?: string | null;
-  email?: string;
+  description?: string;
+  entityType: 'contact' | 'company';
+  triggerType: string;
+  config: Record<string, unknown>;
+  isActive: boolean;
+  createdAt: string;
 }
 
-export interface Company {
-  id: string;
-  domain: string;
+export interface CreateSignal {
   name: string;
-  industry?: string | null;
-  sizeBucket?: string | null;
-  geo?: string | null;
-  logo?: string | null;
+  description?: string;
+  entityType: 'contact' | 'company';
+  triggerType: string;
+  config?: Record<string, unknown>;
 }
 
-export interface Contact {
+export interface SignalMatch {
   id: string;
-  email: string;
-  name?: string | null;
-  title?: string | null;
-  avatarUrl?: string | null;
-  companyId?: string | null;
-  company?: Company | null;
-  meetingsCount: number;
-  lastSeenAt: string;
-  isApproved?: boolean;
-  lastEventTitle?: string;
+  signalId: string;
+  entityType: 'contact' | 'company';
+  entityId: string;
+  summary: string;
+  data: Record<string, unknown>;
+  isRead: boolean;
+  matchedAt: string;
+  signal: {
+    id: string;
+    name: string;
+    entityType: string;
+    triggerType: string;
+  };
+  entity: unknown;
 }
 
-export interface RelationshipWithDetails {
+// Additional types for API responses
+export interface Space {
   id: string;
-  userId: string;
-  companyId: string;
-  meetingsCount: number;
-  lastSeenAt: string;
-  strengthScore?: number | null;
-  user?: User;
-  company?: Company;
+  name: string;
+  description?: string | null;
+  emoji: string;
+  isPrivate: boolean;
+  inviteCode: string;
+  ownerId: string;
+  members: SpaceMember[];
+  requests?: SpaceRequest[];
+  pendingCount?: number;
 }
 
-export interface NormalizedQuery {
-  targetDomain?: string;
-  industry?: string;
-  sizeBucket?: string;
-  geo?: string;
-  role?: string;
+export interface SpaceMember {
+  id: string;
+  role: string;
+  status?: string;
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    avatar: string | null;
+  };
 }
 
-export interface IntroRequest {
+export interface SpaceRequest {
   id: string;
   requesterId: string;
   rawText: string;
   normalizedQuery: NormalizedQuery;
   bidAmount: number;
-  currency: string;
-  status: 'open' | 'accepted' | 'completed';
+  status: string;
   createdAt: string;
+  requester: {
+    id: string;
+    name: string;
+    email: string;
+    avatar: string | null;
+  };
+  offers: {
+    id: string;
+    introducerId: string;
+    status: string;
+    introducer: {
+      id: string;
+      name: string;
+      avatar: string | null;
+    };
+  }[];
 }
 
-export interface IntroRequestWithDetails extends IntroRequest {
-  requester?: User;
-  offers?: IntroOfferWithDetails[];
-}
-
-export interface IntroOffer {
+export interface SpaceCompany {
   id: string;
-  requestId: string;
-  introducerId: string;
-  message: string;
-  status: 'pending' | 'accepted' | 'rejected';
-  createdAt: string;
+  name: string;
+  domain: string;
+  industry: string | null;
+  sizeBucket: string | null;
+  logo: string | null;
+  contactCount: number;
+  contacts: {
+    id: string;
+    name: string;
+    email: string;
+    title: string | null;
+    userId: string;
+    userName: string;
+  }[];
 }
 
-export interface IntroOfferWithDetails extends IntroOffer {
-  introducer?: User;
-  request?: IntroRequest & { requester?: User };
-}
-
-export interface CreateIntroRequest {
-  rawText: string;
-  normalizedQuery?: NormalizedQuery;
-  bidAmount?: number;
-  currency?: string;
+export interface SpaceReachResponse {
+  companies: SpaceCompany[];
+  totalCompanies: number;
+  totalContacts: number;
+  memberCount: number;
 }

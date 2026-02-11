@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppState, useAppDispatch, useAppActions } from '../store';
 import type { Contact } from '../store/types';
@@ -9,15 +9,14 @@ export function OnboardingPage() {
   const dispatch = useAppDispatch();
   const { syncCalendar } = useAppActions();
   const navigate = useNavigate();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [parsedContacts, setParsedContacts] = useState<Contact[]>([]);
-  const [step, setStep] = useState<'choose' | 'review' | 'complete'>('choose');
+  const [step, setStep] = useState<'connect' | 'review' | 'complete'>('connect');
 
   // If already has contacts, redirect
-  if (contacts && contacts.length > 0 && step === 'choose') {
+  if (contacts && contacts.length > 0 && step === 'connect') {
     navigate('/dashboard');
     return null;
   }
@@ -65,7 +64,7 @@ export function OnboardingPage() {
       }));
       
       if (formattedContacts.length === 0) {
-        setError('No contacts found in your calendar. Try uploading a CSV instead.');
+        setError('No contacts found in your calendar. Make sure you have meetings with external attendees.');
         setIsProcessing(false);
         return;
       }
@@ -85,85 +84,6 @@ export function OnboardingPage() {
     } finally {
       setIsProcessing(false);
     }
-  };
-
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setIsProcessing(true);
-    setError(null);
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const text = e.target?.result as string;
-        const lines = text.split('\n').filter(line => line.trim());
-        
-        if (lines.length < 2) {
-          throw new Error('CSV must have a header row and at least one contact');
-        }
-
-        // Parse header
-        const header = lines[0].toLowerCase().split(',').map(h => h.trim());
-        const emailIndex = header.findIndex(h => h.includes('email'));
-        const nameIndex = header.findIndex(h => h.includes('name') && !h.includes('company'));
-        const titleIndex = header.findIndex(h => h.includes('title') || h.includes('role') || h.includes('position'));
-        const companyIndex = header.findIndex(h => h.includes('company') || h.includes('organization'));
-
-        if (emailIndex === -1) {
-          throw new Error('CSV must have an "email" column');
-        }
-
-        const newContacts: Contact[] = [];
-        
-        for (let i = 1; i < lines.length; i++) {
-          const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
-          const email = values[emailIndex];
-          
-          if (!email || !email.includes('@')) continue;
-          
-          const name = nameIndex !== -1 ? values[nameIndex] : email.split('@')[0];
-          const title = titleIndex !== -1 ? values[titleIndex] : null;
-          const companyName = companyIndex !== -1 ? values[companyIndex] : null;
-          const domain = email.split('@')[1];
-
-          newContacts.push({
-            id: `csv-${Date.now()}-${i}`,
-            email,
-            name: name || null,
-            title: title || null,
-            isApproved: true,
-            meetingsCount: 1,
-            lastSeenAt: new Date().toISOString(),
-            company: companyName ? {
-              id: `company-${domain}`,
-              domain,
-              name: companyName,
-              logo: `https://www.google.com/s2/favicons?domain=${domain}&sz=128`,
-            } : null,
-          });
-        }
-
-        if (newContacts.length === 0) {
-          throw new Error('No valid contacts found in CSV');
-        }
-
-        setParsedContacts(newContacts);
-        setStep('review');
-      } catch (err: any) {
-        setError(err.message || 'Failed to parse CSV');
-      } finally {
-        setIsProcessing(false);
-      }
-    };
-
-    reader.onerror = () => {
-      setError('Failed to read file');
-      setIsProcessing(false);
-    };
-
-    reader.readAsText(file);
   };
 
   const handleAddContacts = () => {
@@ -229,7 +149,7 @@ export function OnboardingPage() {
     return (
       <div className="onboarding-page">
         <div className="onboarding-card wide">
-          <button className="back-btn" onClick={() => setStep('choose')}>
+          <button className="back-btn" onClick={() => setStep('connect')}>
             ← Back
           </button>
           <h1>Review Your Contacts</h1>
@@ -259,7 +179,7 @@ export function OnboardingPage() {
           </div>
 
           <div className="onboarding-actions">
-            <button className="btn-secondary" onClick={() => setStep('choose')}>
+            <button className="btn-secondary" onClick={() => setStep('connect')}>
               Cancel
             </button>
             <button className="btn-primary btn-large" onClick={handleAddContacts}>
@@ -271,7 +191,7 @@ export function OnboardingPage() {
     );
   }
 
-  // Choose step
+  // Connect step
   return (
     <div className="onboarding-page">
       <div className="onboarding-card">
@@ -280,7 +200,7 @@ export function OnboardingPage() {
           <h1>Welcome to Introo</h1>
         </div>
         <p className="onboarding-description">
-          Build your professional network by connecting your calendar or uploading your contacts.
+          Connect your Google Calendar to build your professional network from meeting attendees.
         </p>
 
         {error && (
@@ -300,47 +220,18 @@ export function OnboardingPage() {
         )}
 
         <div className="onboarding-options">
-          {/* Calendar Option */}
           <button 
-            className="onboarding-option-card"
+            className="onboarding-option-card primary"
             onClick={handleCalendarConnect}
             disabled={isProcessing}
           >
             <div className="option-icon">📅</div>
             <div className="option-content">
-              <h3>Connect Calendar</h3>
+              <h3>Connect Google Calendar</h3>
               <p>We'll scan your meetings to find your professional contacts</p>
             </div>
             {isProcessing && <span className="loading-spinner small"></span>}
           </button>
-
-          <div className="option-divider">
-            <span>or</span>
-          </div>
-
-          {/* CSV Upload Option */}
-          <button 
-            className="onboarding-option-card"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isProcessing}
-          >
-            <div className="option-icon">📄</div>
-            <div className="option-content">
-              <h3>Upload CSV</h3>
-              <p>Import contacts from a spreadsheet with work emails</p>
-            </div>
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv"
-            onChange={handleFileUpload}
-            style={{ display: 'none' }}
-          />
-
-          <p className="csv-hint">
-            CSV should have columns: email, name (optional), title (optional), company (optional)
-          </p>
         </div>
 
         <div className="onboarding-footer">

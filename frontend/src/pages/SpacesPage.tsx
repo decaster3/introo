@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppState } from '../store';
 import { API_BASE } from '../lib/api';
+import { PersonAvatar } from '../components';
 
 interface Space {
   id: string;
@@ -261,11 +262,12 @@ export function SpacesPage() {
                   <div className="space-members-row">
                     {space.members.slice(0, 5).map(m => (
                       <div key={m.id} className="member-bubble-small" title={m.user.name}>
-                        {m.user.avatar ? (
-                          <img src={m.user.avatar} alt="" referrerPolicy="no-referrer" />
-                        ) : (
-                          <span>{m.user.name.charAt(0)}</span>
-                        )}
+                        <PersonAvatar 
+                          email={m.user.email} 
+                          name={m.user.name} 
+                          avatarUrl={m.user.avatar}
+                          size={28}
+                        />
                       </div>
                     ))}
                     {space.members.length > 5 && (

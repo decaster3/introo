@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppState } from '../store';
+import { PersonAvatar } from '../components';
 
 function timeAgo(date: Date): string {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -133,11 +134,12 @@ export function ActivityPage() {
               return (
                 <Link to={`/request/${offer.requestId}`} key={offer.id} className="activity-card">
                   <div className="activity-card-header">
-                    {requester?.avatar ? (
-                      <img src={requester.avatar} alt="" className="activity-avatar" referrerPolicy="no-referrer" />
-                    ) : (
-                      <div className="activity-avatar fallback">{requester?.name?.charAt(0)}</div>
-                    )}
+                    <PersonAvatar 
+                      email={requester?.email} 
+                      name={requester?.name} 
+                      avatarUrl={requester?.avatar}
+                      size={32}
+                    />
                     <span className="activity-to">To {requester?.name}</span>
                   </div>
                   <p className="activity-text">{request?.rawText}</p>

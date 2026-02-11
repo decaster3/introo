@@ -2,48 +2,20 @@ import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppState } from '../store';
 import { API_BASE } from '../lib/api';
+import { DisplayContact, calculateStrength, timeAgo } from '../types';
+import { PersonAvatar } from '../components';
+import { openOfferIntroEmail } from '../lib/offerIntro';
 
-// Display-friendly contact interface (derived from store Contact)
-export interface Contact {
-  id: string;
-  name: string;
-  email: string;
-  avatar: string;
-  title: string;
-  company: string;
-  companyDomain: string;
-  linkedinUrl?: string;
-  lastContacted: Date;
-  connectionStrength: 'strong' | 'medium' | 'weak';
-}
-
+// Re-export for backward compatibility with other files importing from here
+export type { DisplayContact };
 // Alias for backward compatibility
-type DisplayContact = Contact;
+export type Contact = DisplayContact;
 
 interface Space {
   id: string;
   name: string;
   emoji: string;
   members: { user: { id: string; name: string; avatar: string | null } }[];
-}
-
-function timeAgo(date: Date): string {
-  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (seconds < 60) return 'just now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return `${Math.floor(days / 7)}w ago`;
-}
-
-function calculateStrength(lastSeenAt: string, meetingsCount: number): 'strong' | 'medium' | 'weak' {
-  const daysSince = Math.floor((Date.now() - new Date(lastSeenAt).getTime()) / (1000 * 60 * 60 * 24));
-  if (daysSince <= 7 && meetingsCount >= 3) return 'strong';
-  if (daysSince <= 30 && meetingsCount >= 2) return 'medium';
-  return 'weak';
 }
 
 export function HomePage() {
@@ -185,11 +157,12 @@ export function HomePage() {
       <div className="compose-box">
         <form onSubmit={handleAskSubmit}>
           <div className="compose-input-row">
-            {currentUser?.avatar ? (
-              <img src={currentUser.avatar} alt="" className="compose-avatar" referrerPolicy="no-referrer" />
-            ) : (
-              <div className="compose-avatar fallback">{currentUser?.name?.charAt(0)}</div>
-            )}
+            <PersonAvatar 
+              email={currentUser?.email} 
+              name={currentUser?.name} 
+              avatarUrl={currentUser?.avatar}
+              size={40}
+            />
             <input
               type="text"
               placeholder="Who do you want to meet? (e.g., 'Intro to someone at Stripe')"
@@ -269,11 +242,12 @@ export function HomePage() {
               <div key={request.id} className="request-card suggestion">
                 <div className="request-card-header">
                   <div className="requester-info">
-                    {requester?.avatar ? (
-                      <img src={requester.avatar} alt="" className="requester-avatar" />
-                    ) : (
-                      <div className="requester-avatar fallback">{requester?.name?.charAt(0)}</div>
-                    )}
+                    <PersonAvatar 
+                      email={requester?.email} 
+                      name={requester?.name} 
+                      avatarUrl={requester?.avatar}
+                      size={32}
+                    />
                     <span className="requester-name">{requester?.name}</span>
                       {requesterSpace && (
                         <span className="space-tag">{requesterSpace.emoji} {requesterSpace.name}</span>
@@ -304,7 +278,18 @@ export function HomePage() {
                 
                 <div className="request-actions">
                   <Link to={`/request/${request.id}`} className="btn-secondary">View Details</Link>
-                  <button className="btn-primary">Offer Intro</button>
+                  <button 
+                    className="btn-primary"
+                    onClick={() => requester?.email && openOfferIntroEmail({
+                      requesterEmail: requester.email,
+                      requesterName: requester.name || 'there',
+                      targetCompany: request.normalizedQuery?.targetCompany || 'the company',
+                      contactName: matchingContacts[0]?.name,
+                      senderName: currentUser?.name,
+                    })}
+                  >
+                    Offer Intro
+                  </button>
                 </div>
               </div>
             );
@@ -327,11 +312,12 @@ export function HomePage() {
               <div key={request.id} className="request-card community">
                 <div className="request-card-header">
                   <div className="requester-info">
-                    {requester?.avatar ? (
-                      <img src={requester.avatar} alt="" className="requester-avatar" />
-                    ) : (
-                      <div className="requester-avatar fallback">{requester?.name?.charAt(0)}</div>
-                    )}
+                    <PersonAvatar 
+                      email={requester?.email} 
+                      name={requester?.name} 
+                      avatarUrl={requester?.avatar}
+                      size={32}
+                    />
                     <span className="requester-name">{requester?.name}</span>
                     {requesterSpace && (
                       <span className="space-tag">{requesterSpace.emoji} {requesterSpace.name}</span>
@@ -342,7 +328,18 @@ export function HomePage() {
                 </div>
                 <p className="request-text">{request.rawText}</p>
                 <div className="request-actions">
-                  <Link to={`/request/${request.id}`} className="btn-text-link">View</Link>
+                  <Link to={`/request/${request.id}`} className="btn-secondary">View Details</Link>
+                  <button 
+                    className="btn-primary"
+                    onClick={() => requester?.email && openOfferIntroEmail({
+                      requesterEmail: requester.email,
+                      requesterName: requester.name || 'there',
+                      targetCompany: request.normalizedQuery?.targetCompany || 'the company',
+                      senderName: currentUser?.name,
+                    })}
+                  >
+                    Offer Intro
+                  </button>
                 </div>
               </div>
             );
