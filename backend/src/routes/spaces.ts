@@ -681,4 +681,122 @@ router.post('/:id/leave', async (req, res) => {
   }
 });
 
+// Get combined reach for a space (all companies from all members)
+router.get('/:id/reach', async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+    const { id } = req.params;
+
+    // Verify user is a member of the space
+    const space = await prisma.space.findFirst({
+      where: {
+        id,
+        OR: [
+          { ownerId: userId },
+          { members: { some: { userId, status: 'approved' } } },
+        ],
+      },
+      include: {
+        members: {
+          where: { status: 'approved' },
+          select: { userId: true },
+        },
+      },
+    });
+
+    if (!space) {
+      res.status(404).json({ error: 'Space not found' });
+      return;
+    }
+
+    // Get all member user IDs (including owner)
+    const memberUserIds = [
+      space.ownerId,
+      ...space.members.map(m => m.userId).filter(id => id !== space.ownerId),
+    ];
+
+    // Get all approved contacts from all members, grouped by company
+    const contacts = await prisma.contact.findMany({
+      where: {
+        userId: { in: memberUserIds },
+        isApproved: true,
+        companyId: { not: null },
+      },
+      include: {
+        company: true,
+        user: {
+          select: { id: true, name: true },
+        },
+      },
+    });
+
+    // Aggregate by company
+    const companyMap = new Map<string, {
+      id: string;
+      name: string;
+      domain: string;
+      industry: string | null;
+      sizeBucket: string | null;
+      logo: string | null;
+      contacts: {
+        id: string;
+        name: string;
+        email: string;
+        title: string | null;
+        userId: string;
+        userName: string;
+      }[];
+    }>();
+
+    for (const contact of contacts) {
+      if (!contact.company) continue;
+
+      const existing = companyMap.get(contact.company.id);
+      const contactInfo = {
+        id: contact.id,
+        name: contact.name || contact.email.split('@')[0],
+        email: contact.email,
+        title: contact.title,
+        userId: contact.userId,
+        userName: contact.user.name,
+      };
+
+      if (existing) {
+        // Avoid duplicates (same contact from same user)
+        if (!existing.contacts.some(c => c.email === contact.email)) {
+          existing.contacts.push(contactInfo);
+        }
+      } else {
+        companyMap.set(contact.company.id, {
+          id: contact.company.id,
+          name: contact.company.name,
+          domain: contact.company.domain,
+          industry: contact.company.industry,
+          sizeBucket: contact.company.sizeBucket,
+          logo: contact.company.logo,
+          contacts: [contactInfo],
+        });
+      }
+    }
+
+    // Convert to array and sort by contact count
+    const companies = Array.from(companyMap.values())
+      .map(c => ({
+        ...c,
+        contactCount: c.contacts.length,
+      }))
+      .sort((a, b) => b.contactCount - a.contactCount);
+
+    res.json({
+      companies,
+      totalCompanies: companies.length,
+      totalContacts: contacts.length,
+      memberCount: memberUserIds.length,
+    });
+  } catch (error: unknown) {
+    console.error('Error fetching space reach:', error);
+    res.status(500).json({ error: 'Failed to fetch space reach' });
+  }
+});
+
 export default router;

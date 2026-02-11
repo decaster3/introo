@@ -7234,6 +7234,13 @@ body {
   color: var(--text-secondary);
 }
 
+.contact-row-via {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 .contact-row-meta {
   display: flex;
   align-items: center;

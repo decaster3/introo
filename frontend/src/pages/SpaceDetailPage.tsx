@@ -77,17 +77,23 @@ const sizeOptions = [
   { value: 'enterprise', label: 'Enterprise (500+)' },
 ];
 
-// Companies the space has collective access to
-const spaceCompanies = [
-  { name: 'Stripe', domain: 'stripe.com', contactCount: 2, industry: 'fintech', size: 'enterprise', roles: ['Engineering', 'Product'] },
-  { name: 'Google', domain: 'google.com', contactCount: 2, industry: 'saas', size: 'enterprise', roles: ['Engineering', 'Sales'] },
-  { name: 'Y Combinator', domain: 'ycombinator.com', contactCount: 1, industry: 'vc', size: 'scaleup', roles: ['Partner'] },
-  { name: 'Sequoia Capital', domain: 'sequoiacap.com', contactCount: 1, industry: 'vc', size: 'scaleup', roles: ['Partner'] },
-  { name: 'OpenAI', domain: 'openai.com', contactCount: 1, industry: 'ai', size: 'scaleup', roles: ['Research'] },
-  { name: 'Figma', domain: 'figma.com', contactCount: 1, industry: 'design', size: 'scaleup', roles: ['Design'] },
-  { name: 'Notion', domain: 'notion.so', contactCount: 1, industry: 'saas', size: 'scaleup', roles: ['Product'] },
-  { name: 'Vercel', domain: 'vercel.com', contactCount: 1, industry: 'developer_tools', size: 'startup', roles: ['Engineering'] },
-];
+interface SpaceCompany {
+  id: string;
+  name: string;
+  domain: string;
+  industry: string | null;
+  sizeBucket: string | null;
+  logo: string | null;
+  contactCount: number;
+  contacts: {
+    id: string;
+    name: string;
+    email: string;
+    title: string | null;
+    userId: string;
+    userName: string;
+  }[];
+}
 
 export function SpaceDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -120,6 +126,12 @@ export function SpaceDetailPage() {
   
   // Admin tab state
   const [pendingMembers, setPendingMembers] = useState<SpaceMember[]>([]);
+  
+  // Space reach state
+  const [spaceCompanies, setSpaceCompanies] = useState<SpaceCompany[]>([]);
+  const [reachLoading, setReachLoading] = useState(false);
+  const [_reachStats, setReachStats] = useState({ totalCompanies: 0, totalContacts: 0, memberCount: 0 });
+  void _reachStats; // Stats available for future use
   
   // Filters for Space Reach
   const [reachSearchQuery, setReachSearchQuery] = useState('');
@@ -162,12 +174,12 @@ export function SpaceDetailPage() {
 
     // Industry filter
     if (selectedIndustries.length > 0) {
-      companies = companies.filter(c => selectedIndustries.includes(c.industry));
+      companies = companies.filter(c => c.industry && selectedIndustries.includes(c.industry));
     }
 
     // Size filter
     if (selectedSizes.length > 0) {
-      companies = companies.filter(c => selectedSizes.includes(c.size));
+      companies = companies.filter(c => c.sizeBucket && selectedSizes.includes(c.sizeBucket));
     }
 
     // Sort
@@ -177,7 +189,7 @@ export function SpaceDetailPage() {
       }
       return a.name.localeCompare(b.name);
     });
-  }, [reachSearchQuery, reachSortBy, selectedContactCounts, selectedIndustries, selectedSizes]);
+  }, [spaceCompanies, reachSearchQuery, reachSortBy, selectedContactCounts, selectedIndustries, selectedSizes]);
 
   const toggleContactCount = (count: string) => {
     setSelectedContactCounts(prev =>
@@ -323,6 +335,34 @@ export function SpaceDetailPage() {
       console.error('Failed to fetch pending members:', e);
     }
   };
+
+  const fetchSpaceReach = async () => {
+    if (!id) return;
+    setReachLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/spaces/${id}/reach`, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setSpaceCompanies(data.companies || []);
+        setReachStats({
+          totalCompanies: data.totalCompanies || 0,
+          totalContacts: data.totalContacts || 0,
+          memberCount: data.memberCount || 0,
+        });
+      }
+    } catch (e) {
+      console.error('Failed to fetch space reach:', e);
+    } finally {
+      setReachLoading(false);
+    }
+  };
+
+  // Fetch reach data when switching to the reach tab
+  useEffect(() => {
+    if (activeTab === 'reach' && spaceCompanies.length === 0 && !reachLoading) {
+      fetchSpaceReach();
+    }
+  }, [activeTab]);
 
   const approveMember = async (memberId: string) => {
     if (!space) return;
@@ -803,11 +843,13 @@ export function SpaceDetailPage() {
                 )}
 
                 {/* Companies List */}
-                {filteredCompanies.length === 0 ? (
+                {reachLoading ? (
+                  <div className="loading-state">Loading companies...</div>
+                ) : filteredCompanies.length === 0 ? (
                   <div className="empty-network">
                     <div className="empty-icon">🏢</div>
-                    <h2>No companies found</h2>
-                    <p>Try adjusting your filters</p>
+                    <h2>{spaceCompanies.length === 0 ? 'No companies yet' : 'No companies found'}</h2>
+                    <p>{spaceCompanies.length === 0 ? 'Space members need to sync their calendars' : 'Try adjusting your filters'}</p>
                     {activeReachFilterCount > 0 && (
                       <button className="btn-secondary" onClick={clearReachFilters}>
                         Clear all filters
@@ -817,7 +859,7 @@ export function SpaceDetailPage() {
                 ) : (
                   <div className="companies-list">
                     {filteredCompanies.map(company => (
-                      <div key={company.domain} className="company-card">
+                      <div key={company.id} className="company-card">
                         <div 
                           className="company-row"
                           onClick={() => setExpandedCompany(expandedCompany === company.domain ? null : company.domain)}
@@ -830,12 +872,16 @@ export function SpaceDetailPage() {
                             <div className="company-domain">{company.domain}</div>
                           </div>
                           <div className="company-meta">
-                            <span className="company-industry-badge">
-                              {industryOptions.find(i => i.value === company.industry)?.label}
-                            </span>
-                            <span className="company-size-badge">
-                              {sizeOptions.find(s => s.value === company.size)?.label.split(' ')[0]}
-                            </span>
+                            {company.industry && (
+                              <span className="company-industry-badge">
+                                {industryOptions.find(i => i.value === company.industry)?.label || company.industry}
+                              </span>
+                            )}
+                            {company.sizeBucket && (
+                              <span className="company-size-badge">
+                                {sizeOptions.find(s => s.value === company.sizeBucket)?.label?.split(' ')[0] || company.sizeBucket}
+                              </span>
+                            )}
                             <span className="company-contact-count">
                               {company.contactCount} contact{company.contactCount !== 1 ? 's' : ''}
                             </span>
@@ -845,20 +891,21 @@ export function SpaceDetailPage() {
                         
                         {expandedCompany === company.domain && (
                           <div className="company-contacts">
-                            {company.roles.map((role, idx) => (
-                              <div key={idx} className="company-contact-row">
+                            {company.contacts.map((contact) => (
+                              <div key={contact.id} className="company-contact-row">
                                 <div className="contact-row-avatar-placeholder">
-                                  {role.charAt(0)}
+                                  {contact.name.charAt(0)}
                                 </div>
                                 <div className="contact-row-info">
-                                  <span className="contact-row-name">Contact in {role}</span>
-                                  <span className="contact-row-title">{role} Team</span>
+                                  <span className="contact-row-name">{contact.name}</span>
+                                  <span className="contact-row-title">{contact.title || contact.email}</span>
+                                  <span className="contact-row-via">via {contact.userName}</span>
                                 </div>
                                 <button 
                                   className="btn-text-small"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    openIntroModal(company.name, role, company.domain);
+                                    openIntroModal(company.name, contact.title || 'Contact', company.domain);
                                   }}
                                 >
                                   Request Intro
