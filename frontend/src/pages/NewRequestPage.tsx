@@ -4,6 +4,7 @@ import { useAppState, useAppDispatch } from '../store';
 import { parseRequestText } from '../lib/nlp';
 import { findMatches, formatScore } from '../lib/matching';
 import type { NormalizedQuery, MatchResult } from '../types';
+import { API_BASE } from '../lib/api';
 
 export function NewRequestPage() {
   const { currentUserId, relationships, users, companies } = useAppState();
@@ -42,7 +43,7 @@ export function NewRequestPage() {
     setIsSubmitting(true);
 
     try {
-      const response = await fetch('/api/requests', {
+      const response = await fetch(`${API_BASE}/api/requests`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

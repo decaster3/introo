@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAppState, useAppDispatch } from '../store';
 import { Contact } from './HomePage';
+import { API_BASE } from '../lib/api';
 
 function calculateStrength(lastSeenAt: string, meetingsCount: number): 'strong' | 'medium' | 'weak' {
   const daysSince = Math.floor((Date.now() - new Date(lastSeenAt).getTime()) / (1000 * 60 * 60 * 24));
@@ -237,7 +238,7 @@ export function SpaceDetailPage() {
         offer: introOffer,
       };
       
-      const response = await fetch('/api/requests', {
+      const response = await fetch(`${API_BASE}/api/requests`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -295,7 +296,7 @@ export function SpaceDetailPage() {
 
   const fetchSpace = async () => {
     try {
-      const res = await fetch(`/api/spaces/${id}`, { credentials: 'include' });
+      const res = await fetch(`${API_BASE}/api/spaces/${id}`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setSpace(data);
@@ -313,7 +314,7 @@ export function SpaceDetailPage() {
 
   const fetchPendingMembers = async () => {
     try {
-      const res = await fetch(`/api/spaces/${id}/pending`, { credentials: 'include' });
+      const res = await fetch(`${API_BASE}/api/spaces/${id}/pending`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setPendingMembers(data);
@@ -326,7 +327,7 @@ export function SpaceDetailPage() {
   const approveMember = async (memberId: string) => {
     if (!space) return;
     try {
-      await fetch(`/api/spaces/${space.id}/members/${memberId}/approve`, {
+      await fetch(`${API_BASE}/api/spaces/${space.id}/members/${memberId}/approve`, {
         method: 'POST',
         credentials: 'include',
       });
@@ -340,7 +341,7 @@ export function SpaceDetailPage() {
   const rejectMember = async (memberId: string) => {
     if (!space) return;
     try {
-      await fetch(`/api/spaces/${space.id}/members/${memberId}/reject`, {
+      await fetch(`${API_BASE}/api/spaces/${space.id}/members/${memberId}/reject`, {
         method: 'POST',
         credentials: 'include',
       });
@@ -353,7 +354,7 @@ export function SpaceDetailPage() {
   const deleteRequest = async (requestId: string) => {
     if (!space || !confirm('Delete this request? This cannot be undone.')) return;
     try {
-      await fetch(`/api/spaces/${space.id}/requests/${requestId}`, {
+      await fetch(`${API_BASE}/api/spaces/${space.id}/requests/${requestId}`, {
         method: 'DELETE',
         credentials: 'include',
       });
@@ -388,7 +389,7 @@ export function SpaceDetailPage() {
   const inviteMember = async () => {
     if (!inviteEmail.trim() || !space) return;
     try {
-      await fetch(`/api/spaces/${space.id}/members`, {
+      await fetch(`${API_BASE}/api/spaces/${space.id}/members`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -405,7 +406,7 @@ export function SpaceDetailPage() {
   const removeMember = async (memberId: string) => {
     if (!space) return;
     try {
-      await fetch(`/api/spaces/${space.id}/members/${memberId}`, {
+      await fetch(`${API_BASE}/api/spaces/${space.id}/members/${memberId}`, {
         method: 'DELETE',
         credentials: 'include',
       });
@@ -418,7 +419,7 @@ export function SpaceDetailPage() {
   const leaveSpace = async () => {
     if (!space) return;
     try {
-      await fetch(`/api/spaces/${space.id}/leave`, {
+      await fetch(`${API_BASE}/api/spaces/${space.id}/leave`, {
         method: 'POST',
         credentials: 'include',
       });
@@ -431,7 +432,7 @@ export function SpaceDetailPage() {
   const deleteSpace = async () => {
     if (!space || !confirm('Delete this space? This cannot be undone.')) return;
     try {
-      await fetch(`/api/spaces/${space.id}`, {
+      await fetch(`${API_BASE}/api/spaces/${space.id}`, {
         method: 'DELETE',
         credentials: 'include',
       });

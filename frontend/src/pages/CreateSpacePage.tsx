@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { API_BASE } from '../lib/api';
 
 const emojiOptions = ['🚀', '💡', '🔥', '⭐', '🎯', '💎', '🌟', '🎨', '🛠️', '📈', '🤝', '🌍'];
 
@@ -15,7 +16,7 @@ export function CreateSpacePage() {
     
     setIsCreating(true);
     try {
-      const res = await fetch('/api/spaces', {
+      const res = await fetch(`${API_BASE}/api/spaces`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

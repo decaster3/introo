@@ -3,6 +3,7 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { useAppState, useAppDispatch } from '../store';
 import { SignalBuilderModal, Signal } from '../components/SignalBuilderModal';
 import type { Contact as StoreContact } from '../store/types';
+import { API_BASE } from '../lib/api';
 
 interface DisplayMeeting {
   id: string;
@@ -117,7 +118,7 @@ export function NetworkPage() {
   const handleApproveAll = async () => {
     setApprovingAll(true);
     try {
-      const res = await fetch('/api/relationships/contacts/approve-all', {
+      const res = await fetch(`${API_BASE}/api/relationships/contacts/approve-all`, {
         method: 'POST',
         credentials: 'include',
       });
@@ -213,7 +214,7 @@ export function NetworkPage() {
 
   const fetchSignals = async () => {
     try {
-      const res = await fetch('/api/signals', { credentials: 'include' });
+      const res = await fetch(`${API_BASE}/api/signals`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setSignals(data);
@@ -226,7 +227,7 @@ export function NetworkPage() {
   const fetchSignalMatches = async () => {
     setSignalsLoading(true);
     try {
-      const res = await fetch('/api/signals/matches', { credentials: 'include' });
+      const res = await fetch(`${API_BASE}/api/signals/matches`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setSignalMatches(data);
@@ -240,7 +241,7 @@ export function NetworkPage() {
 
   const fetchUnreadCount = async () => {
     try {
-      const res = await fetch('/api/signals/matches/count', { credentials: 'include' });
+      const res = await fetch(`${API_BASE}/api/signals/matches/count`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setUnreadCount(data.count);
@@ -252,7 +253,7 @@ export function NetworkPage() {
 
   const markMatchAsRead = async (matchId: string) => {
     try {
-      await fetch(`/api/signals/matches/${matchId}/read`, {
+      await fetch(`${API_BASE}/api/signals/matches/${matchId}/read`, {
         method: 'POST',
         credentials: 'include',
       });
@@ -267,7 +268,7 @@ export function NetworkPage() {
 
   const markAllAsRead = async () => {
     try {
-      await fetch('/api/signals/matches/read-all', {
+      await fetch(`${API_BASE}/api/signals/matches/read-all`, {
         method: 'POST',
         credentials: 'include',
       });
@@ -281,7 +282,7 @@ export function NetworkPage() {
   const deleteSignal = async (signalId: string) => {
     if (!confirm('Delete this signal? All matches will also be deleted.')) return;
     try {
-      await fetch(`/api/signals/${signalId}`, {
+      await fetch(`${API_BASE}/api/signals/${signalId}`, {
         method: 'DELETE',
         credentials: 'include',
       });

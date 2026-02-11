@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAppState, useAppDispatch } from '../store';
 import { Contact } from './HomePage';
+import { API_BASE } from '../lib/api';
 
 function timeAgo(date: Date): string {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -51,7 +52,7 @@ export function RequestDetailPage() {
 
   // Fetch spaces to build user-space mapping
   useEffect(() => {
-    fetch('/api/spaces', { credentials: 'include' })
+    fetch(`${API_BASE}/api/spaces`, { credentials: 'include' })
       .then(res => res.json())
       .then((spaces: { id: string; name: string; emoji: string; members: { user: { id: string } }[] }[]) => {
         const map: Record<string, { id: string; name: string; emoji: string }> = {};
@@ -126,7 +127,7 @@ export function RequestDetailPage() {
     
     setDeleting(true);
     try {
-      const res = await fetch(`/api/requests/${request.id}`, {
+      const res = await fetch(`${API_BASE}/api/requests/${request.id}`, {
         method: 'DELETE',
         credentials: 'include',
       });

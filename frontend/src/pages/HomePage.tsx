@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppState } from '../store';
+import { API_BASE } from '../lib/api';
 
 // Display-friendly contact interface (derived from store Contact)
 export interface Contact {
@@ -84,7 +85,7 @@ export function HomePage() {
   useEffect(() => {
     setSpacesLoading(true);
     setSpacesError(null);
-    fetch('/api/spaces', { credentials: 'include' })
+    fetch(`${API_BASE}/api/spaces`, { credentials: 'include' })
       .then(res => {
         if (!res.ok) throw new Error('Failed to load spaces');
         return res.json();

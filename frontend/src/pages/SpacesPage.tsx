@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppState } from '../store';
+import { API_BASE } from '../lib/api';
 
 interface Space {
   id: string;
@@ -47,7 +48,7 @@ export function SpacesPage() {
 
   const fetchSpaces = async () => {
     try {
-      const res = await fetch('/api/spaces', { credentials: 'include' });
+      const res = await fetch(`${API_BASE}/api/spaces`, { credentials: 'include' });
       const data = await res.json();
       setSpaces(data);
     } catch (e) {
@@ -60,7 +61,7 @@ export function SpacesPage() {
   const createSpace = async () => {
     if (!newSpaceName.trim()) return;
     try {
-      await fetch('/api/spaces', {
+      await fetch(`${API_BASE}/api/spaces`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -83,7 +84,7 @@ export function SpacesPage() {
   const joinSpace = async () => {
     if (!joinCode.trim()) return;
     try {
-      const res = await fetch(`/api/spaces/join/${joinCode}`, {
+      const res = await fetch(`${API_BASE}/api/spaces/join/${joinCode}`, {
         method: 'POST',
         credentials: 'include',
       });
@@ -99,7 +100,7 @@ export function SpacesPage() {
   const inviteMember = async (spaceId: string) => {
     if (!inviteEmail.trim()) return;
     try {
-      await fetch(`/api/spaces/${spaceId}/members`, {
+      await fetch(`${API_BASE}/api/spaces/${spaceId}/members`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -115,7 +116,7 @@ export function SpacesPage() {
 
   const leaveSpace = async (spaceId: string) => {
     try {
-      await fetch(`/api/spaces/${spaceId}/leave`, {
+      await fetch(`${API_BASE}/api/spaces/${spaceId}/leave`, {
         method: 'POST',
         credentials: 'include',
       });
