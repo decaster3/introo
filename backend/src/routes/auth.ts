@@ -7,14 +7,12 @@ const router = Router();
 
 // Initiate Google OAuth
 router.get('/google', (req, res, next) => {
-  const callbackURL = process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3001/auth/google/callback';
-  console.log('Initiating OAuth with callbackURL:', callbackURL);
+  console.log('Initiating OAuth, GOOGLE_CALLBACK_URL:', process.env.GOOGLE_CALLBACK_URL);
   
   passport.authenticate('google', {
     accessType: 'offline',
     prompt: 'consent',
-    callbackURL, // Explicitly pass callback URL
-  })(req, res, next);
+  } as any)(req, res, next);
 });
 
 // Google OAuth callback
