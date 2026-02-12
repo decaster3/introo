@@ -1,22 +1,12 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider } from './store';
-import { Layout, ErrorBoundary } from './components';
+import { ErrorBoundary } from './components';
 import {
-  NewRequestPage,
-  RequestDetailPage,
   LoginPage,
   OnboardingPage,
-  SpacesPage,
-  CreateSpacePage,
-  SpaceDetailPage,
-  HomePage,
   AIHomePage,
-  NetworkPage,
-  ContactDetailPage,
-  DashboardPage,
-  ConnectPage,
   LandingPage,
   TermsPage,
   PrivacyPage,
@@ -34,95 +24,22 @@ function App() {
           <Route path="/terms" element={<TermsPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
           
-          {/* Onboarding - no layout */}
+          {/* Onboarding */}
           <Route path="/onboarding" element={<OnboardingPage />} />
           
-          {/* Main routes with layout */}
-          <Route
-            path="/home"
-            element={<AIHomePage />}
-          />
-          {/* Keep old home page accessible */}
-          <Route
-            path="/home-classic"
-            element={
-              <Layout>
-                <HomePage />
-              </Layout>
-            }
-          />
-          <Route
-            path="/dashboard"
-            element={
-              <Layout>
-                <DashboardPage />
-              </Layout>
-            }
-          />
-          <Route
-            path="/network"
-            element={
-              <Layout>
-                <NetworkPage />
-              </Layout>
-            }
-          />
-          <Route
-            path="/spaces"
-            element={
-              <Layout>
-                <SpacesPage />
-              </Layout>
-            }
-          />
-          <Route
-            path="/spaces/new"
-            element={
-              <Layout>
-                <CreateSpacePage />
-              </Layout>
-            }
-          />
-          <Route
-            path="/spaces/:id"
-            element={
-              <Layout>
-                <SpaceDetailPage />
-              </Layout>
-            }
-          />
-          <Route
-            path="/request/new"
-            element={
-              <Layout>
-                <NewRequestPage />
-              </Layout>
-            }
-          />
-          <Route
-            path="/request/:id"
-            element={
-              <Layout>
-                <RequestDetailPage />
-              </Layout>
-            }
-          />
-          <Route
-            path="/contact/:id"
-            element={
-              <Layout>
-                <ContactDetailPage />
-              </Layout>
-            }
-          />
-          <Route
-            path="/connect"
-            element={
-              <Layout>
-                <ConnectPage />
-              </Layout>
-            }
-          />
+          {/* Main app — single window */}
+          <Route path="/home" element={<AIHomePage />} />
+
+          {/* Redirect old routes to /home */}
+          <Route path="/dashboard" element={<Navigate to="/home" replace />} />
+          <Route path="/network" element={<Navigate to="/home" replace />} />
+          <Route path="/spaces" element={<Navigate to="/home" replace />} />
+          <Route path="/spaces/*" element={<Navigate to="/home" replace />} />
+          <Route path="/request/*" element={<Navigate to="/home" replace />} />
+          <Route path="/contact/*" element={<Navigate to="/home" replace />} />
+          <Route path="/connect" element={<Navigate to="/home" replace />} />
+          <Route path="/home-classic" element={<Navigate to="/home" replace />} />
+          <Route path="*" element={<Navigate to="/home" replace />} />
         </Routes>
       </BrowserRouter>
     </AppProvider>

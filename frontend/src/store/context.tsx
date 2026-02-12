@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useReducer, useEffect, useCallback, type ReactNode } from 'react';
 import type { AppState, AppAction } from './types';
 import { appReducer } from './reducer';
-import { authApi, usersApi, relationshipsApi, requestsApi, offersApi, calendarApi } from '../lib/api';
+import { authApi, relationshipsApi, calendarApi } from '../lib/api';
 
 const initialState: AppState = {
   isAuthenticated: false,
@@ -9,11 +9,6 @@ const initialState: AppState = {
   currentUser: null,
   currentUserId: '',
   isCalendarConnected: false,
-  relationships: [],
-  requests: [],
-  offers: [],
-  outcomes: [],
-  users: [],
   contacts: [],
   companies: [],
 };
@@ -45,12 +40,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
             payload: { isAuthenticated: true, user },
           });
 
-          // Load all data in parallel
-          const [users, relationships, requests, offers, contactsResponse, companies, calendarStatus] = await Promise.all([
-            usersApi.getAll().catch(() => []),
-            relationshipsApi.getAll().catch(() => []),
-            requestsApi.getAll().catch(() => []),
-            offersApi.getMine().catch(() => []),
+          // Load essential data in parallel
+          const [contactsResponse, companies, calendarStatus] = await Promise.all([
             relationshipsApi.getContacts({ limit: 1000 }).catch(() => ({ data: [] })),
             relationshipsApi.getCompanies().catch(() => []),
             calendarApi.getStatus().catch(() => ({ isConnected: false })),
@@ -61,10 +52,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
             ? contactsResponse 
             : (contactsResponse?.data || []);
 
-          dispatch({ type: 'SET_USERS', payload: users });
-          dispatch({ type: 'SET_RELATIONSHIPS', payload: relationships });
-          dispatch({ type: 'SET_REQUESTS', payload: requests });
-          dispatch({ type: 'SET_OFFERS', payload: offers });
           dispatch({ type: 'SET_CONTACTS', payload: contacts });
           dispatch({ type: 'SET_COMPANIES', payload: companies });
           dispatch({ type: 'SET_CALENDAR_CONNECTED', payload: calendarStatus.isConnected });
@@ -101,6 +88,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       console.error('Logout error:', error);
     }
     dispatch({ type: 'LOGOUT' });
+    window.location.href = '/login';
   }, []);
 
   const syncCalendar = useCallback(async () => {
@@ -108,9 +96,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await calendarApi.sync();
       dispatch({ type: 'SET_CALENDAR_CONNECTED', payload: true });
       
-      // Refresh relationships after sync
-      const relationships = await relationshipsApi.getAll();
-      dispatch({ type: 'SET_RELATIONSHIPS', payload: relationships });
+      // Refresh contacts & companies after sync
+      const [contactsResponse, companies] = await Promise.all([
+        relationshipsApi.getContacts({ limit: 1000 }),
+        relationshipsApi.getCompanies(),
+      ]);
+      const contacts = Array.isArray(contactsResponse)
+        ? contactsResponse
+        : (contactsResponse?.data || []);
+      dispatch({ type: 'SET_CONTACTS', payload: contacts });
+      dispatch({ type: 'SET_COMPANIES', payload: companies });
     } catch (error) {
       console.error('Calendar sync error:', error);
       throw error;
@@ -119,14 +114,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const refreshData = useCallback(async () => {
     try {
-      const [relationships, requests, offers] = await Promise.all([
-        relationshipsApi.getAll(),
-        requestsApi.getAll(),
-        offersApi.getMine(),
+      const [contactsResponse, companies] = await Promise.all([
+        relationshipsApi.getContacts({ limit: 1000 }),
+        relationshipsApi.getCompanies(),
       ]);
-      dispatch({ type: 'SET_RELATIONSHIPS', payload: relationships });
-      dispatch({ type: 'SET_REQUESTS', payload: requests });
-      dispatch({ type: 'SET_OFFERS', payload: offers });
+      const contacts = Array.isArray(contactsResponse)
+        ? contactsResponse
+        : (contactsResponse?.data || []);
+      dispatch({ type: 'SET_CONTACTS', payload: contacts });
+      dispatch({ type: 'SET_COMPANIES', payload: companies });
     } catch (error) {
       console.error('Failed to refresh data:', error);
     }

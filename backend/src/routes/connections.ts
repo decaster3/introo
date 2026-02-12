@@ -1,0 +1,314 @@
+import { Router } from 'express';
+import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
+import prisma from '../lib/prisma.js';
+
+const router = Router();
+router.use(authMiddleware);
+
+// ─── List all connections (accepted + pending) ──────────────────────────────
+
+router.get('/', async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+
+    const connections = await prisma.directConnection.findMany({
+      where: {
+        OR: [
+          { fromUserId: userId },
+          { toUserId: userId },
+        ],
+      },
+      include: {
+        fromUser: { select: { id: true, name: true, email: true, avatar: true } },
+        toUser: { select: { id: true, name: true, email: true, avatar: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Normalize: always return the "other" user as `peer`
+    const result = connections.map(c => {
+      const isFrom = c.fromUserId === userId;
+      return {
+        id: c.id,
+        status: c.status,
+        direction: isFrom ? 'sent' : 'received',
+        createdAt: c.createdAt,
+        peer: isFrom ? c.toUser : c.fromUser,
+      };
+    });
+
+    res.json(result);
+  } catch (error: any) {
+    console.error('List connections error:', error.message);
+    res.status(500).json({ error: 'Failed to list connections' });
+  }
+});
+
+// ─── Send connection request (by email) ─────────────────────────────────────
+
+router.post('/', async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+    const { email } = req.body as { email: string };
+
+    if (!email?.trim()) {
+      res.status(400).json({ error: 'Email is required' });
+      return;
+    }
+
+    // Find the target user
+    const targetUser = await prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
+    if (!targetUser) {
+      res.status(404).json({ error: 'User not found. They need to sign up first.' });
+      return;
+    }
+
+    if (targetUser.id === userId) {
+      res.status(400).json({ error: 'Cannot connect with yourself' });
+      return;
+    }
+
+    // Check if connection already exists (in either direction)
+    const existing = await prisma.directConnection.findFirst({
+      where: {
+        OR: [
+          { fromUserId: userId, toUserId: targetUser.id },
+          { fromUserId: targetUser.id, toUserId: userId },
+        ],
+      },
+    });
+
+    if (existing) {
+      if (existing.status === 'accepted') {
+        res.status(409).json({ error: 'Already connected' });
+        return;
+      }
+      if (existing.status === 'pending') {
+        // If they sent us a request, auto-accept it
+        if (existing.fromUserId === targetUser.id) {
+          const updated = await prisma.directConnection.update({
+            where: { id: existing.id },
+            data: { status: 'accepted' },
+            include: {
+              fromUser: { select: { id: true, name: true, email: true, avatar: true } },
+              toUser: { select: { id: true, name: true, email: true, avatar: true } },
+            },
+          });
+          res.json({ id: updated.id, status: 'accepted', peer: updated.fromUser, autoAccepted: true });
+          return;
+        }
+        res.status(409).json({ error: 'Connection request already pending' });
+        return;
+      }
+      // If rejected, allow re-request by updating
+      await prisma.directConnection.update({
+        where: { id: existing.id },
+        data: { status: 'pending', fromUserId: userId, toUserId: targetUser.id },
+      });
+      res.json({ id: existing.id, status: 'pending', peer: { id: targetUser.id, name: targetUser.name, email: targetUser.email, avatar: targetUser.avatar } });
+      return;
+    }
+
+    // Create new connection
+    const connection = await prisma.directConnection.create({
+      data: { fromUserId: userId, toUserId: targetUser.id },
+      include: {
+        toUser: { select: { id: true, name: true, email: true, avatar: true } },
+      },
+    });
+
+    res.json({
+      id: connection.id,
+      status: 'pending',
+      peer: connection.toUser,
+    });
+  } catch (error: any) {
+    console.error('Send connection error:', error.message);
+    res.status(500).json({ error: 'Failed to send connection request' });
+  }
+});
+
+// ─── Accept connection ──────────────────────────────────────────────────────
+
+router.post('/:id/accept', async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+
+    const connection = await prisma.directConnection.findFirst({
+      where: { id: req.params.id, toUserId: userId, status: 'pending' },
+    });
+
+    if (!connection) {
+      res.status(404).json({ error: 'Connection request not found' });
+      return;
+    }
+
+    const updated = await prisma.directConnection.update({
+      where: { id: connection.id },
+      data: { status: 'accepted' },
+      include: {
+        fromUser: { select: { id: true, name: true, email: true, avatar: true } },
+      },
+    });
+
+    res.json({ id: updated.id, status: 'accepted', peer: updated.fromUser });
+  } catch (error: any) {
+    console.error('Accept connection error:', error.message);
+    res.status(500).json({ error: 'Failed to accept connection' });
+  }
+});
+
+// ─── Reject connection ──────────────────────────────────────────────────────
+
+router.post('/:id/reject', async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+
+    const connection = await prisma.directConnection.findFirst({
+      where: { id: req.params.id, toUserId: userId, status: 'pending' },
+    });
+
+    if (!connection) {
+      res.status(404).json({ error: 'Connection request not found' });
+      return;
+    }
+
+    await prisma.directConnection.update({
+      where: { id: connection.id },
+      data: { status: 'rejected' },
+    });
+
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Reject connection error:', error.message);
+    res.status(500).json({ error: 'Failed to reject connection' });
+  }
+});
+
+// ─── Remove connection ──────────────────────────────────────────────────────
+
+router.delete('/:id', async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+
+    const connection = await prisma.directConnection.findFirst({
+      where: {
+        id: req.params.id,
+        OR: [{ fromUserId: userId }, { toUserId: userId }],
+      },
+    });
+
+    if (!connection) {
+      res.status(404).json({ error: 'Connection not found' });
+      return;
+    }
+
+    await prisma.directConnection.delete({ where: { id: connection.id } });
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Remove connection error:', error.message);
+    res.status(500).json({ error: 'Failed to remove connection' });
+  }
+});
+
+// ─── Get connected user's shared contacts (reach) ───────────────────────────
+
+router.get('/:id/reach', async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+
+    // Verify it's an accepted connection
+    const connection = await prisma.directConnection.findFirst({
+      where: {
+        id: req.params.id,
+        status: 'accepted',
+        OR: [{ fromUserId: userId }, { toUserId: userId }],
+      },
+      include: {
+        fromUser: { select: { id: true, name: true } },
+        toUser: { select: { id: true, name: true } },
+      },
+    });
+
+    if (!connection) {
+      res.status(404).json({ error: 'Connection not found or not accepted' });
+      return;
+    }
+
+    const peerId = connection.fromUserId === userId ? connection.toUserId : connection.fromUserId;
+    const peerName = connection.fromUserId === userId ? connection.toUser.name : connection.fromUser.name;
+
+    // Get peer's approved contacts grouped by company
+    const contacts = await prisma.contact.findMany({
+      where: {
+        userId: peerId,
+        isApproved: true,
+        companyId: { not: null },
+      },
+      include: {
+        company: true,
+      },
+    });
+
+    // Aggregate by company
+    const companyMap = new Map<string, {
+      id: string;
+      name: string;
+      domain: string;
+      industry: string | null;
+      sizeBucket: string | null;
+      logo: string | null;
+      contactCount: number;
+      contacts: {
+        id: string;
+        name: string;
+        email: string;
+        title: string | null;
+        userId: string;
+        userName: string;
+      }[];
+    }>();
+
+    for (const contact of contacts) {
+      if (!contact.company) continue;
+
+      const contactInfo = {
+        id: contact.id,
+        name: contact.name || contact.email.split('@')[0],
+        email: contact.email,
+        title: contact.title,
+        userId: peerId,
+        userName: peerName,
+      };
+
+      const existing = companyMap.get(contact.company.id);
+      if (existing) {
+        existing.contacts.push(contactInfo);
+        existing.contactCount++;
+      } else {
+        companyMap.set(contact.company.id, {
+          id: contact.company.id,
+          name: contact.company.name,
+          domain: contact.company.domain,
+          industry: contact.company.industry,
+          sizeBucket: contact.company.sizeBucket,
+          logo: contact.company.logo,
+          contactCount: 1,
+          contacts: [contactInfo],
+        });
+      }
+    }
+
+    res.json({
+      connectionId: connection.id,
+      peerId,
+      peerName,
+      companies: Array.from(companyMap.values()).sort((a, b) => b.contactCount - a.contactCount),
+    });
+  } catch (error: any) {
+    console.error('Connection reach error:', error.message);
+    res.status(500).json({ error: 'Failed to fetch connection reach' });
+  }
+});
+
+export default router;

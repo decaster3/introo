@@ -14,6 +14,9 @@ import offersRoutes from './routes/offers.js';
 import relationshipsRoutes from './routes/relationships.js';
 import spacesRoutes from './routes/spaces.js';
 import signalsRoutes from './routes/signals.js';
+import enrichmentRoutes from './routes/enrichment.js';
+import connectionsRoutes from './routes/connections.js';
+import aiRoutes from './routes/ai.js';
 import prisma from './lib/prisma.js';
 
 const app = express();
@@ -21,7 +24,7 @@ const PORT = process.env.PORT || 3001;
 
 // Environment variable validation
 const requiredEnvVars = ['DATABASE_URL'];
-const recommendedEnvVars = ['JWT_SECRET', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'FRONTEND_URL'];
+const recommendedEnvVars = ['JWT_SECRET', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'FRONTEND_URL', 'APOLLO_API_KEY', 'OPENAI_API_KEY'];
 
 for (const envVar of requiredEnvVars) {
   if (!process.env[envVar]) {
@@ -89,6 +92,9 @@ app.use('/api/offers', offersRoutes);
 app.use('/api/relationships', relationshipsRoutes);
 app.use('/api/spaces', spacesRoutes);
 app.use('/api/signals', signalsRoutes);
+app.use('/api/enrichment', enrichmentRoutes);
+app.use('/api/connections', connectionsRoutes);
+app.use('/api/ai', aiRoutes);
 
 // Health check with database connectivity
 app.get('/health', async (req, res) => {

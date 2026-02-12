@@ -2,13 +2,6 @@ import type {
   User,
   Company,
   Contact,
-  RelationshipWithDetails,
-  IntroRequest,
-  IntroRequestWithDetails,
-  IntroOffer,
-  IntroOfferWithDetails,
-  NormalizedQuery,
-  CreateIntroRequest,
 } from '../types';
 
 // Re-export types for convenience
@@ -16,13 +9,6 @@ export type {
   User,
   Company,
   Contact,
-  RelationshipWithDetails,
-  IntroRequest,
-  IntroRequestWithDetails,
-  IntroOffer,
-  IntroOfferWithDetails,
-  NormalizedQuery,
-  CreateIntroRequest,
 };
 
 export const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -56,13 +42,6 @@ export const authApi = {
   getGoogleAuthUrl: () => `${API_BASE}/auth/google`,
 };
 
-// Users
-export const usersApi = {
-  getAll: () => request<User[]>('/api/users'),
-  getById: (id: string) => request<User>(`/api/users/${id}`),
-  getMyStats: () => request<{ connections: number; asks: number; introsMade: number }>('/api/users/me/stats'),
-};
-
 // Calendar
 export const calendarApi = {
   sync: () => request<{ success: boolean; contactsFound: number; companiesFound: number; relationshipsCreated: number }>('/api/calendar/sync', { method: 'POST' }),
@@ -71,8 +50,6 @@ export const calendarApi = {
 
 // Relationships
 export const relationshipsApi = {
-  getAll: () => request<RelationshipWithDetails[]>('/api/relationships'),
-  getMine: () => request<RelationshipWithDetails[]>('/api/relationships/mine'),
   getCompanies: () => request<Company[]>('/api/relationships/companies'),
   getContacts: (options?: { limit?: number; page?: number; approved?: boolean }) => {
     const params = new URLSearchParams();
@@ -82,34 +59,6 @@ export const relationshipsApi = {
     const query = params.toString() ? `?${params.toString()}` : '';
     return request<{ data: Contact[]; pagination: { total: number } }>(`/api/relationships/contacts${query}`);
   },
-};
-
-// Requests
-export const requestsApi = {
-  getAll: () => request<IntroRequestWithDetails[]>('/api/requests'),
-  getById: (id: string) => request<IntroRequestWithDetails>(`/api/requests/${id}`),
-  getMine: () => request<IntroRequestWithDetails[]>('/api/requests/user/mine'),
-  create: (data: CreateIntroRequest) => request<IntroRequestWithDetails>('/api/requests', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  }),
-  updateStatus: (id: string, status: string) => request<IntroRequest>(`/api/requests/${id}/status`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status }),
-  }),
-};
-
-// Offers
-export const offersApi = {
-  create: (data: { requestId: string; message: string }) => request<IntroOffer>('/api/offers', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  }),
-  updateStatus: (id: string, status: 'accepted' | 'rejected') => request<IntroOffer>(`/api/offers/${id}/status`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status }),
-  }),
-  getMine: () => request<IntroOfferWithDetails[]>('/api/offers/mine'),
 };
 
 // Spaces
@@ -147,73 +96,35 @@ export const spacesApi = {
   removeMember: (spaceId: string, memberId: string) => request<{ success: boolean }>(`/api/spaces/${spaceId}/members/${memberId}`, {
     method: 'DELETE',
   }),
-  
-  // Request management
-  deleteRequest: (spaceId: string, requestId: string) => request<{ success: boolean }>(`/api/spaces/${spaceId}/requests/${requestId}`, {
-    method: 'DELETE',
-  }),
 };
 
-// Signals
-export const signalsApi = {
-  getAll: () => request<Signal[]>('/api/signals'),
-  create: (data: CreateSignal) => request<Signal>('/api/signals', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  }),
-  delete: (id: string) => request<{ success: boolean }>(`/api/signals/${id}`, {
-    method: 'DELETE',
-  }),
-  toggle: (id: string, isActive: boolean) => request<Signal>(`/api/signals/${id}/toggle`, {
-    method: 'POST',
-    body: JSON.stringify({ isActive }),
-  }),
-  getMatches: () => request<SignalMatch[]>('/api/signals/matches'),
-  markMatchAsRead: (matchId: string) => request<SignalMatch>(`/api/signals/matches/${matchId}/read`, {
-    method: 'POST',
-  }),
-  markAllAsRead: () => request<{ success: boolean }>('/api/signals/matches/read-all', {
-    method: 'POST',
-  }),
+// Enrichment
+export interface EnrichmentStats {
+  contacts: { total: number; enriched: number };
+  companies: { total: number; enriched: number };
+}
+
+export interface EnrichmentProgress {
+  total: number;
+  enriched: number;
+  skipped: number;
+  errors: number;
+  done: boolean;
+}
+
+export const enrichmentApi = {
+  getStatus: () => request<EnrichmentStats>('/api/enrichment/status'),
+  getProgress: () => request<{
+    contacts: EnrichmentProgress | null;
+    companies: EnrichmentProgress | null;
+    contactsFree: EnrichmentProgress | null;
+  }>('/api/enrichment/progress'),
+  // FREE enrichment — uses mixed_people/api_search, 0 credits
+  enrichContactsFree: () =>
+    request<{ message: string; key: string }>('/api/enrichment/contacts-free', {
+      method: 'POST',
+    }),
 };
-
-// Signal types
-export interface Signal {
-  id: string;
-  name: string;
-  description?: string;
-  entityType: 'contact' | 'company';
-  triggerType: string;
-  config: Record<string, unknown>;
-  isActive: boolean;
-  createdAt: string;
-}
-
-export interface CreateSignal {
-  name: string;
-  description?: string;
-  entityType: 'contact' | 'company';
-  triggerType: string;
-  config?: Record<string, unknown>;
-}
-
-export interface SignalMatch {
-  id: string;
-  signalId: string;
-  entityType: 'contact' | 'company';
-  entityId: string;
-  summary: string;
-  data: Record<string, unknown>;
-  isRead: boolean;
-  matchedAt: string;
-  signal: {
-    id: string;
-    name: string;
-    entityType: string;
-    triggerType: string;
-  };
-  entity: unknown;
-}
 
 // Additional types for API responses
 export interface Space {
@@ -225,7 +136,6 @@ export interface Space {
   inviteCode: string;
   ownerId: string;
   members: SpaceMember[];
-  requests?: SpaceRequest[];
   pendingCount?: number;
 }
 
@@ -239,32 +149,6 @@ export interface SpaceMember {
     email: string;
     avatar: string | null;
   };
-}
-
-export interface SpaceRequest {
-  id: string;
-  requesterId: string;
-  rawText: string;
-  normalizedQuery: NormalizedQuery;
-  bidAmount: number;
-  status: string;
-  createdAt: string;
-  requester: {
-    id: string;
-    name: string;
-    email: string;
-    avatar: string | null;
-  };
-  offers: {
-    id: string;
-    introducerId: string;
-    status: string;
-    introducer: {
-      id: string;
-      name: string;
-      avatar: string | null;
-    };
-  }[];
 }
 
 export interface SpaceCompany {

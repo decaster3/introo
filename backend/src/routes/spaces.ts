@@ -45,6 +45,35 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Get spaces where current user has a pending membership request
+router.get('/my-pending', async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+
+    const pendingMemberships = await prisma.spaceMember.findMany({
+      where: { userId, status: 'pending' },
+      include: {
+        space: {
+          select: { id: true, name: true, emoji: true, isPrivate: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    res.json(pendingMemberships.map(m => ({
+      id: m.space.id,
+      name: m.space.name,
+      emoji: m.space.emoji,
+      isPrivate: m.space.isPrivate,
+      membershipId: m.id,
+      appliedAt: m.createdAt,
+    })));
+  } catch (error: unknown) {
+    console.error('Error fetching pending spaces:', error);
+    res.status(500).json({ error: 'Failed to fetch pending spaces' });
+  }
+});
+
 // Get single space by ID
 router.get('/:id', async (req, res) => {
   try {

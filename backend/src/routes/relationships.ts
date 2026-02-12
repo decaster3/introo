@@ -34,9 +34,7 @@ router.get('/mine', authMiddleware, async (req, res) => {
     const relationships = await prisma.relationship.findMany({
       where: { userId },
       include: {
-        company: {
-          select: { id: true, domain: true, name: true, industry: true, logo: true, geo: true },
-        },
+        company: true,
       },
       orderBy: { strengthScore: 'desc' },
     });
@@ -112,9 +110,7 @@ router.get('/contacts', authMiddleware, async (req, res) => {
       prisma.contact.findMany({
         where,
         include: {
-          company: {
-            select: { id: true, domain: true, name: true, logo: true },
-          },
+          company: true,
           meetings: {
             orderBy: { date: 'desc' },
             take: 5,
