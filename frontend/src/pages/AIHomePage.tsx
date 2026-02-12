@@ -4,36 +4,8 @@ import { useAppState } from '../store';
 import { API_BASE } from '../lib/api';
 import { calculateStrength } from '../types';
 import { PromptBar } from '../components/PromptBar';
-import { SuggestionCard } from '../components/SuggestionCard';
 import { CommandPalette } from '../components/CommandPalette';
-import { NetworkView } from '../components/NetworkView';
-
-interface Suggestion {
-  id: string;
-  type: 'help_opportunity' | 'reconnect' | 'pending_ask' | 'ai_insight' | 'network_insight';
-  title: string;
-  description: string;
-  context?: string;
-  primaryAction: {
-    label: string;
-    onClick: () => void;
-  };
-  secondaryAction?: {
-    label: string;
-    onClick: () => void;
-  };
-  person?: {
-    name: string;
-    email?: string;
-    avatar?: string | null;
-    company?: string;
-  };
-  metadata?: {
-    strength?: 'strong' | 'medium' | 'weak';
-    timeAgo?: string;
-    count?: number;
-  };
-}
+import { PersonAvatar, CompanyLogo } from '../components';
 
 interface SpaceCompany {
   id: string;
@@ -58,24 +30,43 @@ interface Space {
   memberCount?: number;
 }
 
-type ViewMode = 'home' | 'my-network' | 'space-reach' | 'search-results';
+interface DisplayContact {
+  id: string;
+  name: string;
+  email: string;
+  title: string;
+  company: string;
+  companyDomain: string;
+  lastSeenAt: string;
+  meetingsCount: number;
+  connectionStrength: 'strong' | 'medium' | 'weak';
+}
+
+interface Company {
+  domain: string;
+  name: string;
+  contacts: DisplayContact[];
+  contactCount: number;
+  hasStrongConnection: boolean;
+}
 
 export function AIHomePage() {
   const navigate = useNavigate();
-  const { currentUser, contacts: storeContacts, requests, users } = useAppState();
+  const { currentUser, contacts: storeContacts } = useAppState();
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [promptValue, setPromptValue] = useState('');
-  const [viewMode, setViewMode] = useState<ViewMode>('home');
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeNetworkTab, setActiveNetworkTab] = useState<'mine' | 'spaces'>('mine');
+  const [expandedCompany, setExpandedCompany] = useState<string | null>(null);
   
   // Space data
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [spaceCompanies, setSpaceCompanies] = useState<SpaceCompany[]>([]);
-  const [loadingSpaces, setLoadingSpaces] = useState(false);
+  const [loadingSpaces, setLoadingSpaces] = useState(true);
 
   // Transform contacts for display
-  const contacts = useMemo(() => {
+  const contacts: DisplayContact[] = useMemo(() => {
     return storeContacts
       .filter(c => c.isApproved)
       .map(c => ({
@@ -91,8 +82,41 @@ export function AIHomePage() {
       }));
   }, [storeContacts]);
 
+  // Group contacts by company
+  const myCompanies = useMemo((): Company[] => {
+    const companyMap = new Map<string, Company>();
+    
+    contacts.forEach(contact => {
+      const domain = contact.companyDomain || 'unknown';
+      if (!companyMap.has(domain)) {
+        companyMap.set(domain, {
+          domain,
+          name: contact.company || domain,
+          contacts: [],
+          contactCount: 0,
+          hasStrongConnection: false,
+        });
+      }
+      const company = companyMap.get(domain)!;
+      company.contacts.push(contact);
+      company.contactCount++;
+      if (contact.connectionStrength === 'strong') {
+        company.hasStrongConnection = true;
+      }
+    });
+
+    return Array.from(companyMap.values())
+      .sort((a, b) => {
+        if (a.hasStrongConnection !== b.hasStrongConnection) {
+          return a.hasStrongConnection ? -1 : 1;
+        }
+        return b.contactCount - a.contactCount;
+      });
+  }, [contacts]);
+
   // Fetch spaces on mount
   useEffect(() => {
+    setLoadingSpaces(true);
     fetch(`${API_BASE}/api/spaces`, { credentials: 'include' })
       .then(res => res.json())
       .then(data => {
@@ -105,15 +129,13 @@ export function AIHomePage() {
           })));
         }
       })
-      .catch(console.error);
+      .catch(console.error)
+      .finally(() => setLoadingSpaces(false));
   }, []);
 
-  // Fetch space companies when viewing space reach
+  // Fetch space companies
   useEffect(() => {
-    if (viewMode === 'space-reach' && spaces.length > 0) {
-      setLoadingSpaces(true);
-      
-      // Fetch companies from all spaces
+    if (spaces.length > 0) {
       Promise.all(
         spaces.map(space =>
           fetch(`${API_BASE}/api/spaces/${space.id}/reach`, { credentials: 'include' })
@@ -121,7 +143,6 @@ export function AIHomePage() {
             .catch(() => ({ companies: [] }))
         )
       ).then(results => {
-        // Merge companies from all spaces
         const companyMap = new Map<string, SpaceCompany>();
         
         results.forEach(result => {
@@ -129,7 +150,6 @@ export function AIHomePage() {
             if (!companyMap.has(company.domain)) {
               companyMap.set(company.domain, company);
             } else {
-              // Merge contacts
               const existing = companyMap.get(company.domain)!;
               const existingEmails = new Set(existing.contacts.map(c => c.email));
               company.contacts.forEach(contact => {
@@ -146,159 +166,36 @@ export function AIHomePage() {
           Array.from(companyMap.values())
             .sort((a, b) => b.contactCount - a.contactCount)
         );
-        setLoadingSpaces(false);
       });
     }
-  }, [viewMode, spaces]);
+  }, [spaces]);
 
-  // Transform space companies for NetworkView
-  const networkSpaceCompanies = useMemo(() => {
-    return spaceCompanies.map(company => ({
-      domain: company.domain,
-      name: company.name,
-      contactCount: company.contactCount,
-      hasStrongConnection: false, // Could compute from data
-      contacts: company.contacts.map(c => ({
-        id: c.id,
-        name: c.name,
-        email: c.email,
-        title: c.title,
-        company: company.name,
-        companyDomain: company.domain,
-        connectionStrength: 'medium' as const,
-        userId: c.userId,
-        userName: c.userName,
-      })),
-    }));
-  }, [spaceCompanies]);
+  // Filter companies based on search
+  const filteredMyCompanies = useMemo(() => {
+    if (!searchQuery) return myCompanies;
+    const q = searchQuery.toLowerCase();
+    return myCompanies.filter(c => 
+      c.name.toLowerCase().includes(q) ||
+      c.domain.toLowerCase().includes(q) ||
+      c.contacts.some(contact => 
+        contact.name.toLowerCase().includes(q) ||
+        contact.title?.toLowerCase().includes(q)
+      )
+    );
+  }, [myCompanies, searchQuery]);
 
-  // Generate AI suggestions based on data
-  const suggestions = useMemo((): Suggestion[] => {
-    const items: Suggestion[] = [];
-
-    // Network insight - show if user has a good network
-    if (contacts.length > 0 && viewMode === 'home') {
-      const strongCount = contacts.filter(c => c.connectionStrength === 'strong').length;
-      const companyCount = new Set(contacts.map(c => c.companyDomain)).size;
-      
-      items.push({
-        id: 'network-insight',
-        type: 'network_insight',
-        title: `Your network spans ${companyCount} companies`,
-        description: `${strongCount} strong connections, ${contacts.length} total contacts`,
-        context: spaces.length > 0 
-          ? `Plus ${spaces.length} space${spaces.length > 1 ? 's' : ''} with combined reach`
-          : 'Join a space to expand your reach',
-        primaryAction: {
-          label: 'View my network',
-          onClick: () => setViewMode('my-network'),
-        },
-        secondaryAction: spaces.length > 0 ? {
-          label: 'View space reach',
-          onClick: () => setViewMode('space-reach'),
-        } : undefined,
-        metadata: {
-          count: companyCount,
-        },
-      });
-    }
-
-    // 1. Help opportunities - requests from others that match your network
-    const otherRequests = requests.filter(r => r.requesterId !== currentUser?.id && r.status === 'open');
-    
-    otherRequests.slice(0, 3).forEach(request => {
-      const requester = request.requester ?? users.find(u => u.id === request.requesterId);
-      const targetDomain = request.normalizedQuery?.targetDomain;
-      const matchingContacts = targetDomain 
-        ? contacts.filter(c => c.companyDomain === targetDomain)
-        : [];
-
-      if (matchingContacts.length > 0) {
-        items.push({
-          id: `help-${request.id}`,
-          type: 'help_opportunity',
-          title: `${requester?.name || 'Someone'} needs an intro`,
-          description: request.rawText,
-          context: `You know ${matchingContacts.length} ${matchingContacts.length === 1 ? 'person' : 'people'} at ${request.normalizedQuery?.targetCompany || 'this company'}`,
-          person: requester ? {
-            name: requester.name,
-            email: requester.email,
-            avatar: requester.avatar,
-          } : undefined,
-          primaryAction: {
-            label: 'Offer to help',
-            onClick: () => navigate(`/request/${request.id}`),
-          },
-          secondaryAction: {
-            label: 'Not now',
-            onClick: () => dismissSuggestion(`help-${request.id}`),
-          },
-          metadata: {
-            strength: matchingContacts[0].connectionStrength,
-            count: matchingContacts.length,
-          },
-        });
-      }
-    });
-
-    // 2. Reconnect suggestions - contacts you haven't talked to in a while
-    const staleContacts = contacts
-      .filter(c => {
-        const daysSince = Math.floor((Date.now() - new Date(c.lastSeenAt).getTime()) / (1000 * 60 * 60 * 24));
-        return daysSince > 30 && c.connectionStrength !== 'weak';
-      })
-      .slice(0, 2);
-
-    staleContacts.forEach(contact => {
-      const daysSince = Math.floor((Date.now() - new Date(contact.lastSeenAt).getTime()) / (1000 * 60 * 60 * 24));
-      items.push({
-        id: `reconnect-${contact.id}`,
-        type: 'reconnect',
-        title: `Reconnect with ${contact.name}`,
-        description: `${contact.title}${contact.company ? ` at ${contact.company}` : ''}`,
-        context: `Last connected ${daysSince} days ago`,
-        person: {
-          name: contact.name,
-          email: contact.email,
-          company: contact.company,
-        },
-        primaryAction: {
-          label: 'Reach out',
-          onClick: () => handleReconnect(contact.email),
-        },
-        secondaryAction: {
-          label: 'Remind me later',
-          onClick: () => dismissSuggestion(`reconnect-${contact.id}`),
-        },
-        metadata: {
-          strength: contact.connectionStrength,
-          timeAgo: `${daysSince}d`,
-        },
-      });
-    });
-
-    // 3. Pending asks - your open requests
-    const myOpenRequests = requests.filter(r => r.requesterId === currentUser?.id && r.status === 'open');
-    
-    if (myOpenRequests.length > 0) {
-      items.push({
-        id: 'pending-asks',
-        type: 'pending_ask',
-        title: `Your pending asks`,
-        description: myOpenRequests.map(r => r.normalizedQuery?.targetCompany || r.rawText.slice(0, 50)).join(', '),
-        context: `${myOpenRequests.length} active ${myOpenRequests.length === 1 ? 'request' : 'requests'}`,
-        primaryAction: {
-          label: 'View all',
-          onClick: () => navigate('/dashboard'),
-        },
-        metadata: {
-          count: myOpenRequests.length,
-        },
-      });
-    }
-
-    return items;
-  }, [requests, contacts, users, currentUser, spaces, viewMode, navigate]);
+  const filteredSpaceCompanies = useMemo(() => {
+    if (!searchQuery) return spaceCompanies;
+    const q = searchQuery.toLowerCase();
+    return spaceCompanies.filter(c => 
+      c.name.toLowerCase().includes(q) ||
+      c.domain.toLowerCase().includes(q) ||
+      c.contacts.some(contact => 
+        contact.name.toLowerCase().includes(q) ||
+        contact.title?.toLowerCase().includes(q)
+      )
+    );
+  }, [spaceCompanies, searchQuery]);
 
   // Keyboard shortcut for command palette
   useEffect(() => {
@@ -308,78 +205,48 @@ export function AIHomePage() {
         setIsCommandPaletteOpen(true);
       }
       if (e.key === 'Escape') {
-        if (viewMode !== 'home') {
-          setViewMode('home');
-          setSearchQuery('');
-        } else {
-          setIsCommandPaletteOpen(false);
-        }
+        setIsCommandPaletteOpen(false);
+        setSearchQuery('');
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [viewMode]);
+  }, []);
 
-  // Handle prompt submission - parse intent
   const handlePromptSubmit = useCallback(async (query: string) => {
     setIsProcessing(true);
-    
     const lowerQuery = query.toLowerCase();
     
-    // Parse user intent
-    if (lowerQuery.includes('my network') || lowerQuery.includes('my contacts') || lowerQuery.includes('who do i know')) {
-      setViewMode('my-network');
-      setSearchQuery('');
-    } else if (lowerQuery.includes('space') && (lowerQuery.includes('reach') || lowerQuery.includes('network'))) {
-      setViewMode('space-reach');
-      setSearchQuery('');
-    } else if (lowerQuery.startsWith('who') || lowerQuery.startsWith('find') || lowerQuery.startsWith('search')) {
-      // Extract search term
-      const searchTerm = query
-        .replace(/^(who do i know at|who do i know|find|search for|search|show me)\s*/i, '')
-        .replace(/[?]/g, '')
-        .trim();
-      
-      if (searchTerm) {
-        setSearchQuery(searchTerm);
-        setViewMode('search-results');
-      }
-    } else if (lowerQuery.includes('intro') || lowerQuery.includes('meet')) {
-      // Request intro flow
+    if (lowerQuery.includes('intro') || lowerQuery.includes('meet') || lowerQuery.includes('need')) {
       navigate('/request/new');
     } else {
-      // Default to search
       setSearchQuery(query);
-      setViewMode('search-results');
     }
     
     setIsProcessing(false);
     setPromptValue('');
   }, [navigate]);
 
-  const handleReconnect = (email: string) => {
-    window.open(`mailto:${email}?subject=Hey!&body=Hi! Just wanted to reconnect...`, '_blank');
+  const handleContactClick = (contactId: string) => {
+    navigate(`/contact/${contactId}`);
   };
 
-  const dismissSuggestion = (id: string) => {
-    console.log('Dismissed:', id);
+  const handleRequestIntro = (companyName: string, domain: string) => {
+    navigate(`/request/new?company=${encodeURIComponent(companyName)}&domain=${encodeURIComponent(domain)}`);
   };
 
-  const handleContactClick = (contact: { id: string }) => {
-    navigate(`/contact/${contact.id}`);
+  // Stats
+  const myNetworkStats = {
+    companies: myCompanies.length,
+    contacts: contacts.length,
+    strong: contacts.filter(c => c.connectionStrength === 'strong').length,
   };
 
-  const handleRequestIntro = (company: { name: string; domain: string }) => {
-    navigate(`/request/new?company=${encodeURIComponent(company.name)}&domain=${encodeURIComponent(company.domain)}`);
-  };
-
-  // Get placeholder text based on view
-  const getPlaceholder = () => {
-    if (viewMode === 'my-network' || viewMode === 'space-reach') {
-      return 'Search companies or people...';
-    }
-    return 'Who do you want to meet? Try "show my network" or "space reach"';
+  const spaceNetworkStats = {
+    companies: spaceCompanies.length,
+    contacts: spaceCompanies.reduce((sum, c) => sum + c.contactCount, 0),
+    spaces: spaces.length,
   };
 
   return (
@@ -388,144 +255,241 @@ export function AIHomePage() {
       <div className="ai-home-ambient" />
       
       {/* Main content */}
-      <div className="ai-home-content">
-        {/* Hero section with prompt */}
-        <div className={`ai-home-hero ${viewMode !== 'home' ? 'compact' : ''}`}>
-          {viewMode === 'home' && (
-            <>
-              <h1 className="ai-home-greeting">
-                {getGreeting()}, {currentUser?.name?.split(' ')[0] || 'there'}
-              </h1>
-              <p className="ai-home-subtitle">
-                Who do you want to meet today?
-              </p>
-            </>
-          )}
+      <div className="ai-home-content ai-home-content--full">
+        {/* Compact header with prompt */}
+        <div className="ai-home-header">
+          <div className="ai-home-brand">
+            <h1 className="ai-home-title">
+              {getGreeting()}, {currentUser?.name?.split(' ')[0] || 'there'}
+            </h1>
+            <button 
+              className="shortcut-btn"
+              onClick={() => setIsCommandPaletteOpen(true)}
+            >
+              <kbd>⌘K</kbd>
+            </button>
+          </div>
           
           <PromptBar
-            value={viewMode !== 'home' ? searchQuery : promptValue}
-            onChange={viewMode !== 'home' ? setSearchQuery : setPromptValue}
+            value={searchQuery || promptValue}
+            onChange={(v) => {
+              setPromptValue(v);
+              setSearchQuery(v);
+            }}
             onSubmit={handlePromptSubmit}
             isProcessing={isProcessing}
-            placeholder={getPlaceholder()}
+            placeholder="Search companies, people, or ask for an intro..."
           />
-          
-          {viewMode === 'home' ? (
-            <div className="ai-home-shortcuts">
-              <button 
-                className="shortcut-hint"
-                onClick={() => setIsCommandPaletteOpen(true)}
-              >
-                <kbd>⌘</kbd><kbd>K</kbd>
-                <span>to search anything</span>
-              </button>
-            </div>
-          ) : (
-            <div className="ai-home-back">
-              <button 
-                className="back-button"
-                onClick={() => { setViewMode('home'); setSearchQuery(''); }}
-              >
-                ← Back to home
-              </button>
-              
-              {/* View mode tabs */}
-              <div className="view-mode-tabs">
-                <button 
-                  className={`view-mode-tab ${viewMode === 'my-network' ? 'active' : ''}`}
-                  onClick={() => setViewMode('my-network')}
-                >
-                  👤 My Network
-                </button>
-                {spaces.length > 0 && (
-                  <button 
-                    className={`view-mode-tab ${viewMode === 'space-reach' ? 'active' : ''}`}
-                    onClick={() => setViewMode('space-reach')}
-                  >
-                    🌐 Space Reach
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* Network View (when not in home mode) */}
-        {viewMode !== 'home' && (
-          <NetworkView
-            contacts={contacts}
-            spaceCompanies={networkSpaceCompanies}
-            spaces={spaces.map(s => ({
-              ...s,
-              contactCount: 0,
-              companyCount: spaceCompanies.length,
-            }))}
-            isLoading={loadingSpaces}
-            searchQuery={searchQuery}
-            viewMode={viewMode === 'search-results' ? 'my-network' : viewMode}
-            onContactClick={handleContactClick}
-            onRequestIntro={handleRequestIntro}
-          />
-        )}
+        {/* Network Section */}
+        <div className="network-section">
+          {/* Tabs */}
+          <div className="network-section-header">
+            <div className="network-section-tabs">
+              <button 
+                className={`network-section-tab ${activeNetworkTab === 'mine' ? 'active' : ''}`}
+                onClick={() => setActiveNetworkTab('mine')}
+              >
+                <span className="tab-icon">👤</span>
+                <span className="tab-label">My Network</span>
+                <span className="tab-count">{myNetworkStats.companies}</span>
+              </button>
+              <button 
+                className={`network-section-tab ${activeNetworkTab === 'spaces' ? 'active' : ''}`}
+                onClick={() => setActiveNetworkTab('spaces')}
+              >
+                <span className="tab-icon">🌐</span>
+                <span className="tab-label">Space Reach</span>
+                <span className="tab-count">{spaceNetworkStats.companies}</span>
+              </button>
+            </div>
+            
+            <div className="network-section-stats">
+              {activeNetworkTab === 'mine' ? (
+                <>
+                  <span>{myNetworkStats.contacts} people</span>
+                  <span className="stat-separator">•</span>
+                  <span className="stat-highlight">{myNetworkStats.strong} strong</span>
+                </>
+              ) : (
+                <>
+                  <span>{spaceNetworkStats.contacts} people</span>
+                  <span className="stat-separator">•</span>
+                  <span>{spaceNetworkStats.spaces} spaces</span>
+                </>
+              )}
+            </div>
+          </div>
 
-        {/* AI-driven feed (only in home mode) */}
-        {viewMode === 'home' && (
-          <div className="ai-home-feed">
-            {suggestions.length > 0 ? (
-              <>
-                <div className="feed-section-header">
-                  <span className="feed-section-icon">✨</span>
-                  <span>Suggested for you</span>
+          {/* Space pills when viewing space reach */}
+          {activeNetworkTab === 'spaces' && spaces.length > 0 && (
+            <div className="space-pills">
+              {spaces.map(space => (
+                <span key={space.id} className="space-pill">
+                  {space.emoji} {space.name}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Companies grid */}
+          <div className="network-grid">
+            {activeNetworkTab === 'mine' ? (
+              filteredMyCompanies.length === 0 ? (
+                <div className="network-empty-state">
+                  {searchQuery ? (
+                    <>
+                      <span className="empty-icon">🔍</span>
+                      <span>No companies match "{searchQuery}"</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="empty-icon">📅</span>
+                      <span>Connect your calendar to see your network</span>
+                      <button className="btn-primary" onClick={() => navigate('/connect')}>
+                        Connect Calendar
+                      </button>
+                    </>
+                  )}
                 </div>
-                
-                <div className="suggestion-list">
-                  {suggestions.map(suggestion => (
-                    <SuggestionCard key={suggestion.id} suggestion={suggestion} />
-                  ))}
-                </div>
-              </>
+              ) : (
+                filteredMyCompanies.slice(0, 50).map(company => (
+                  <div 
+                    key={company.domain} 
+                    className={`company-card ${expandedCompany === company.domain ? 'expanded' : ''}`}
+                  >
+                    <div 
+                      className="company-card-header"
+                      onClick={() => setExpandedCompany(
+                        expandedCompany === company.domain ? null : company.domain
+                      )}
+                    >
+                      <CompanyLogo domain={company.domain} name={company.name} size={36} />
+                      <div className="company-card-info">
+                        <span className="company-card-name">{company.name}</span>
+                        <span className="company-card-meta">
+                          {company.contactCount} {company.contactCount === 1 ? 'contact' : 'contacts'}
+                          {company.hasStrongConnection && <span className="strong-dot" />}
+                        </span>
+                      </div>
+                      <span className={`expand-chevron ${expandedCompany === company.domain ? 'open' : ''}`}>
+                        ▾
+                      </span>
+                    </div>
+                    
+                    {expandedCompany === company.domain && (
+                      <div className="company-card-contacts">
+                        {company.contacts.slice(0, 5).map(contact => (
+                          <div 
+                            key={contact.id} 
+                            className="contact-row"
+                            onClick={() => handleContactClick(contact.id)}
+                          >
+                            <PersonAvatar email={contact.email} name={contact.name} size={28} />
+                            <div className="contact-row-info">
+                              <span className="contact-row-name">{contact.name}</span>
+                              <span className="contact-row-title">{contact.title || contact.email}</span>
+                            </div>
+                            <span className={`strength-badge strength-badge--${contact.connectionStrength}`}>
+                              {contact.connectionStrength}
+                            </span>
+                          </div>
+                        ))}
+                        {company.contacts.length > 5 && (
+                          <div className="contact-row-more">+{company.contacts.length - 5} more</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))
+              )
             ) : (
-              <div className="ai-home-empty">
-                <div className="empty-icon">🌱</div>
-                <h3>Your network is growing</h3>
-                <p>Connect your calendar to unlock intro suggestions</p>
-              </div>
+              loadingSpaces ? (
+                <div className="network-loading">
+                  <div className="spinner" />
+                  <span>Loading space reach...</span>
+                </div>
+              ) : filteredSpaceCompanies.length === 0 ? (
+                <div className="network-empty-state">
+                  {searchQuery ? (
+                    <>
+                      <span className="empty-icon">🔍</span>
+                      <span>No companies match "{searchQuery}"</span>
+                    </>
+                  ) : spaces.length === 0 ? (
+                    <>
+                      <span className="empty-icon">👥</span>
+                      <span>Join a space to see combined network</span>
+                      <button className="btn-primary" onClick={() => navigate('/spaces')}>
+                        Browse Spaces
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="empty-icon">🏢</span>
+                      <span>No companies in your spaces yet</span>
+                    </>
+                  )}
+                </div>
+              ) : (
+                filteredSpaceCompanies.slice(0, 50).map(company => (
+                  <div 
+                    key={company.domain} 
+                    className={`company-card company-card--space ${expandedCompany === company.domain ? 'expanded' : ''}`}
+                  >
+                    <div 
+                      className="company-card-header"
+                      onClick={() => setExpandedCompany(
+                        expandedCompany === company.domain ? null : company.domain
+                      )}
+                    >
+                      <CompanyLogo domain={company.domain} name={company.name} size={36} />
+                      <div className="company-card-info">
+                        <span className="company-card-name">{company.name}</span>
+                        <span className="company-card-meta">
+                          {company.contactCount} {company.contactCount === 1 ? 'contact' : 'contacts'}
+                        </span>
+                      </div>
+                      <button 
+                        className="request-intro-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRequestIntro(company.name, company.domain);
+                        }}
+                      >
+                        Request Intro
+                      </button>
+                      <span className={`expand-chevron ${expandedCompany === company.domain ? 'open' : ''}`}>
+                        ▾
+                      </span>
+                    </div>
+                    
+                    {expandedCompany === company.domain && (
+                      <div className="company-card-contacts">
+                        {company.contacts.slice(0, 5).map(contact => (
+                          <div key={contact.id} className="contact-row">
+                            <PersonAvatar email={contact.email} name={contact.name} size={28} />
+                            <div className="contact-row-info">
+                              <span className="contact-row-name">{contact.name}</span>
+                              <span className="contact-row-title">
+                                {contact.title || 'Contact'}
+                                <span className="via-tag">via {contact.userName}</span>
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                        {company.contacts.length > 5 && (
+                          <div className="contact-row-more">+{company.contacts.length - 5} more</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))
+              )
             )}
           </div>
-        )}
-
-        {/* Network stats (only in home mode) */}
-        {viewMode === 'home' && (
-          <div className="ai-home-stats">
-            <button className="stat-item clickable" onClick={() => setViewMode('my-network')}>
-              <span className="stat-value">{contacts.length}</span>
-              <span className="stat-label">connections</span>
-            </button>
-            <div className="stat-divider" />
-            <button className="stat-item clickable" onClick={() => setViewMode('my-network')}>
-              <span className="stat-value">
-                {contacts.filter(c => c.connectionStrength === 'strong').length}
-              </span>
-              <span className="stat-label">strong ties</span>
-            </button>
-            <div className="stat-divider" />
-            <button className="stat-item clickable" onClick={() => setViewMode('my-network')}>
-              <span className="stat-value">
-                {new Set(contacts.map(c => c.companyDomain)).size}
-              </span>
-              <span className="stat-label">companies</span>
-            </button>
-            {spaces.length > 0 && (
-              <>
-                <div className="stat-divider" />
-                <button className="stat-item clickable" onClick={() => setViewMode('space-reach')}>
-                  <span className="stat-value">{spaces.length}</span>
-                  <span className="stat-label">spaces</span>
-                </button>
-              </>
-            )}
-          </div>
-        )}
+        </div>
       </div>
 
       {/* Command Palette */}

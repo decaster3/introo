@@ -12420,3 +12420,415 @@ body {
     max-height: 400px;
   }
 }
+
+/* ============================================
+   AI Home - Full Network View
+   ============================================ */
+
+.ai-home-content--full {
+  max-width: 1200px;
+  padding-top: 1.5rem;
+}
+
+/* Compact header */
+.ai-home-header {
+  margin-bottom: 1.5rem;
+}
+
+.ai-home-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.ai-home-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.shortcut-btn {
+  display: flex;
+  align-items: center;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.shortcut-btn:hover {
+  background: var(--bg-elevated);
+  border-color: var(--border-medium);
+}
+
+.shortcut-btn kbd {
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+/* Network Section */
+.network-section {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.network-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.network-section-tabs {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.network-section-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.875rem;
+  background: var(--bg-tertiary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.network-section-tab:hover {
+  background: var(--bg-elevated);
+}
+
+.network-section-tab.active {
+  background: var(--accent-muted);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.network-section-tab .tab-icon {
+  font-size: 1rem;
+}
+
+.network-section-tab .tab-count {
+  padding: 0.125rem 0.375rem;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.network-section-tab.active .tab-count {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.network-section-stats {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.stat-separator {
+  color: var(--border-medium);
+}
+
+.stat-highlight {
+  color: var(--success);
+  font-weight: 500;
+}
+
+/* Space pills */
+.space-pills {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+  overflow-x: auto;
+}
+
+.space-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  background: var(--bg-tertiary);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* Network grid */
+.network-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 0.75rem;
+  padding: 1rem;
+  max-height: calc(100vh - 280px);
+  overflow-y: auto;
+}
+
+/* Company card */
+.company-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: all 0.2s;
+}
+
+.company-card:hover {
+  border-color: var(--border-medium);
+}
+
+.company-card.expanded {
+  border-color: var(--accent-primary);
+  grid-column: span 1;
+}
+
+.company-card--space {
+  border-left: 3px solid var(--info);
+}
+
+.company-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  cursor: pointer;
+}
+
+.company-card-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.company-card-name {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.company-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.strong-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--success);
+  border-radius: 50%;
+}
+
+.expand-chevron {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  transition: transform 0.2s;
+}
+
+.expand-chevron.open {
+  transform: rotate(180deg);
+}
+
+.request-intro-btn {
+  padding: 0.375rem 0.625rem;
+  background: var(--accent-primary);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+
+.request-intro-btn:hover {
+  background: var(--accent-secondary);
+}
+
+/* Company contacts */
+.company-card-contacts {
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-secondary);
+  padding: 0.5rem;
+}
+
+.contact-row {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.5rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.contact-row:hover {
+  background: var(--bg-tertiary);
+}
+
+.contact-row-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.contact-row-name {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+
+.contact-row-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.via-tag {
+  padding: 0.125rem 0.375rem;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  font-size: 0.65rem;
+}
+
+.contact-row-more {
+  padding: 0.5rem;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.strength-badge {
+  padding: 0.2rem 0.4rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.65rem;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.strength-badge--strong {
+  background: rgba(52, 211, 153, 0.15);
+  color: var(--success);
+}
+
+.strength-badge--medium {
+  background: rgba(251, 191, 36, 0.15);
+  color: var(--warning);
+}
+
+.strength-badge--weak {
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+/* Empty and loading states */
+.network-empty-state {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 3rem;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.network-empty-state .empty-icon {
+  font-size: 2.5rem;
+  opacity: 0.5;
+}
+
+.network-empty-state .btn-primary {
+  margin-top: 0.5rem;
+}
+
+.network-loading {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 3rem;
+  color: var(--text-muted);
+}
+
+.spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border-medium);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .ai-home-content--full {
+    padding: 1rem;
+  }
+
+  .ai-home-title {
+    font-size: 1.25rem;
+  }
+
+  .network-section-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .network-section-tabs {
+    width: 100%;
+  }
+
+  .network-section-tab {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .network-section-stats {
+    justify-content: center;
+  }
+
+  .network-grid {
+    grid-template-columns: 1fr;
+    max-height: calc(100vh - 320px);
+  }
+
+  .company-card-header {
+    flex-wrap: wrap;
+  }
+
+  .request-intro-btn {
+    order: 3;
+    margin-top: 0.5rem;
+  }
+}
