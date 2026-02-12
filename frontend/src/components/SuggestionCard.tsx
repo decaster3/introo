@@ -2,7 +2,7 @@ import { PersonAvatar } from './PersonAvatar';
 
 interface Suggestion {
   id: string;
-  type: 'help_opportunity' | 'reconnect' | 'pending_ask' | 'ai_insight';
+  type: 'help_opportunity' | 'reconnect' | 'pending_ask' | 'ai_insight' | 'network_insight';
   title: string;
   description: string;
   context?: string;
@@ -36,6 +36,7 @@ const typeIcons: Record<Suggestion['type'], string> = {
   reconnect: '🔄',
   pending_ask: '📬',
   ai_insight: '✨',
+  network_insight: '🌐',
 };
 
 const typeLabels: Record<Suggestion['type'], string> = {
@@ -43,6 +44,7 @@ const typeLabels: Record<Suggestion['type'], string> = {
   reconnect: 'Time to reconnect',
   pending_ask: 'Your asks',
   ai_insight: 'AI suggestion',
+  network_insight: 'Your network',
 };
 
 export function SuggestionCard({ suggestion }: SuggestionCardProps) {

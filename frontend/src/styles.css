@@ -11928,3 +11928,495 @@ body {
     max-width: calc(100% - 2rem);
   }
 }
+
+/* ============================================
+   Network View Styles
+   ============================================ */
+
+/* Compact hero mode */
+.ai-home-hero.compact {
+  padding-top: 2rem;
+  margin-bottom: 1.5rem;
+}
+
+.ai-home-hero.compact .ai-home-greeting,
+.ai-home-hero.compact .ai-home-subtitle {
+  display: none;
+}
+
+/* Back navigation */
+.ai-home-back {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.back-button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 0.5rem 0;
+  transition: color 0.2s;
+}
+
+.back-button:hover {
+  color: var(--text-primary);
+}
+
+/* View mode tabs */
+.view-mode-tabs {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.view-mode-tab {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.875rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.view-mode-tab:hover {
+  background: var(--bg-elevated);
+  border-color: var(--border-medium);
+}
+
+.view-mode-tab.active {
+  background: var(--accent-muted);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+/* Clickable stats */
+.stat-item.clickable {
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.stat-item.clickable:hover {
+  transform: scale(1.05);
+}
+
+.stat-item.clickable:hover .stat-value {
+  color: var(--accent-primary);
+}
+
+/* Network View Component */
+.network-view {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.network-view--loading {
+  min-height: 300px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.network-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  color: var(--text-muted);
+}
+
+.network-loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border-medium);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Network Header */
+.network-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.network-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.network-title-icon {
+  font-size: 1.1rem;
+}
+
+.network-stats-mini {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.network-stats-mini strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.network-stat-divider {
+  color: var(--border-medium);
+}
+
+/* Network Tabs */
+.network-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 1.25rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.network-tab {
+  padding: 0.875rem 1.25rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: -1px;
+}
+
+.network-tab:hover {
+  color: var(--text-secondary);
+}
+
+.network-tab.active {
+  color: var(--accent-primary);
+  border-bottom-color: var(--accent-primary);
+}
+
+/* Space Pills */
+.network-spaces {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.network-space-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  background: var(--bg-tertiary);
+  border-radius: 999px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.network-space-pill .space-emoji {
+  font-size: 0.9rem;
+}
+
+.network-space-pill .space-count {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+/* Network Content */
+.network-content {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.network-companies,
+.network-people {
+  padding: 0.5rem;
+}
+
+/* Network Empty State */
+.network-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 3rem;
+  color: var(--text-muted);
+}
+
+.network-empty-icon {
+  font-size: 2rem;
+  opacity: 0.5;
+}
+
+/* Network Company Card */
+.network-company-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  margin-bottom: 0.5rem;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.network-company-card:hover {
+  border-color: var(--border-medium);
+}
+
+.network-company-card.expanded {
+  border-color: var(--accent-primary);
+}
+
+.network-company-header {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  padding: 0.875rem;
+  cursor: pointer;
+}
+
+.network-company-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.network-company-name {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.network-company-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 0.125rem;
+}
+
+.strong-badge {
+  color: var(--success);
+  font-size: 0.75rem;
+}
+
+.network-company-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.network-action-btn {
+  padding: 0.4rem 0.75rem;
+  background: var(--accent-primary);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: white;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.network-action-btn:hover {
+  background: var(--accent-secondary);
+}
+
+.expand-indicator {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  transition: transform 0.2s;
+}
+
+.expand-indicator.expanded {
+  transform: rotate(180deg);
+}
+
+/* Company Contacts */
+.network-company-contacts {
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-secondary);
+  padding: 0.5rem;
+}
+
+.network-contact-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 0.5rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.network-contact-row:hover {
+  background: var(--bg-tertiary);
+}
+
+.network-contact-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.network-contact-name {
+  display: block;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+}
+
+.network-contact-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.via-badge {
+  padding: 0.125rem 0.375rem;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.network-contact-more {
+  padding: 0.5rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* Strength Indicator */
+.strength-indicator {
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.strength-indicator--strong {
+  background: rgba(52, 211, 153, 0.15);
+  color: var(--success);
+}
+
+.strength-indicator--medium {
+  background: rgba(251, 191, 36, 0.15);
+  color: var(--warning);
+}
+
+.strength-indicator--weak {
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+}
+
+/* Network Person Card */
+.network-person-card {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  padding: 0.875rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  margin-bottom: 0.5rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.network-person-card:hover {
+  border-color: var(--border-medium);
+  transform: translateX(4px);
+}
+
+.network-person-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.network-person-name {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.network-person-title {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Network insight card type */
+.suggestion-card--network_insight {
+  border-left: 3px solid var(--success);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .ai-home-back {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .view-mode-tabs {
+    width: 100%;
+  }
+
+  .view-mode-tab {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .network-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .network-company-header {
+    flex-wrap: wrap;
+  }
+
+  .network-company-actions {
+    width: 100%;
+    justify-content: flex-end;
+    margin-top: 0.5rem;
+  }
+
+  .network-content {
+    max-height: 400px;
+  }
+}

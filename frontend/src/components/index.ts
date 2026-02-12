@@ -6,3 +6,4 @@ export { Pagination } from './Pagination';
 export { PromptBar } from './PromptBar';
 export { SuggestionCard } from './SuggestionCard';
 export { CommandPalette } from './CommandPalette';
+export { NetworkView } from './NetworkView';
