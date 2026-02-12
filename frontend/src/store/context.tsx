@@ -55,8 +55,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({ type: 'SET_CONTACTS', payload: contacts });
           dispatch({ type: 'SET_COMPANIES', payload: companies });
           dispatch({ type: 'SET_CALENDAR_CONNECTED', payload: calendarStatus.isConnected });
-          // All data loaded, now set loading to false
           dispatch({ type: 'SET_LOADING', payload: false });
+
+          // Auto-sync calendar if user has no contacts yet (first login or post-OAuth redirect)
+          if (contacts.length === 0) {
+            try {
+              await calendarApi.sync();
+              dispatch({ type: 'SET_CALENDAR_CONNECTED', payload: true });
+              const [freshContacts, freshCompanies] = await Promise.all([
+                relationshipsApi.getContacts({ limit: 1000 }).catch(() => ({ data: [] })),
+                relationshipsApi.getCompanies().catch(() => []),
+              ]);
+              const parsed = Array.isArray(freshContacts) ? freshContacts : (freshContacts?.data || []);
+              dispatch({ type: 'SET_CONTACTS', payload: parsed });
+              dispatch({ type: 'SET_COMPANIES', payload: freshCompanies });
+            } catch (syncErr) {
+              console.error('Auto calendar sync failed (expected if no calendar connected):', syncErr);
+            }
+          }
         } else {
           dispatch({
             type: 'SET_AUTH',
