@@ -57,16 +57,16 @@ router.get('/my-pending', async (req, res) => {
           select: { id: true, name: true, emoji: true, isPrivate: true },
         },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { joinedAt: 'desc' },
     });
 
-    res.json(pendingMemberships.map(m => ({
+    res.json(pendingMemberships.map((m: any) => ({
       id: m.space.id,
       name: m.space.name,
       emoji: m.space.emoji,
       isPrivate: m.space.isPrivate,
       membershipId: m.id,
-      appliedAt: m.createdAt,
+      appliedAt: m.joinedAt,
     })));
   } catch (error: unknown) {
     console.error('Error fetching pending spaces:', error);
