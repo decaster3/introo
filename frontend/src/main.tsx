@@ -12,6 +12,7 @@ import {
   CreateSpacePage,
   SpaceDetailPage,
   HomePage,
+  AIHomePage,
   NetworkPage,
   ContactDetailPage,
   DashboardPage,
@@ -39,6 +40,11 @@ function App() {
           {/* Main routes with layout */}
           <Route
             path="/home"
+            element={<AIHomePage />}
+          />
+          {/* Keep old home page accessible */}
+          <Route
+            path="/home-classic"
             element={
               <Layout>
                 <HomePage />

@@ -9,6 +9,7 @@ export { SpacesPage } from './SpacesPage';
 export { CreateSpacePage } from './CreateSpacePage';
 export { SpaceDetailPage } from './SpaceDetailPage';
 export { HomePage } from './HomePage';
+export { AIHomePage } from './AIHomePage';
 export { NetworkPage } from './NetworkPage';
 export { ActivityPage } from './ActivityPage';
 export { ContactDetailPage } from './ContactDetailPage';
