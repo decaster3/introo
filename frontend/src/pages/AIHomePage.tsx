@@ -1,14 +1,12 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppState } from '../store';
 import { API_BASE } from '../lib/api';
 import { calculateStrength } from '../types';
-import { CommandPalette } from '../components/CommandPalette';
 import { PersonAvatar, CompanyLogo } from '../components';
+import { openOfferIntroEmail } from '../lib/offerIntro';
 
-// ============================================================================
-// Types
-// ============================================================================
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 interface SpaceCompany {
   id: string;
@@ -17,665 +15,668 @@ interface SpaceCompany {
   industry?: string;
   contactCount: number;
   contacts: {
-    id: string;
-    name: string;
-    email: string;
-    title?: string;
-    userId: string;
-    userName: string;
+    id: string; name: string; email: string; title?: string;
+    userId: string; userName: string;
   }[];
 }
 
 interface Space {
-  id: string;
-  name: string;
-  emoji: string;
-  memberCount?: number;
+  id: string; name: string; emoji: string; memberCount?: number;
 }
 
 interface DisplayContact {
-  id: string;
-  name: string;
-  email: string;
-  title: string;
-  company: string;
-  companyDomain: string;
-  lastSeenAt: string;
-  meetingsCount: number;
+  id: string; name: string; email: string; title: string;
+  company: string; companyDomain: string;
+  lastSeenAt: string; meetingsCount: number;
   connectionStrength: 'strong' | 'medium' | 'weak';
 }
 
-interface Company {
+interface MergedCompany {
   domain: string;
   name: string;
-  contacts: DisplayContact[];
-  contactCount: number;
+  myContacts: DisplayContact[];
+  spaceContacts: { id: string; name: string; email: string; title?: string; userName: string }[];
+  myCount: number;
+  spaceCount: number;
+  totalCount: number;
   hasStrongConnection: boolean;
+  source: 'mine' | 'space' | 'both';
+  matchingHunts: string[];
 }
 
-interface ActiveHunt {
+interface Hunt {
   id: string;
   title: string;
-  query: string;
-  targetRole?: string;
-  targetIndustry?: string;
-  targetCompanySize?: string;
-  matchCount: number;
+  keywords: string[];
   isActive: boolean;
-  createdAt: string;
 }
 
-interface Signal {
-  id: string;
-  type: 'job_change' | 'new_connection' | 'company_news' | 'match_found';
-  title: string;
-  description: string;
-  timestamp: string;
-  actionLabel?: string;
-  actionUrl?: string;
-  person?: {
-    name: string;
-    email?: string;
-    avatar?: string;
-  };
+interface InlinePanel {
+  type: 'person' | 'intro-request' | 'intro-offer';
+  company?: MergedCompany;
+  contact?: DisplayContact | { id: string; name: string; email: string; title?: string; userName?: string };
 }
 
-type NetworkTab = 'mine' | 'spaces' | 'connections';
-
-// ============================================================================
-// Component
-// ============================================================================
+// ─── Component ───────────────────────────────────────────────────────────────
 
 export function AIHomePage() {
   const navigate = useNavigate();
-  const { contacts: storeContacts } = useAppState();
-  
+  const { currentUser, contacts: storeContacts } = useAppState();
+  const searchRef = useRef<HTMLInputElement>(null);
+
   // UI State
-  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
-  const [networkTab, setNetworkTab] = useState<NetworkTab>('mine');
-  const [expandedCompany, setExpandedCompany] = useState<string | null>(null);
-  const [showAddHunt, setShowAddHunt] = useState(false);
-  const [newHuntQuery, setNewHuntQuery] = useState('');
-  
-  // Data State
+  const [selectedHunt, setSelectedHunt] = useState<string | null>(null);
+  const [showHuntInput, setShowHuntInput] = useState(false);
+  const [newHuntText, setNewHuntText] = useState('');
+  const [expandedDomain, setExpandedDomain] = useState<string | null>(null);
+  const [inlinePanel, setInlinePanel] = useState<InlinePanel | null>(null);
+  const [showSignals, setShowSignals] = useState(false);
+
+  // Data
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [spaceCompanies, setSpaceCompanies] = useState<SpaceCompany[]>([]);
-  const [loadingSpaces, setLoadingSpaces] = useState(true);
-  const [activeHunts, setActiveHunts] = useState<ActiveHunt[]>([
-    // Demo data - would come from API
-    {
-      id: '1',
-      title: 'CTO at Series A Fintech',
-      query: 'CTO OR "Chief Technology Officer" fintech series-a',
-      targetRole: 'CTO',
-      targetIndustry: 'fintech',
-      matchCount: 0,
-      isActive: true,
-      createdAt: new Date().toISOString(),
-    },
+  const [loading, setLoading] = useState(true);
+  const [hunts, setHunts] = useState<Hunt[]>([
+    { id: '1', title: 'CTO at Series A Fintech', keywords: ['cto', 'chief technology', 'fintech'], isActive: true },
   ]);
-  const [signals, setSignals] = useState<Signal[]>([]);
 
-  // Transform contacts
+  // ─── Data transforms ────────────────────────────────────────────────────────
+
   const contacts: DisplayContact[] = useMemo(() => {
-    return storeContacts
-      .filter(c => c.isApproved)
-      .map(c => ({
-        id: c.id,
-        name: c.name || c.email.split('@')[0],
-        email: c.email,
-        title: c.title || '',
-        company: c.company?.name || '',
-        companyDomain: c.company?.domain || c.email.split('@')[1] || '',
-        lastSeenAt: c.lastSeenAt,
-        meetingsCount: c.meetingsCount,
-        connectionStrength: calculateStrength(c.lastSeenAt, c.meetingsCount),
-      }));
+    return storeContacts.filter(c => c.isApproved).map(c => ({
+      id: c.id,
+      name: c.name || c.email.split('@')[0],
+      email: c.email,
+      title: c.title || '',
+      company: c.company?.name || '',
+      companyDomain: c.company?.domain || c.email.split('@')[1] || '',
+      lastSeenAt: c.lastSeenAt,
+      meetingsCount: c.meetingsCount,
+      connectionStrength: calculateStrength(c.lastSeenAt, c.meetingsCount),
+    }));
   }, [storeContacts]);
 
-  // Group contacts by company
-  const myCompanies = useMemo((): Company[] => {
-    const companyMap = new Map<string, Company>();
-    
-    contacts.forEach(contact => {
-      const domain = contact.companyDomain || 'unknown';
-      if (!companyMap.has(domain)) {
-        companyMap.set(domain, {
-          domain,
-          name: contact.company || domain,
-          contacts: [],
-          contactCount: 0,
-          hasStrongConnection: false,
+  // Merge my network + space network into unified view
+  const mergedCompanies = useMemo((): MergedCompany[] => {
+    const map = new Map<string, MergedCompany>();
+
+    // My contacts
+    contacts.forEach(c => {
+      const d = c.companyDomain || 'unknown';
+      if (!map.has(d)) {
+        map.set(d, {
+          domain: d, name: c.company || d,
+          myContacts: [], spaceContacts: [],
+          myCount: 0, spaceCount: 0, totalCount: 0,
+          hasStrongConnection: false, source: 'mine', matchingHunts: [],
         });
       }
-      const company = companyMap.get(domain)!;
-      company.contacts.push(contact);
-      company.contactCount++;
-      if (contact.connectionStrength === 'strong') {
-        company.hasStrongConnection = true;
-      }
+      const co = map.get(d)!;
+      co.myContacts.push(c);
+      co.myCount++;
+      co.totalCount++;
+      if (c.connectionStrength === 'strong') co.hasStrongConnection = true;
     });
 
-    return Array.from(companyMap.values())
-      .sort((a, b) => {
-        if (a.hasStrongConnection !== b.hasStrongConnection) {
-          return a.hasStrongConnection ? -1 : 1;
-        }
-        return b.contactCount - a.contactCount;
-      });
-  }, [contacts]);
-
-  // Calculate hunt matches
-  const huntsWithMatches = useMemo(() => {
-    return activeHunts.map(hunt => {
-      const query = hunt.query.toLowerCase();
-      const keywords = query.split(/\s+or\s+|\s+/i).filter(k => k.length > 2);
-      
-      let matchCount = 0;
-      const matchedCompanies: string[] = [];
-      
-      contacts.forEach(contact => {
-        const searchable = `${contact.title} ${contact.company} ${contact.name}`.toLowerCase();
-        if (keywords.some(k => searchable.includes(k.replace(/"/g, '')))) {
-          matchCount++;
-          if (!matchedCompanies.includes(contact.companyDomain)) {
-            matchedCompanies.push(contact.companyDomain);
-          }
+    // Space contacts
+    spaceCompanies.forEach(sc => {
+      if (!map.has(sc.domain)) {
+        map.set(sc.domain, {
+          domain: sc.domain, name: sc.name,
+          myContacts: [], spaceContacts: [],
+          myCount: 0, spaceCount: 0, totalCount: 0,
+          hasStrongConnection: false, source: 'space', matchingHunts: [],
+        });
+      }
+      const co = map.get(sc.domain)!;
+      sc.contacts.forEach(contact => {
+        if (!co.spaceContacts.some(ec => ec.email === contact.email) &&
+            !co.myContacts.some(mc => mc.email === contact.email)) {
+          co.spaceContacts.push(contact);
+          co.spaceCount++;
+          co.totalCount++;
         }
       });
-
-      // Also check space companies
-      spaceCompanies.forEach(company => {
-        company.contacts.forEach(contact => {
-          const searchable = `${contact.title} ${company.name}`.toLowerCase();
-          if (keywords.some(k => searchable.includes(k.replace(/"/g, '')))) {
-            matchCount++;
-          }
-        });
-      });
-
-      return { ...hunt, matchCount, matchedCompanies };
+      if (co.myCount > 0 && co.spaceCount > 0) co.source = 'both';
+      else if (co.spaceCount > 0 && co.myCount === 0) co.source = 'space';
     });
-  }, [activeHunts, contacts, spaceCompanies]);
 
-  // Generate signals from data
-  useEffect(() => {
-    const newSignals: Signal[] = [];
-    
-    // Recent strong connections
-    const strongContacts = contacts
-      .filter(c => c.connectionStrength === 'strong')
-      .slice(0, 2);
-    
-    strongContacts.forEach(contact => {
-      newSignals.push({
-        id: `strong-${contact.id}`,
-        type: 'new_connection',
-        title: `Strong connection at ${contact.company}`,
-        description: `${contact.name} - ${contact.title}`,
-        timestamp: contact.lastSeenAt,
-        person: { name: contact.name, email: contact.email },
+    // Match hunts
+    const companies = Array.from(map.values());
+    companies.forEach(co => {
+      hunts.forEach(hunt => {
+        const allText = [
+          co.name, co.domain,
+          ...co.myContacts.map(c => `${c.title} ${c.name}`),
+          ...co.spaceContacts.map(c => `${c.title || ''} ${c.name}`),
+        ].join(' ').toLowerCase();
+
+        if (hunt.keywords.some(k => allText.includes(k))) {
+          co.matchingHunts.push(hunt.id);
+        }
       });
     });
 
-    // Hunt matches
-    huntsWithMatches.forEach(hunt => {
-      if (hunt.matchCount > 0) {
-        newSignals.push({
-          id: `match-${hunt.id}`,
-          type: 'match_found',
-          title: `${hunt.matchCount} matches for "${hunt.title}"`,
-          description: 'People in your network match this hunt',
-          timestamp: new Date().toISOString(),
-          actionLabel: 'View matches',
+    return companies.sort((a, b) => {
+      // Both > mine > space, then by strong > count
+      const sourceOrder = { both: 0, mine: 1, space: 2 };
+      if (sourceOrder[a.source] !== sourceOrder[b.source]) return sourceOrder[a.source] - sourceOrder[b.source];
+      if (a.hasStrongConnection !== b.hasStrongConnection) return a.hasStrongConnection ? -1 : 1;
+      return b.totalCount - a.totalCount;
+    });
+  }, [contacts, spaceCompanies, hunts]);
+
+  // Filter by search + active hunt
+  const filteredCompanies = useMemo(() => {
+    let result = mergedCompanies;
+
+    // Filter by active hunt
+    if (selectedHunt) {
+      result = result.filter(c => c.matchingHunts.includes(selectedHunt));
+    }
+
+    // Filter by search
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(c =>
+        c.name.toLowerCase().includes(q) ||
+        c.domain.toLowerCase().includes(q) ||
+        c.myContacts.some(contact => contact.name.toLowerCase().includes(q) || contact.title.toLowerCase().includes(q)) ||
+        c.spaceContacts.some(contact => contact.name.toLowerCase().includes(q) || (contact.title || '').toLowerCase().includes(q))
+      );
+    }
+
+    return result;
+  }, [mergedCompanies, selectedHunt, searchQuery]);
+
+  // Hunt match counts
+  const huntMatchCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    hunts.forEach(h => {
+      counts[h.id] = mergedCompanies.filter(c => c.matchingHunts.includes(h.id)).length;
+    });
+    return counts;
+  }, [hunts, mergedCompanies]);
+
+  // Stats
+  const stats = useMemo(() => ({
+    myCompanies: mergedCompanies.filter(c => c.source === 'mine' || c.source === 'both').length,
+    spaceCompanies: mergedCompanies.filter(c => c.source === 'space' || c.source === 'both').length,
+    overlap: mergedCompanies.filter(c => c.source === 'both').length,
+    total: mergedCompanies.length,
+    strongTies: contacts.filter(c => c.connectionStrength === 'strong').length,
+  }), [mergedCompanies, contacts]);
+
+  // Signals (derived)
+  const signals = useMemo(() => {
+    const items: { id: string; icon: string; text: string; detail: string; huntId?: string }[] = [];
+
+    hunts.forEach(h => {
+      const count = huntMatchCounts[h.id] || 0;
+      if (count > 0) {
+        items.push({
+          id: `match-${h.id}`, icon: '🎯',
+          text: `${count} companies match "${h.title}"`,
+          detail: 'Click hunt to filter', huntId: h.id,
         });
       }
     });
 
-    setSignals(newSignals.slice(0, 5));
-  }, [contacts, huntsWithMatches]);
+    const overlapCount = stats.overlap;
+    if (overlapCount > 0) {
+      items.push({
+        id: 'overlap', icon: '🔗',
+        text: `${overlapCount} companies in both your & space networks`,
+        detail: 'Best intro paths',
+      });
+    }
 
-  // Fetch spaces
+    return items;
+  }, [hunts, huntMatchCounts, stats.overlap]);
+
+  // ─── Data fetching ──────────────────────────────────────────────────────────
+
   useEffect(() => {
-    setLoadingSpaces(true);
+    setLoading(true);
     fetch(`${API_BASE}/api/spaces`, { credentials: 'include' })
-      .then(res => res.json())
+      .then(r => r.json())
       .then(data => {
         if (Array.isArray(data)) {
-          setSpaces(data.map((s: any) => ({
-            id: s.id,
-            name: s.name,
-            emoji: s.emoji,
-            memberCount: s.members?.length || 0,
-          })));
+          setSpaces(data.map((s: any) => ({ id: s.id, name: s.name, emoji: s.emoji, memberCount: s.members?.length || 0 })));
         }
       })
       .catch(console.error)
-      .finally(() => setLoadingSpaces(false));
+      .finally(() => setLoading(false));
   }, []);
 
-  // Fetch space companies
   useEffect(() => {
-    if (spaces.length > 0) {
-      Promise.all(
-        spaces.map(space =>
-          fetch(`${API_BASE}/api/spaces/${space.id}/reach`, { credentials: 'include' })
-            .then(res => res.ok ? res.json() : { companies: [] })
-            .catch(() => ({ companies: [] }))
-        )
-      ).then(results => {
-        const companyMap = new Map<string, SpaceCompany>();
-        
-        results.forEach(result => {
-          (result.companies || []).forEach((company: SpaceCompany) => {
-            if (!companyMap.has(company.domain)) {
-              companyMap.set(company.domain, company);
-            } else {
-              const existing = companyMap.get(company.domain)!;
-              const existingEmails = new Set(existing.contacts.map(c => c.email));
-              company.contacts.forEach(contact => {
-                if (!existingEmails.has(contact.email)) {
-                  existing.contacts.push(contact);
-                  existing.contactCount++;
-                }
-              });
-            }
-          });
+    if (spaces.length === 0) return;
+    Promise.all(
+      spaces.map(s =>
+        fetch(`${API_BASE}/api/spaces/${s.id}/reach`, { credentials: 'include' })
+          .then(r => r.ok ? r.json() : { companies: [] }).catch(() => ({ companies: [] }))
+      )
+    ).then(results => {
+      const map = new Map<string, SpaceCompany>();
+      results.forEach(r => {
+        (r.companies || []).forEach((c: SpaceCompany) => {
+          if (!map.has(c.domain)) map.set(c.domain, c);
+          else {
+            const ex = map.get(c.domain)!;
+            const emails = new Set(ex.contacts.map(x => x.email));
+            c.contacts.forEach(x => { if (!emails.has(x.email)) { ex.contacts.push(x); ex.contactCount++; } });
+          }
         });
-        
-        setSpaceCompanies(Array.from(companyMap.values()).sort((a, b) => b.contactCount - a.contactCount));
       });
-    }
+      setSpaceCompanies(Array.from(map.values()));
+    });
   }, [spaces]);
 
-  // Filter companies
-  const filteredCompanies = useMemo(() => {
-    const companies = networkTab === 'spaces' ? spaceCompanies.map(c => ({
-      ...c,
-      contacts: c.contacts.map(contact => ({
-        ...contact,
-        title: contact.title || '',
-        company: c.name,
-        companyDomain: c.domain,
-        lastSeenAt: new Date().toISOString(),
-        meetingsCount: 0,
-        connectionStrength: 'medium' as const,
-      })),
-      hasStrongConnection: false,
-    })) : myCompanies;
+  // ─── Keyboard ───────────────────────────────────────────────────────────────
 
-    if (!searchQuery) return companies;
-    
-    const q = searchQuery.toLowerCase();
-    return companies.filter(c => 
-      c.name.toLowerCase().includes(q) ||
-      c.domain.toLowerCase().includes(q) ||
-      c.contacts.some(contact => 
-        contact.name.toLowerCase().includes(q) ||
-        contact.title?.toLowerCase().includes(q)
-      )
-    );
-  }, [myCompanies, spaceCompanies, searchQuery, networkTab]);
-
-  // Keyboard shortcuts
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
-        setIsCommandPaletteOpen(true);
+        searchRef.current?.focus();
       }
       if (e.key === 'Escape') {
-        setIsCommandPaletteOpen(false);
+        setInlinePanel(null);
+        setShowSignals(false);
         setSearchQuery('');
-        setShowAddHunt(false);
+        setSelectedHunt(null);
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  // Actions
-  const handleSearch = useCallback((query: string) => {
-    setSearchQuery(query);
+  // ─── Actions ────────────────────────────────────────────────────────────────
+
+  const toggleHunt = useCallback((huntId: string) => {
+    setSelectedHunt(prev => prev === huntId ? null : huntId);
+    setExpandedDomain(null);
   }, []);
 
-  const handleAddHunt = () => {
-    if (!newHuntQuery.trim()) return;
-    
-    const newHunt: ActiveHunt = {
+  const addHunt = useCallback(() => {
+    if (!newHuntText.trim()) return;
+    const keywords = newHuntText.toLowerCase().split(/[\s,]+/).filter(k => k.length > 2);
+    setHunts(prev => [...prev, {
       id: Date.now().toString(),
-      title: newHuntQuery,
-      query: newHuntQuery,
-      matchCount: 0,
+      title: newHuntText.trim(),
+      keywords,
       isActive: true,
-      createdAt: new Date().toISOString(),
-    };
-    
-    setActiveHunts(prev => [...prev, newHunt]);
-    setNewHuntQuery('');
-    setShowAddHunt(false);
-  };
+    }]);
+    setNewHuntText('');
+    setShowHuntInput(false);
+  }, [newHuntText]);
 
-  const handleRemoveHunt = (huntId: string) => {
-    setActiveHunts(prev => prev.filter(h => h.id !== huntId));
-  };
+  const removeHunt = useCallback((id: string) => {
+    setHunts(prev => prev.filter(h => h.id !== id));
+    if (selectedHunt === id) setSelectedHunt(null);
+  }, [selectedHunt]);
 
-  const handleRequestIntro = (companyName: string, domain: string) => {
-    navigate(`/request/new?company=${encodeURIComponent(companyName)}&domain=${encodeURIComponent(domain)}`);
-  };
+  const openIntroPanel = useCallback((company: MergedCompany) => {
+    setInlinePanel({ type: 'intro-request', company });
+  }, []);
 
-  const handleContactClick = (contactId: string) => {
-    navigate(`/contact/${contactId}`);
-  };
+  const openPersonPanel = useCallback((contact: DisplayContact | { id: string; name: string; email: string; title?: string; userName?: string }, company?: MergedCompany) => {
+    setInlinePanel({ type: 'person', contact, company });
+  }, []);
 
-  // Stats
-  const stats = {
-    myContacts: contacts.length,
-    myCompanies: myCompanies.length,
-    spaceCompanies: spaceCompanies.length,
-    spaceContacts: spaceCompanies.reduce((sum, c) => sum + c.contactCount, 0),
-    totalReach: myCompanies.length + spaceCompanies.length,
-  };
+  const handleOfferIntro = useCallback((contact: { email: string; name: string }, companyName: string) => {
+    openOfferIntroEmail({
+      requesterEmail: contact.email,
+      requesterName: contact.name,
+      targetCompany: companyName,
+      senderName: currentUser?.name,
+    });
+  }, [currentUser]);
+
+  // ─── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="unified-home">
-      {/* Ambient background */}
-      <div className="unified-ambient" />
+    <div className="u-root">
+      <div className="u-ambient" />
 
-      {/* Main Layout */}
-      <div className="unified-layout">
-        {/* Left Panel - Active Hunts & Signals */}
-        <aside className="unified-sidebar">
-          {/* Active Hunts */}
-          <section className="sidebar-section">
-            <div className="sidebar-section-header">
-              <div className="sidebar-section-title">
-                <span className="section-icon">🎯</span>
-                <span>Active Hunts</span>
-              </div>
-              <button 
-                className="sidebar-action-btn"
-                onClick={() => setShowAddHunt(true)}
-              >
-                +
-              </button>
-            </div>
-
-            <div className="hunts-list">
-              {huntsWithMatches.map(hunt => (
-                <div key={hunt.id} className={`hunt-card ${hunt.matchCount > 0 ? 'has-matches' : ''}`}>
-                  <div className="hunt-content">
-                    <span className="hunt-title">{hunt.title}</span>
-                    <span className="hunt-meta">
-                      {hunt.matchCount > 0 ? (
-                        <span className="hunt-matches">{hunt.matchCount} matches</span>
-                      ) : (
-                        <span className="hunt-no-matches">No matches yet</span>
-                      )}
-                    </span>
-                  </div>
-                  <button 
-                    className="hunt-remove"
-                    onClick={() => handleRemoveHunt(hunt.id)}
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-
-              {showAddHunt && (
-                <div className="hunt-add-form">
-                  <input
-                    type="text"
-                    value={newHuntQuery}
-                    onChange={(e) => setNewHuntQuery(e.target.value)}
-                    placeholder="e.g., VP Sales at SaaS"
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleAddHunt();
-                      if (e.key === 'Escape') setShowAddHunt(false);
-                    }}
-                  />
-                  <div className="hunt-add-actions">
-                    <button onClick={handleAddHunt}>Add</button>
-                    <button onClick={() => setShowAddHunt(false)}>Cancel</button>
-                  </div>
-                </div>
-              )}
-
-              {activeHunts.length === 0 && !showAddHunt && (
-                <div className="hunts-empty">
-                  <p>Add long-running searches</p>
-                  <p className="hunts-empty-hint">e.g., "CTO at fintech"</p>
-                </div>
-              )}
-            </div>
-          </section>
-
-          {/* Signals */}
-          <section className="sidebar-section">
-            <div className="sidebar-section-header">
-              <div className="sidebar-section-title">
-                <span className="section-icon">📡</span>
-                <span>Signals</span>
-              </div>
-            </div>
-
-            <div className="signals-list">
-              {signals.length === 0 ? (
-                <div className="signals-empty">
-                  <p>Network signals will appear here</p>
-                </div>
-              ) : (
-                signals.map(signal => (
-                  <div key={signal.id} className={`signal-card signal-card--${signal.type}`}>
-                    <div className="signal-content">
-                      <span className="signal-title">{signal.title}</span>
-                      <span className="signal-description">{signal.description}</span>
-                    </div>
-                    {signal.actionLabel && (
-                      <button className="signal-action">{signal.actionLabel}</button>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </section>
-
-          {/* Quick Stats */}
-          <div className="sidebar-stats">
-            <div className="sidebar-stat">
-              <span className="sidebar-stat-value">{stats.myContacts}</span>
-              <span className="sidebar-stat-label">contacts</span>
-            </div>
-            <div className="sidebar-stat">
-              <span className="sidebar-stat-value">{stats.totalReach}</span>
-              <span className="sidebar-stat-label">companies</span>
-            </div>
-          </div>
-        </aside>
-
-        {/* Main Content */}
-        <main className="unified-main">
-          {/* Search Bar */}
-          <div className="unified-search-wrapper">
-            <div className={`unified-search ${searchFocused ? 'focused' : ''}`}>
-              <div className="search-icon">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="11" cy="11" r="8" />
-                  <path d="m21 21-4.35-4.35" />
-                </svg>
-              </div>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => handleSearch(e.target.value)}
-                onFocus={() => setSearchFocused(true)}
-                onBlur={() => setSearchFocused(false)}
-                placeholder="Search network, find intros, or type a question..."
-              />
-              <div className="search-shortcuts">
-                <kbd>⌘K</kbd>
-              </div>
-            </div>
+      <div className={`u-canvas ${inlinePanel ? 'has-panel' : ''}`}>
+        {/* ── Top Bar ─────────────────────────────────────────────── */}
+        <header className="u-topbar">
+          <div className={`u-search ${searchFocused ? 'focused' : ''}`}>
+            <svg className="u-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+            </svg>
+            <input
+              ref={searchRef}
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              onFocus={() => setSearchFocused(true)}
+              onBlur={() => setSearchFocused(false)}
+              placeholder="Search people, companies..."
+            />
+            {searchQuery && (
+              <button className="u-search-clear" onClick={() => setSearchQuery('')}>×</button>
+            )}
+            <kbd className="u-kbd">⌘K</kbd>
           </div>
 
-          {/* Network Tabs */}
-          <div className="network-tabs-bar">
-            <button 
-              className={`network-tab-btn ${networkTab === 'mine' ? 'active' : ''}`}
-              onClick={() => setNetworkTab('mine')}
+          <div className="u-topbar-right">
+            <button
+              className={`u-signals-btn ${signals.length > 0 ? 'has-signals' : ''}`}
+              onClick={() => setShowSignals(!showSignals)}
             >
-              <span className="tab-emoji">👤</span>
-              <span>My Network</span>
-              <span className="tab-badge">{stats.myCompanies}</span>
+              <span>📡</span>
+              {signals.length > 0 && <span className="u-signals-badge">{signals.length}</span>}
             </button>
-            <button 
-              className={`network-tab-btn ${networkTab === 'spaces' ? 'active' : ''}`}
-              onClick={() => setNetworkTab('spaces')}
-            >
-              <span className="tab-emoji">🌐</span>
-              <span>Spaces</span>
-              <span className="tab-badge">{stats.spaceCompanies}</span>
+            <button className="u-action-btn" onClick={() => navigate('/spaces')}>
+              Spaces
             </button>
-            <button 
-              className={`network-tab-btn ${networkTab === 'connections' ? 'active' : ''}`}
-              onClick={() => setNetworkTab('connections')}
-            >
-              <span className="tab-emoji">🤝</span>
-              <span>1:1 Connections</span>
-              <span className="tab-badge">0</span>
-            </button>
-
-            {/* Request Intro Button */}
-            <button 
-              className="request-intro-main-btn"
-              onClick={() => navigate('/request/new')}
-            >
-              <span>✨</span>
-              <span>Request Intro</span>
+            <button className="u-primary-btn" onClick={() => setInlinePanel({ type: 'intro-request' })}>
+              ✨ Request Intro
             </button>
           </div>
+        </header>
 
-          {/* Space Pills (when on spaces tab) */}
-          {networkTab === 'spaces' && spaces.length > 0 && (
-            <div className="spaces-pills-bar">
-              {spaces.map(space => (
-                <span key={space.id} className="space-pill-item">
-                  {space.emoji} {space.name}
-                </span>
-              ))}
-              <button 
-                className="add-space-btn"
-                onClick={() => navigate('/spaces')}
-              >
-                + Join Space
-              </button>
-            </div>
-          )}
-
-          {/* Companies Grid */}
-          <div className="companies-grid">
-            {loadingSpaces && networkTab === 'spaces' ? (
-              <div className="grid-loading">
-                <div className="loading-spinner" />
-                <span>Loading network...</span>
-              </div>
-            ) : filteredCompanies.length === 0 ? (
-              <div className="grid-empty">
-                {searchQuery ? (
-                  <>
-                    <span className="empty-icon">🔍</span>
-                    <span>No results for "{searchQuery}"</span>
-                    <button onClick={() => setSearchQuery('')}>Clear search</button>
-                  </>
-                ) : networkTab === 'spaces' ? (
-                  <>
-                    <span className="empty-icon">👥</span>
-                    <span>Join spaces to see their network</span>
-                    <button onClick={() => navigate('/spaces')}>Browse Spaces</button>
-                  </>
-                ) : (
-                  <>
-                    <span className="empty-icon">📅</span>
-                    <span>Connect your calendar to build your network</span>
-                    <button onClick={() => navigate('/connect')}>Connect Calendar</button>
-                  </>
-                )}
-              </div>
+        {/* ── Signals Dropdown ────────────────────────────────────── */}
+        {showSignals && (
+          <div className="u-signals-dropdown">
+            {signals.length === 0 ? (
+              <div className="u-signals-empty">No new signals</div>
             ) : (
-              filteredCompanies.slice(0, 60).map(company => (
-                <div 
-                  key={company.domain} 
-                  className={`company-tile ${expandedCompany === company.domain ? 'expanded' : ''}`}
+              signals.map(s => (
+                <div
+                  key={s.id}
+                  className="u-signal-row"
+                  onClick={() => { if (s.huntId) { toggleHunt(s.huntId); setShowSignals(false); } }}
                 >
-                  <div 
-                    className="company-tile-header"
-                    onClick={() => setExpandedCompany(
-                      expandedCompany === company.domain ? null : company.domain
-                    )}
-                  >
-                    <CompanyLogo domain={company.domain} name={company.name} size={32} />
-                    <div className="company-tile-info">
-                      <span className="company-tile-name">{company.name}</span>
-                      <span className="company-tile-meta">
-                        {company.contactCount} {company.contactCount === 1 ? 'person' : 'people'}
-                        {company.hasStrongConnection && <span className="strong-indicator">●</span>}
-                      </span>
-                    </div>
-                    {networkTab === 'spaces' && (
-                      <button 
-                        className="tile-intro-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRequestIntro(company.name, company.domain);
-                        }}
-                      >
-                        Intro
-                      </button>
-                    )}
+                  <span className="u-signal-icon">{s.icon}</span>
+                  <div className="u-signal-text">
+                    <span className="u-signal-main">{s.text}</span>
+                    <span className="u-signal-detail">{s.detail}</span>
                   </div>
-                  
-                  {expandedCompany === company.domain && (
-                    <div className="company-tile-contacts">
-                      {company.contacts.slice(0, 4).map(contact => (
-                        <div 
-                          key={contact.id} 
-                          className="tile-contact"
-                          onClick={() => handleContactClick(contact.id)}
-                        >
-                          <PersonAvatar email={contact.email} name={contact.name} size={24} />
-                          <div className="tile-contact-info">
-                            <span className="tile-contact-name">{contact.name}</span>
-                            <span className="tile-contact-title">{contact.title || contact.email}</span>
-                          </div>
-                          {'connectionStrength' in contact && (
-                            <span className={`tile-strength tile-strength--${contact.connectionStrength}`}>
-                              {contact.connectionStrength}
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                      {company.contacts.length > 4 && (
-                        <div className="tile-more">+{company.contacts.length - 4} more</div>
-                      )}
-                    </div>
-                  )}
                 </div>
               ))
             )}
           </div>
-        </main>
+        )}
+
+        {/* ── Hunts Bar ───────────────────────────────────────────── */}
+        <div className="u-hunts-bar">
+          <span className="u-hunts-label">Hunts</span>
+          {hunts.map(h => (
+            <button
+              key={h.id}
+              className={`u-hunt-pill ${selectedHunt === h.id ? 'active' : ''} ${(huntMatchCounts[h.id] || 0) > 0 ? 'has-matches' : ''}`}
+              onClick={() => toggleHunt(h.id)}
+            >
+              <span className="u-hunt-pill-text">{h.title}</span>
+              {(huntMatchCounts[h.id] || 0) > 0 && (
+                <span className="u-hunt-pill-count">{huntMatchCounts[h.id]}</span>
+              )}
+              <button className="u-hunt-pill-x" onClick={(e) => { e.stopPropagation(); removeHunt(h.id); }}>×</button>
+            </button>
+          ))}
+          {showHuntInput ? (
+            <div className="u-hunt-input-wrap">
+              <input
+                autoFocus
+                value={newHuntText}
+                onChange={e => setNewHuntText(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') addHunt(); if (e.key === 'Escape') setShowHuntInput(false); }}
+                placeholder="VP Sales at SaaS..."
+              />
+              <button onClick={addHunt}>Add</button>
+            </div>
+          ) : (
+            <button className="u-hunt-add" onClick={() => setShowHuntInput(true)}>+ Add hunt</button>
+          )}
+        </div>
+
+        {/* ── Stats Strip ─────────────────────────────────────────── */}
+        <div className="u-stats-strip">
+          <span className="u-stat">
+            <strong>{stats.total}</strong> companies
+          </span>
+          <span className="u-stat-dot" />
+          <span className="u-stat">
+            <strong>{contacts.length}</strong> contacts
+          </span>
+          <span className="u-stat-dot" />
+          <span className="u-stat u-stat--highlight">
+            <strong>{stats.overlap}</strong> overlap
+          </span>
+          <span className="u-stat-dot" />
+          <span className="u-stat u-stat--strong">
+            <strong>{stats.strongTies}</strong> strong
+          </span>
+          {selectedHunt && (
+            <>
+              <span className="u-stat-dot" />
+              <span className="u-stat u-stat--filter">
+                Showing <strong>{filteredCompanies.length}</strong> matches
+                <button onClick={() => setSelectedHunt(null)}>Clear</button>
+              </span>
+            </>
+          )}
+        </div>
+
+        {/* ── Company Grid ────────────────────────────────────────── */}
+        <div className="u-grid">
+          {loading ? (
+            <div className="u-grid-loading"><div className="u-spinner" /> Loading...</div>
+          ) : filteredCompanies.length === 0 ? (
+            <div className="u-grid-empty">
+              <span className="u-grid-empty-icon">{searchQuery || selectedHunt ? '🔍' : '📅'}</span>
+              <span>{searchQuery ? `No results for "${searchQuery}"` : selectedHunt ? 'No matches for this hunt' : 'Connect your calendar to get started'}</span>
+              {!searchQuery && !selectedHunt && (
+                <button onClick={() => navigate('/connect')}>Connect Calendar</button>
+              )}
+            </div>
+          ) : (
+            filteredCompanies.slice(0, 80).map(company => (
+              <div
+                key={company.domain}
+                className={[
+                  'u-tile',
+                  expandedDomain === company.domain ? 'expanded' : '',
+                  company.source === 'both' ? 'u-tile--overlap' : '',
+                  company.matchingHunts.length > 0 ? 'u-tile--hunt-match' : '',
+                ].filter(Boolean).join(' ')}
+              >
+                {/* Source badge */}
+                <div className={`u-tile-source u-tile-source--${company.source}`}>
+                  {company.source === 'both' ? '⚡' : company.source === 'mine' ? '👤' : '🌐'}
+                </div>
+
+                {/* Hunt match indicator */}
+                {company.matchingHunts.length > 0 && (
+                  <div className="u-tile-hunt-tags">
+                    {company.matchingHunts.map(hId => {
+                      const h = hunts.find(x => x.id === hId);
+                      return h ? <span key={hId} className="u-tile-hunt-tag">{h.title}</span> : null;
+                    })}
+                  </div>
+                )}
+
+                {/* Header */}
+                <div
+                  className="u-tile-header"
+                  onClick={() => setExpandedDomain(expandedDomain === company.domain ? null : company.domain)}
+                >
+                  <CompanyLogo domain={company.domain} name={company.name} size={28} />
+                  <div className="u-tile-info">
+                    <span className="u-tile-name">{company.name}</span>
+                    <span className="u-tile-meta">
+                      {company.myCount > 0 && <span>{company.myCount} yours</span>}
+                      {company.myCount > 0 && company.spaceCount > 0 && <span className="u-tile-meta-sep">·</span>}
+                      {company.spaceCount > 0 && <span>{company.spaceCount} via spaces</span>}
+                      {company.hasStrongConnection && <span className="u-tile-strong">●</span>}
+                    </span>
+                  </div>
+
+                  {/* Quick actions */}
+                  <div className="u-tile-actions" onClick={e => e.stopPropagation()}>
+                    {company.spaceCount > 0 && (
+                      <button className="u-tile-btn u-tile-btn--intro" onClick={() => openIntroPanel(company)}>
+                        Intro
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Expanded contacts */}
+                {expandedDomain === company.domain && (
+                  <div className="u-tile-body">
+                    {/* My contacts */}
+                    {company.myContacts.slice(0, 4).map(c => (
+                      <div key={c.id} className="u-contact" onClick={() => openPersonPanel(c, company)}>
+                        <PersonAvatar email={c.email} name={c.name} size={24} />
+                        <div className="u-contact-info">
+                          <span className="u-contact-name">{c.name}</span>
+                          <span className="u-contact-title">{c.title || c.email}</span>
+                        </div>
+                        <span className={`u-strength u-strength--${c.connectionStrength}`}>{c.connectionStrength}</span>
+                        <button className="u-contact-action" onClick={(e) => { e.stopPropagation(); handleOfferIntro(c, company.name); }}>
+                          ✉
+                        </button>
+                      </div>
+                    ))}
+                    {/* Space contacts */}
+                    {company.spaceContacts.slice(0, 4).map(c => (
+                      <div key={c.id} className="u-contact u-contact--space" onClick={() => openPersonPanel(c, company)}>
+                        <PersonAvatar email={c.email} name={c.name} size={24} />
+                        <div className="u-contact-info">
+                          <span className="u-contact-name">{c.name}</span>
+                          <span className="u-contact-title">{c.title || 'Contact'} <span className="u-via">via {c.userName}</span></span>
+                        </div>
+                        <button className="u-contact-action" onClick={(e) => { e.stopPropagation(); openIntroPanel(company); }}>
+                          Intro
+                        </button>
+                      </div>
+                    ))}
+                    {(company.myContacts.length + company.spaceContacts.length) > 8 && (
+                      <div className="u-tile-more">+{company.myContacts.length + company.spaceContacts.length - 8} more</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
       </div>
 
-      {/* Command Palette */}
-      <CommandPalette
-        isOpen={isCommandPaletteOpen}
-        onClose={() => setIsCommandPaletteOpen(false)}
-        contacts={contacts}
-      />
+      {/* ── Inline Panel ────────────────────────────────────────────── */}
+      {inlinePanel && (
+        <div className="u-panel-overlay" onClick={() => setInlinePanel(null)}>
+          <div className="u-panel" onClick={e => e.stopPropagation()}>
+            <button className="u-panel-close" onClick={() => setInlinePanel(null)}>×</button>
+
+            {inlinePanel.type === 'person' && inlinePanel.contact && (
+              <div className="u-panel-person">
+                <PersonAvatar email={inlinePanel.contact.email} name={inlinePanel.contact.name} size={56} />
+                <h2>{inlinePanel.contact.name}</h2>
+                <p className="u-panel-subtitle">
+                  {inlinePanel.contact.title || ''}
+                  {inlinePanel.company && ` at ${inlinePanel.company.name}`}
+                </p>
+                <p className="u-panel-email">{inlinePanel.contact.email}</p>
+
+                {'connectionStrength' in inlinePanel.contact && (
+                  <span className={`u-panel-strength u-strength--${(inlinePanel.contact as DisplayContact).connectionStrength}`}>
+                    {(inlinePanel.contact as DisplayContact).connectionStrength} connection
+                  </span>
+                )}
+
+                {'userName' in inlinePanel.contact && (inlinePanel.contact as any).userName && (
+                  <span className="u-panel-via">via {(inlinePanel.contact as any).userName}</span>
+                )}
+
+                <div className="u-panel-actions">
+                  <button
+                    className="u-primary-btn"
+                    onClick={() => {
+                      if (inlinePanel.company) openIntroPanel(inlinePanel.company);
+                    }}
+                  >
+                    ✨ Request Intro
+                  </button>
+                  <button
+                    className="u-action-btn"
+                    onClick={() => window.open(`mailto:${inlinePanel.contact!.email}`, '_blank')}
+                  >
+                    ✉ Email
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {inlinePanel.type === 'intro-request' && (
+              <div className="u-panel-intro">
+                <h2>✨ Request Intro</h2>
+                {inlinePanel.company ? (
+                  <>
+                    <div className="u-panel-target">
+                      <CompanyLogo domain={inlinePanel.company.domain} name={inlinePanel.company.name} size={32} />
+                      <span>{inlinePanel.company.name}</span>
+                    </div>
+
+                    <div className="u-panel-paths">
+                      <h4>Intro paths</h4>
+                      {inlinePanel.company.spaceContacts.slice(0, 3).map(c => (
+                        <div key={c.id} className="u-panel-path">
+                          <PersonAvatar email={c.email} name={c.name} size={28} />
+                          <div>
+                            <span className="u-panel-path-name">{c.name}</span>
+                            <span className="u-panel-path-via">via {c.userName}</span>
+                          </div>
+                        </div>
+                      ))}
+                      {inlinePanel.company.myContacts.slice(0, 2).map(c => (
+                        <div key={c.id} className="u-panel-path">
+                          <PersonAvatar email={c.email} name={c.name} size={28} />
+                          <div>
+                            <span className="u-panel-path-name">{c.name}</span>
+                            <span className="u-panel-path-via">your contact · {c.connectionStrength}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <textarea className="u-panel-textarea" placeholder="What would you like to discuss with them?" rows={3} />
+
+                    <div className="u-panel-actions">
+                      <button className="u-primary-btn" onClick={() => navigate(`/request/new?company=${encodeURIComponent(inlinePanel.company!.name)}&domain=${encodeURIComponent(inlinePanel.company!.domain)}`)}>
+                        Send Request
+                      </button>
+                      <button className="u-action-btn" onClick={() => setInlinePanel(null)}>Cancel</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="u-panel-hint">Who do you want an intro to?</p>
+                    <input
+                      className="u-panel-input"
+                      placeholder="Company name or person..."
+                      autoFocus
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          navigate(`/request/new`);
+                        }
+                      }}
+                    />
+                    <div className="u-panel-actions">
+                      <button className="u-primary-btn" onClick={() => navigate('/request/new')}>Continue</button>
+                      <button className="u-action-btn" onClick={() => setInlinePanel(null)}>Cancel</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
