@@ -191,7 +191,7 @@ export function AIHomePage() {
   const [joinStatus, setJoinStatus] = useState<{ type: 'success' | 'error' | 'pending'; message: string } | null>(null);
 
   // Connection management state
-  const [showConnectForm, setShowConnectForm] = useState(false);
+  const [, setShowConnectForm] = useState(false);
   const [connectEmail, setConnectEmail] = useState('');
   const [copiedCode, setCopiedCode] = useState(false);
 
@@ -2393,11 +2393,36 @@ export function AIHomePage() {
                   )}
 
                   <div className="sb-spaces-actions" style={{ marginTop: '0.5rem' }}>
-                    <button className="sb-space-action-btn primary" onClick={() => { setShowCreateSpace(true); setSidebarOpen(true); }}>+ Create</button>
-                    <button className="sb-space-action-btn" onClick={() => { setShowJoinSpace(v => !v); setJoinCode(''); setJoinStatus(null); }}>
+                    <button className="sb-space-action-btn primary" onClick={() => { setShowCreateSpace(v => !v); setShowJoinSpace(false); }}>
+                      {showCreateSpace ? 'Cancel' : '+ Create'}
+                    </button>
+                    <button className="sb-space-action-btn" onClick={() => { setShowJoinSpace(v => !v); setShowCreateSpace(false); setJoinCode(''); setJoinStatus(null); }}>
                       {showJoinSpace ? 'Cancel' : 'Join'}
                     </button>
                   </div>
+
+                  {/* Inline create space form */}
+                  {showCreateSpace && (
+                    <div className="sb-space-form-row" style={{ marginTop: '0.5rem' }}>
+                      <input
+                        className="sb-input sb-space-emoji-input"
+                        value={newSpaceEmoji}
+                        onChange={e => setNewSpaceEmoji(e.target.value)}
+                        maxLength={2}
+                        style={{ width: '2.5rem', textAlign: 'center' }}
+                      />
+                      <input
+                        className="sb-input"
+                        style={{ flex: 1 }}
+                        placeholder="Space name"
+                        value={newSpaceName}
+                        onChange={e => setNewSpaceName(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') createSpace(); }}
+                        autoFocus
+                      />
+                      <button className="sb-space-action-btn primary" onClick={createSpace} disabled={!newSpaceName.trim()}>→</button>
+                    </div>
+                  )}
 
                   {/* Inline join space form */}
                   {showJoinSpace && (
