@@ -32,7 +32,10 @@ router.get('/', async (req, res) => {
           },
         },
         _count: {
-          select: { members: { where: { status: 'approved' } } },
+          select: {
+            members: { where: { status: 'approved' } },
+            requests: { where: { status: 'open' } },
+          },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -327,10 +330,33 @@ router.post('/join/:inviteCode', async (req, res) => {
       },
     });
 
+    const joinerUser = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+
     if (status === 'pending') {
+      // Notify space owner about pending join request
+      await prisma.notification.create({
+        data: {
+          userId: space.ownerId,
+          type: 'space_join_request',
+          title: `Join request: ${space.name}`,
+          body: `${joinerUser?.name || 'Someone'} wants to join ${space.emoji || ''} ${space.name}.`,
+          data: { spaceId: space.id, spaceName: space.name, spaceEmoji: space.emoji, requesterId: userId },
+        },
+      }).catch(() => {});
       res.json({ message: 'Your request to join has been submitted and is pending approval', pending: true });
       return;
     }
+
+    // Notify space owner that someone joined
+    await prisma.notification.create({
+      data: {
+        userId: space.ownerId,
+        type: 'space_member_joined',
+        title: `New member: ${space.name}`,
+        body: `${joinerUser?.name || 'Someone'} joined ${space.emoji || ''} ${space.name}.`,
+        data: { spaceId: space.id, spaceName: space.name, spaceEmoji: space.emoji, memberId: userId },
+      },
+    }).catch(() => {});
 
     const updatedSpace = await prisma.space.findUnique({
       where: { id: space.id },
@@ -466,6 +492,17 @@ router.post('/:id/members/:memberId/approve', async (req, res) => {
       data: { status: 'approved' },
     });
 
+    // Notify the approved member
+    await prisma.notification.create({
+      data: {
+        userId: memberId,
+        type: 'space_approved',
+        title: `Welcome to ${space.name}!`,
+        body: `Your request to join ${space.emoji || ''} ${space.name} was approved.`,
+        data: { spaceId: id, spaceName: space.name, spaceEmoji: space.emoji },
+      },
+    }).catch(() => {});
+
     res.json({ success: true, message: 'Member approved' });
   } catch (error: unknown) {
     console.error('Error approving member:', error);
@@ -600,6 +637,18 @@ router.post('/:id/members', async (req, res) => {
       },
     });
 
+    // Notify the added user
+    const inviter = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+    await prisma.notification.create({
+      data: {
+        userId: userToAdd.id,
+        type: 'space_invited',
+        title: `Added to ${space.name}`,
+        body: `${inviter?.name || 'Someone'} added you to ${space.emoji || ''} ${space.name}.`,
+        data: { spaceId: id, spaceName: space.name, spaceEmoji: space.emoji, inviterId: userId },
+      },
+    }).catch(() => {});
+
     const updatedSpace = await prisma.space.findUnique({
       where: { id },
       include: {
@@ -668,9 +717,36 @@ router.delete('/:id/members/:memberId', async (req, res) => {
       return;
     }
 
+    const isRemovingSelf = userId === memberId;
+
     await prisma.spaceMember.delete({
       where: { spaceId_userId: { spaceId: id, userId: memberId } },
     });
+
+    if (isRemovingSelf) {
+      // User left voluntarily — notify space owner
+      const leaverUser = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+      await prisma.notification.create({
+        data: {
+          userId: space.ownerId,
+          type: 'space_member_left',
+          title: `Member left: ${space.name}`,
+          body: `${leaverUser?.name || 'Someone'} left ${space.emoji || ''} ${space.name}.`,
+          data: { spaceId: id, spaceName: space.name, spaceEmoji: space.emoji, memberId: userId },
+        },
+      }).catch(() => {});
+    } else {
+      // Removed by owner/admin — notify the removed member
+      await prisma.notification.create({
+        data: {
+          userId: memberId,
+          type: 'space_removed',
+          title: `Removed from ${space.name}`,
+          body: `You were removed from ${space.emoji || ''} ${space.name}.`,
+          data: { spaceId: id, spaceName: space.name, spaceEmoji: space.emoji },
+        },
+      }).catch(() => {});
+    }
 
     res.json({ success: true });
   } catch (error: unknown) {
@@ -702,6 +778,18 @@ router.post('/:id/leave', async (req, res) => {
     await prisma.spaceMember.delete({
       where: { spaceId_userId: { spaceId: id, userId } },
     });
+
+    // Notify space owner
+    const leaverUser = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+    await prisma.notification.create({
+      data: {
+        userId: space.ownerId,
+        type: 'space_member_left',
+        title: `Member left: ${space.name}`,
+        body: `${leaverUser?.name || 'Someone'} left ${space.emoji || ''} ${space.name}.`,
+        data: { spaceId: id, spaceName: space.name, spaceEmoji: space.emoji, memberId: userId },
+      },
+    }).catch(() => {});
 
     res.json({ success: true });
   } catch (error: unknown) {
@@ -803,6 +891,17 @@ router.get('/:id/reach', async (req, res) => {
           industry: contact.company.industry,
           sizeBucket: contact.company.sizeBucket,
           logo: contact.company.logo,
+          employeeCount: contact.company.employeeCount,
+          foundedYear: contact.company.foundedYear,
+          annualRevenue: contact.company.annualRevenue,
+          totalFunding: contact.company.totalFunding,
+          lastFundingRound: contact.company.lastFundingRound,
+          lastFundingDate: contact.company.lastFundingDate,
+          city: contact.company.city,
+          country: contact.company.country,
+          description: contact.company.description,
+          linkedinUrl: contact.company.linkedinUrl,
+          enrichedAt: contact.company.enrichedAt,
           contacts: [contactInfo],
         });
       }

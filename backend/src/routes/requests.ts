@@ -6,6 +6,39 @@ import prisma from '../lib/prisma.js';
 
 const router = Router();
 
+// Get requests targeted at current user via 1-1 connection
+router.get('/user/incoming', authMiddleware, async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+
+    // Find requests where normalizedQuery.connectionPeerId matches current user
+    const requests = await prisma.introRequest.findMany({
+      where: {
+        normalizedQuery: { path: ['connectionPeerId'], equals: userId },
+        requesterId: { not: userId }, // not my own requests
+      },
+      include: {
+        requester: {
+          select: { id: true, name: true, avatar: true, email: true },
+        },
+        offers: {
+          include: {
+            introducer: {
+              select: { id: true, name: true, avatar: true },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    res.json(requests);
+  } catch (error: unknown) {
+    console.error('Error fetching incoming requests:', error);
+    res.status(500).json({ error: 'Failed to fetch incoming requests' });
+  }
+});
+
 // Get current user's requests - must be before /:id
 router.get('/user/mine', authMiddleware, async (req, res) => {
   try {
@@ -110,7 +143,7 @@ router.get('/:id', optionalAuthMiddleware, async (req, res) => {
 router.post('/', authMiddleware, validate(schemas.createRequest), async (req, res) => {
   try {
     const userId = (req as AuthenticatedRequest).user!.id;
-    const { rawText, normalizedQuery, bidAmount, currency, spaceId } = req.body;
+    const { rawText, normalizedQuery, bidAmount, currency, spaceId, connectionPeerId } = req.body;
 
     // If spaceId is provided, verify user is an approved member of the space
     if (spaceId) {
@@ -123,11 +156,14 @@ router.post('/', authMiddleware, validate(schemas.createRequest), async (req, re
       }
     }
 
+    // Merge connectionPeerId into normalizedQuery so we can query it later
+    const mergedQuery = { ...(normalizedQuery || {}), ...(connectionPeerId ? { connectionPeerId } : {}) };
+
     const request = await prisma.introRequest.create({
       data: {
         requesterId: userId,
         rawText,
-        normalizedQuery: normalizedQuery || {},
+        normalizedQuery: mergedQuery,
         bidAmount: bidAmount || 0,
         currency: currency || 'USD',
         status: 'open',
@@ -142,6 +178,114 @@ router.post('/', authMiddleware, validate(schemas.createRequest), async (req, re
         },
       },
     });
+
+    // Create notifications ONLY for connectors — space members who have
+    // approved contacts at the target company (not all space members).
+    if (spaceId) {
+      try {
+        const companyDomain = (normalizedQuery as Record<string, unknown>)?.companyDomain as string;
+        const companyId = (normalizedQuery as Record<string, unknown>)?.companyId as string;
+        const companyName = (normalizedQuery as Record<string, unknown>)?.companyName as string || 'a company';
+        const requesterName = request.requester.name || 'Someone';
+        const spaceName = request.space?.name || 'your space';
+
+        // Get all approved space members except the requester
+        const spaceMembers = await prisma.spaceMember.findMany({
+          where: {
+            spaceId,
+            status: 'approved',
+            userId: { not: userId },
+          },
+          select: { userId: true },
+        });
+
+        const memberUserIds = spaceMembers.map(m => m.userId);
+
+        if (memberUserIds.length > 0) {
+          // Find which of those members actually have approved contacts at the target company
+          const connectorIds = new Set<string>();
+
+          if (companyId) {
+            const contacts = await prisma.contact.findMany({
+              where: {
+                userId: { in: memberUserIds },
+                companyId,
+                isApproved: true,
+              },
+              select: { userId: true },
+            });
+            contacts.forEach(c => connectorIds.add(c.userId));
+          } else if (companyDomain) {
+            // Fallback: match by company domain
+            const company = await prisma.company.findUnique({ where: { domain: companyDomain } });
+            if (company) {
+              const contacts = await prisma.contact.findMany({
+                where: {
+                  userId: { in: memberUserIds },
+                  companyId: company.id,
+                  isApproved: true,
+                },
+                select: { userId: true },
+              });
+              contacts.forEach(c => connectorIds.add(c.userId));
+            }
+          }
+
+          if (connectorIds.size > 0) {
+            await prisma.notification.createMany({
+              data: Array.from(connectorIds).map(connectorUserId => ({
+                userId: connectorUserId,
+                type: 'intro_request',
+                title: `Intro request: ${companyName}`,
+                body: `${requesterName} is looking for an intro to ${companyName}. "${rawText}"`,
+                data: {
+                  requestId: request.id,
+                  spaceId,
+                  spaceName,
+                  spaceEmoji: request.space?.emoji || null,
+                  companyName,
+                  companyDomain: companyDomain || null,
+                  companyId: companyId || null,
+                  requesterId: userId,
+                  requesterName,
+                  rawText,
+                },
+              })),
+            });
+          }
+        }
+      } catch (notifError) {
+        console.error('Failed to create notifications:', notifError);
+      }
+    }
+
+    // For 1-1 connection requests: notify the peer directly
+    if (connectionPeerId && connectionPeerId !== userId) {
+      try {
+        const companyName = (normalizedQuery as Record<string, unknown>)?.companyName as string || 'a company';
+        const requesterName = request.requester.name || 'Someone';
+        await prisma.notification.create({
+          data: {
+            userId: connectionPeerId,
+            type: 'intro_request',
+            title: `Intro request: ${companyName}`,
+            body: `${requesterName} is looking for an intro to ${companyName}. "${rawText}"`,
+            data: {
+              requestId: request.id,
+              companyName,
+              companyDomain: (normalizedQuery as Record<string, unknown>)?.companyDomain || null,
+              companyId: (normalizedQuery as Record<string, unknown>)?.companyId || null,
+              requesterId: userId,
+              requesterName,
+              connectionPeerId,
+              rawText,
+            },
+          },
+        });
+      } catch (notifError) {
+        console.error('Failed to create 1-1 notification:', notifError);
+      }
+    }
 
     res.status(201).json(request);
   } catch (error: unknown) {
@@ -179,6 +323,96 @@ router.patch('/:id/status', authMiddleware, validate(schemas.updateRequestStatus
     res.json(request);
   } catch (error: unknown) {
     res.status(500).json({ error: 'Failed to update request' });
+  }
+});
+
+// Decline request (anonymous — connector declines without revealing identity)
+router.patch('/:id/decline', authMiddleware, async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+    const { reason } = req.body || {};
+
+    const existing = await prisma.introRequest.findUnique({
+      where: { id: req.params.id },
+      include: {
+        space: { select: { id: true, name: true, emoji: true } },
+      },
+    });
+
+    if (!existing) {
+      res.status(404).json({ error: 'Request not found' });
+      return;
+    }
+
+    // Cannot decline your own request
+    if (existing.requesterId === userId) {
+      res.status(400).json({ error: 'Cannot decline your own request' });
+      return;
+    }
+
+    // Must be a member of the space
+    if (existing.spaceId) {
+      const membership = await prisma.spaceMember.findUnique({
+        where: { spaceId_userId: { spaceId: existing.spaceId, userId } },
+      });
+      if (!membership || membership.status !== 'approved') {
+        res.status(403).json({ error: 'You must be a member of the space' });
+        return;
+      }
+    }
+
+    // Update request status to declined
+    const updated = await prisma.introRequest.update({
+      where: { id: req.params.id },
+      data: { status: 'declined' },
+    });
+
+    // Create anonymous notification for the requester
+    const nq = existing.normalizedQuery as Record<string, unknown> || {};
+    const companyName = (nq.companyName as string) || 'a company';
+    const companyDomain = (nq.companyDomain as string) || null;
+    const spaceId = existing.spaceId;
+    const spaceName = existing.space?.name || null;
+    const spaceEmoji = (existing.space as any)?.emoji || null;
+    const connPeerId = (nq.connectionPeerId as string) || null;
+
+    // For 1-1 requests, look up the peer's name
+    let connPeerName: string | null = null;
+    if (connPeerId && !spaceId) {
+      const peer = await prisma.user.findUnique({ where: { id: connPeerId }, select: { name: true } });
+      connPeerName = peer?.name || null;
+    }
+
+    let notifBody = `Your intro request to ${companyName} was declined.`;
+    if (reason) {
+      notifBody += ` Reason: "${reason}"`;
+    }
+
+    await prisma.notification.create({
+      data: {
+        userId: existing.requesterId,
+        type: 'intro_declined',
+        title: `Declined: ${companyName}`,
+        body: notifBody,
+        data: {
+          requestId: existing.id,
+          companyName,
+          companyDomain,
+          spaceId: spaceId || null,
+          spaceName: spaceName || null,
+          spaceEmoji: spaceEmoji || null,
+          reason: reason || null,
+          connectionPeerId: connPeerId,
+          connectionPeerName: connPeerName,
+          // No connector identity — anonymous
+        },
+      },
+    });
+
+    res.json(updated);
+  } catch (error: unknown) {
+    console.error('Decline request error:', error);
+    res.status(500).json({ error: 'Failed to decline request' });
   }
 });
 

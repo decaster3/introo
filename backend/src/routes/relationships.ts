@@ -123,7 +123,23 @@ router.get('/contacts', authMiddleware, async (req, res) => {
       prisma.contact.count({ where }),
     ]);
 
-    res.json(createPaginatedResponse(contacts, total, pagination));
+    // Compute firstSeenAt (earliest meeting date) for each contact
+    const contactIds = contacts.map(c => c.id);
+    const firstMeetings = contactIds.length > 0
+      ? await prisma.meeting.groupBy({
+          by: ['contactId'],
+          where: { contactId: { in: contactIds } },
+          _min: { date: true },
+        })
+      : [];
+    const firstSeenMap = new Map(firstMeetings.map(fm => [fm.contactId, fm._min.date]));
+
+    const enrichedContacts = contacts.map(c => ({
+      ...c,
+      firstSeenAt: firstSeenMap.get(c.id) || c.lastSeenAt,
+    }));
+
+    res.json(createPaginatedResponse(enrichedContacts, total, pagination));
   } catch (error: unknown) {
     res.status(500).json({ error: 'Failed to fetch contacts' });
   }

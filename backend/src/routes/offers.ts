@@ -39,6 +39,7 @@ router.post('/', authMiddleware, validate(schemas.createOffer), async (req, res)
     // Verify request exists and is open
     const request = await prisma.introRequest.findUnique({
       where: { id: requestId },
+      include: { space: { select: { id: true, name: true, emoji: true } } },
     });
 
     if (!request) {
@@ -78,10 +79,52 @@ router.post('/', authMiddleware, validate(schemas.createOffer), async (req, res)
           select: { id: true, name: true, avatar: true },
         },
         request: {
-          select: { id: true, rawText: true, requesterId: true },
+          select: { id: true, rawText: true, requesterId: true, spaceId: true, normalizedQuery: true },
         },
       },
     });
+
+    // Notify the requester that someone offered an intro
+    try {
+      const nq = (request.normalizedQuery as Record<string, unknown>) || {};
+      const companyName = (nq?.companyName as string) || 'a company';
+      const introducerName = offer.introducer.name || 'Someone';
+      const spaceId = request.spaceId;
+      const spaceName = request.space?.name || null;
+      const spaceEmoji = request.space?.emoji || null;
+      const connPeerId = (nq?.connectionPeerId as string) || null;
+
+      // For 1-1 requests, look up the peer's name
+      let connPeerName: string | null = null;
+      if (connPeerId && !spaceId) {
+        const peer = await prisma.user.findUnique({ where: { id: connPeerId }, select: { name: true } });
+        connPeerName = peer?.name || null;
+      }
+
+      await prisma.notification.create({
+        data: {
+          userId: request.requesterId,
+          type: 'intro_offered',
+          title: `Intro offered: ${companyName}`,
+          body: `${introducerName} offered to introduce you to someone at ${companyName}.`,
+          data: {
+            requestId,
+            offerId: offer.id,
+            spaceId: spaceId || null,
+            spaceName,
+            spaceEmoji,
+            companyName,
+            companyDomain: (nq?.companyDomain as string) || null,
+            introducerId: userId,
+            introducerName,
+            connectionPeerId: connPeerId,
+            connectionPeerName: connPeerName,
+          },
+        },
+      });
+    } catch (notifError) {
+      console.error('Failed to create intro_offered notification:', notifError);
+    }
 
     res.status(201).json(offer);
   } catch (error: unknown) {

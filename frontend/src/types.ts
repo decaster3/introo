@@ -67,6 +67,8 @@ export interface Contact {
   country?: string | null;
   headline?: string | null;
   enrichedAt?: string | null;
+  createdAt?: string;
+  firstSeenAt?: string;
 }
 
 // =============================================================================
