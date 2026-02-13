@@ -87,7 +87,7 @@ router.get('/companies', async (req, res) => {
 router.get('/contacts', authMiddleware, async (req, res) => {
   try {
     const userId = (req as AuthenticatedRequest).user!.id;
-    const pagination = getPaginationParams(req, 50);
+    const pagination = getPaginationParams(req, 50, 10000);
     const { approved, search } = req.query;
     
     const where: Record<string, unknown> = { userId };
@@ -115,6 +115,9 @@ router.get('/contacts', authMiddleware, async (req, res) => {
             orderBy: { date: 'desc' },
             take: 5,
           },
+          sourceAccounts: {
+            select: { id: true, email: true },
+          },
         },
         orderBy: { lastSeenAt: 'desc' },
         skip: pagination.skip,
@@ -137,6 +140,7 @@ router.get('/contacts', authMiddleware, async (req, res) => {
     const enrichedContacts = contacts.map(c => ({
       ...c,
       firstSeenAt: firstSeenMap.get(c.id) || c.lastSeenAt,
+      sourceAccountEmails: c.sourceAccounts.map(sa => sa.email),
     }));
 
     res.json(createPaginatedResponse(enrichedContacts, total, pagination));

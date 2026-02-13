@@ -7,6 +7,13 @@ export interface User {
   name: string;
   email?: string;
   avatar?: string | null;
+  title?: string | null;
+  company?: string | null;
+  companyDomain?: string | null;
+  linkedinUrl?: string | null;
+  headline?: string | null;
+  city?: string | null;
+  country?: string | null;
 }
 
 export interface Company {
@@ -59,7 +66,7 @@ export interface Contact {
   lastEventTitle?: string;
   meetings?: Meeting[];
   source?: string;
-  sourceAccountEmail?: string;
+  sourceAccountEmails?: string[];
   linkedinUrl?: string | null;
   photoUrl?: string | null;
   city?: string | null;
@@ -77,8 +84,14 @@ export interface Contact {
 
 export function calculateStrength(lastSeenAt: string, meetingsCount: number): 'strong' | 'medium' | 'weak' {
   const daysSince = Math.floor((Date.now() - new Date(lastSeenAt).getTime()) / (1000 * 60 * 60 * 24));
-  if (daysSince <= 7 && meetingsCount >= 3) return 'strong';
-  if (daysSince <= 30 && meetingsCount >= 2) return 'medium';
+  // Strong: frequent recent contact
+  if (meetingsCount >= 5) return 'strong';
+  if (daysSince <= 30 && meetingsCount >= 3) return 'strong';
+  if (daysSince <= 14 && meetingsCount >= 2) return 'strong';
+  // Medium: any meaningful contact
+  if (meetingsCount >= 2) return 'medium';
+  if (daysSince <= 90) return 'medium';
+  // Weak: only 1 meeting and it was 90+ days ago
   return 'weak';
 }
 

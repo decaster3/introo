@@ -56,8 +56,19 @@ router.post('/', async (req, res) => {
       return;
     }
 
-    // Find the target user
-    const targetUser = await prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
+    // Find the target user by primary email or any linked calendar account email
+    const normalizedEmail = email.trim().toLowerCase();
+    let targetUser = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (!targetUser) {
+      // Check calendar account emails
+      const calAccount = await prisma.calendarAccount.findFirst({
+        where: { email: normalizedEmail, isActive: true },
+        select: { userId: true },
+      });
+      if (calAccount) {
+        targetUser = await prisma.user.findUnique({ where: { id: calAccount.userId } });
+      }
+    }
     if (!targetUser) {
       res.status(404).json({ error: 'User not found. They need to sign up first.' });
       return;
@@ -101,19 +112,44 @@ router.post('/', async (req, res) => {
         return;
       }
       // If rejected, allow re-request by updating
+      const reSender = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
       await prisma.directConnection.update({
         where: { id: existing.id },
         data: { status: 'pending', fromUserId: userId, toUserId: targetUser.id },
       });
+
+      // Notify the target user about the new request
+      await prisma.notification.create({
+        data: {
+          userId: targetUser.id,
+          type: 'connection_request',
+          title: `${reSender?.name || 'Someone'} wants to connect`,
+          body: 'Accept to share your networks with each other.',
+          data: { connectionId: existing.id, fromUserId: userId, fromUserName: reSender?.name },
+        },
+      });
+
       res.json({ id: existing.id, status: 'pending', peer: { id: targetUser.id, name: targetUser.name, email: targetUser.email, avatar: targetUser.avatar } });
       return;
     }
 
     // Create new connection
+    const sender = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
     const connection = await prisma.directConnection.create({
       data: { fromUserId: userId, toUserId: targetUser.id },
       include: {
         toUser: { select: { id: true, name: true, email: true, avatar: true } },
+      },
+    });
+
+    // Notify the target user
+    await prisma.notification.create({
+      data: {
+        userId: targetUser.id,
+        type: 'connection_request',
+        title: `${sender?.name || 'Someone'} wants to connect`,
+        body: 'Accept to share your networks with each other.',
+        data: { connectionId: connection.id, fromUserId: userId, fromUserName: sender?.name },
       },
     });
 
@@ -143,11 +179,23 @@ router.post('/:id/accept', async (req, res) => {
       return;
     }
 
+    const accepter = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
     const updated = await prisma.directConnection.update({
       where: { id: connection.id },
       data: { status: 'accepted' },
       include: {
         fromUser: { select: { id: true, name: true, email: true, avatar: true } },
+      },
+    });
+
+    // Notify the original sender that their request was accepted
+    await prisma.notification.create({
+      data: {
+        userId: connection.fromUserId,
+        type: 'connection_accepted',
+        title: `${accepter?.name || 'Someone'} accepted your connection`,
+        body: 'You are now connected.',
+        data: { connectionId: connection.id, peerId: userId, peerName: accepter?.name },
       },
     });
 

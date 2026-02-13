@@ -22,7 +22,7 @@ const FILTER_SCHEMA = {
       properties: {
         description: {
           type: 'string' as const,
-          description: 'Business type, industry, or description keyword to match (e.g. "fintech", "real estate", "SaaS")',
+          description: 'Business type, industry, or description keyword to match (e.g. "fintech", "real estate", "SaaS"). Use empty string if not applicable.',
         },
         employeeRanges: {
           type: 'array' as const,
@@ -30,15 +30,15 @@ const FILTER_SCHEMA = {
             type: 'string' as const,
             enum: ['1-10', '11-50', '51-200', '201-1000', '1001-5000', '5000+'],
           },
-          description: 'Employee count ranges to filter by',
+          description: 'Employee count ranges to filter by. Use empty array if not applicable.',
         },
         country: {
           type: 'string' as const,
-          description: 'Country name to filter by (e.g. "United States", "Germany")',
+          description: 'Country name to filter by (e.g. "United States", "Germany"). Use empty string if not applicable.',
         },
         city: {
           type: 'string' as const,
-          description: 'City name to filter by (e.g. "San Francisco", "London")',
+          description: 'City name to filter by (e.g. "San Francisco", "London"). Use empty string if not applicable.',
         },
         fundingRounds: {
           type: 'array' as const,
@@ -46,15 +46,15 @@ const FILTER_SCHEMA = {
             type: 'string' as const,
             enum: ['no-funding', 'pre-seed', 'series-a', 'series-b'],
           },
-          description: 'Funding rounds to filter by. "series-b" includes Series B, C, D, E and later.',
+          description: 'Funding rounds to filter by. "series-b" includes Series B, C, D, E and later. Use empty array if not applicable.',
         },
         foundedFrom: {
           type: 'string' as const,
-          description: 'Minimum founding year (e.g. "2020")',
+          description: 'Minimum founding year (e.g. "2020"). Use empty string if not applicable.',
         },
         foundedTo: {
           type: 'string' as const,
-          description: 'Maximum founding year (e.g. "2024")',
+          description: 'Maximum founding year (e.g. "2024"). Use empty string if not applicable.',
         },
         revenueRanges: {
           type: 'array' as const,
@@ -62,20 +62,20 @@ const FILTER_SCHEMA = {
             type: 'string' as const,
             enum: ['0-1m', '1-10m', '10-50m', '50-100m', '100m+'],
           },
-          description: 'Annual revenue ranges to filter by',
+          description: 'Annual revenue ranges to filter by. Use empty array if not applicable.',
         },
         sourceFilter: {
           type: 'string' as const,
           enum: ['all', 'mine', 'spaces', 'both'],
-          description: '"mine" = only my contacts, "spaces" = only from shared spaces, "both" = companies where I AND spaces have contacts, "all" = no filter',
+          description: '"mine" = only my contacts, "spaces" = only from shared spaces, "both" = companies where I AND spaces have contacts, "all" = no filter. Default "all".',
         },
         strengthFilter: {
           type: 'string' as const,
           enum: ['all', 'strong', 'medium', 'weak'],
-          description: 'Connection strength filter. "strong" = met recently/frequently, "weak" = old/infrequent contact',
+          description: 'Connection strength filter. "strong" = met recently/frequently, "weak" = old/infrequent contact. Default "all".',
         },
       },
-      required: [] as string[],
+      required: ['description', 'employeeRanges', 'country', 'city', 'fundingRounds', 'foundedFrom', 'foundedTo', 'revenueRanges', 'sourceFilter', 'strengthFilter'] as string[],
       additionalProperties: false,
     },
     semanticKeywords: {
@@ -168,6 +168,93 @@ router.post('/parse-query', async (req, res) => {
   } catch (error: unknown) {
     console.error('AI parse-query error:', error);
     const message = error instanceof Error ? error.message : 'Failed to parse query';
+    res.status(500).json({ error: message });
+  }
+});
+
+// ─── Expand Keywords ─────────────────────────────────────────────────────────
+
+const EXPAND_KEYWORDS_SCHEMA = {
+  type: 'object' as const,
+  properties: {
+    keywords: {
+      type: 'array' as const,
+      items: { type: 'string' as const },
+      description: 'Array of 10-30 lowercase search keywords expanded from the input text',
+    },
+  },
+  required: ['keywords'] as string[],
+  additionalProperties: false,
+};
+
+const EXPAND_SYSTEM_PROMPT = `You are a keyword expansion engine for a professional networking app. Given a business description or category, generate 10-25 search keywords that will be used to match against company names, descriptions, and industries.
+
+RULES:
+1. Include the original term(s) as keywords
+2. Focus on SIMPLE, COMMON words that describe what the business actually does or sells — the kind of words you'd find in a company's one-line description or industry tag
+3. Prefer plain business words over technical jargon (e.g. prefer "payments" over "transaction solutions", prefer "lending" over "credit solutions")
+4. Include the core industry label and its most obvious synonyms
+5. Include what the companies BUILD or SELL (products/services), not abstract concepts
+6. All keywords should be lowercase
+7. Keep keywords to 1-2 words max — single words are best
+8. Do NOT generate overly specific technical terms, compound phrases, or niche jargon
+9. Do NOT pad the list with loosely related financial/tech buzzwords
+10. Aim for 10-20 high-quality keywords, not 30+ low-quality ones
+
+Examples:
+- "fintech" → ["fintech", "financial technology", "payments", "banking", "lending", "insurance", "neobank", "money transfer", "credit", "debit", "wallet", "checkout", "billing"]
+- "real estate" → ["real estate", "property", "housing", "rental", "mortgage", "broker", "leasing", "residential", "commercial", "realtor", "proptech", "building"]
+- "B2B" → ["b2b", "enterprise", "saas", "software", "platform", "crm", "analytics", "automation", "cloud", "business", "workflow", "services"]
+- "AI" → ["ai", "artificial intelligence", "machine learning", "deep learning", "nlp", "computer vision", "data science", "automation", "chatbot", "generative"]
+- "food" → ["food", "restaurant", "delivery", "grocery", "meal", "catering", "kitchen", "dining", "recipe", "snack", "beverage", "organic"]`;
+
+router.post('/expand-keywords', async (req, res) => {
+  try {
+    const { text } = req.body as { text: string };
+
+    if (!text || typeof text !== 'string' || text.trim().length < 2) {
+      res.status(400).json({ error: 'Text must be at least 2 characters' });
+      return;
+    }
+
+    if (!process.env.OPENAI_API_KEY) {
+      res.status(500).json({ error: 'OpenAI API key not configured' });
+      return;
+    }
+
+    console.log(`[AI] Expanding keywords for: "${text}"`);
+    const startTime = Date.now();
+
+    const completion = await getOpenAI().chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: EXPAND_SYSTEM_PROMPT },
+        { role: 'user', content: `Expand into search keywords: "${text.trim()}"` },
+      ],
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'expanded_keywords',
+          strict: true,
+          schema: EXPAND_KEYWORDS_SCHEMA,
+        },
+      },
+      temperature: 0.3,
+      max_tokens: 400,
+    });
+
+    const content = completion.choices[0]?.message?.content;
+    if (!content) {
+      res.status(500).json({ error: 'Empty response from AI' });
+      return;
+    }
+
+    const parsed = JSON.parse(content);
+    console.log(`[AI] Expanded "${text}" into ${parsed.keywords.length} keywords in ${Date.now() - startTime}ms`);
+    res.json(parsed);
+  } catch (error: unknown) {
+    console.error('AI expand-keywords error:', error);
+    const message = error instanceof Error ? error.message : 'Failed to expand keywords';
     res.status(500).json({ error: message });
   }
 });

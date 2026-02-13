@@ -1,13 +1,30 @@
 import { Router } from 'express';
 import passport from 'passport';
-import { generateToken, verifyToken, authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
+import { google } from 'googleapis';
+import { generateToken, verifyToken, authMiddleware, encryptToken, AuthenticatedRequest } from '../middleware/auth.js';
 import { cookieConfig } from '../middleware/security.js';
+import prisma from '../lib/prisma.js';
+import { enrichUserProfile } from '../services/apollo.js';
 
 const router = Router();
 
-// Initiate Google OAuth
+const ADD_ACCOUNT_PREFIX = 'add_account:';
+
+function getCallbackUrl() {
+  return process.env.GOOGLE_CALLBACK_URL || 'http://localhost:3001/auth/google/callback';
+}
+
+function buildOAuth2Client() {
+  return new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID || '',
+    process.env.GOOGLE_CLIENT_SECRET || '',
+    getCallbackUrl(),
+  );
+}
+
+// Initiate Google OAuth (login)
 router.get('/google', (req, res, next) => {
-  console.log('Initiating OAuth, GOOGLE_CALLBACK_URL:', process.env.GOOGLE_CALLBACK_URL);
+  console.log('Initiating OAuth, GOOGLE_CALLBACK_URL:', getCallbackUrl());
   
   passport.authenticate('google', {
     accessType: 'offline',
@@ -15,23 +32,151 @@ router.get('/google', (req, res, next) => {
   } as any)(req, res, next);
 });
 
-// Google OAuth callback
-router.get(
-  '/google/callback',
-  (req, res, next) => {
-    console.log('OAuth callback received, redirecting to:', process.env.FRONTEND_URL);
-    next();
-  },
-  passport.authenticate('google', { session: false, failureRedirect: '/auth/failure' }),
-  (req, res) => {
-    const user = req.user as any;
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    console.log('Auth successful, redirecting to:', frontendUrl);
-    
-    if (!user) {
+// ─── Add Google Account (link additional calendar to current user) ───────────
+// Uses the SAME callback URL as login, but passes state=add_account:<userId>
+
+router.get('/google/add-account', (req, res) => {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+  // Must already be logged in
+  const token = req.cookies?.token;
+  if (!token) {
+    res.redirect(`${frontendUrl}/login?error=not_authenticated`);
+    return;
+  }
+  const payload = verifyToken(token);
+  if (!payload) {
+    res.redirect(`${frontendUrl}/login?error=not_authenticated`);
+    return;
+  }
+
+  const oauth2Client = buildOAuth2Client();
+  const url = oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    prompt: 'consent',
+    scope: [
+      'profile',
+      'email',
+      'https://www.googleapis.com/auth/calendar.readonly',
+    ],
+    state: `${ADD_ACCOUNT_PREFIX}${payload.userId}`,
+  });
+
+  res.redirect(url);
+});
+
+// ─── Unified Google OAuth callback ───────────────────────────────────────────
+// Handles both login and add-account flows via the same registered callback URL.
+// If state starts with "add_account:", we skip Passport and handle it manually.
+
+router.get('/google/callback', async (req, res, next) => {
+  const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const stateParam = req.query.state as string | undefined;
+
+  // ── Add-account flow ──
+  if (stateParam && stateParam.startsWith(ADD_ACCOUNT_PREFIX)) {
+    try {
+      const userId = stateParam.slice(ADD_ACCOUNT_PREFIX.length);
+      const code = req.query.code as string | undefined;
+
+      if (!code || !userId) {
+        res.redirect(`${frontendUrl}/home?panel=settings&error=invalid_callback`);
+        return;
+      }
+
+      // Verify the userId is real
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      if (!user) {
+        res.redirect(`${frontendUrl}/home?panel=settings&error=user_not_found`);
+        return;
+      }
+
+      // Exchange code for tokens
+      const oauth2Client = buildOAuth2Client();
+      const { tokens } = await oauth2Client.getToken(code);
+      oauth2Client.setCredentials(tokens);
+
+      // Get the email of the Google account just authorized
+      const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
+      const { data: profile } = await oauth2.userinfo.get();
+      const accountEmail = profile.email?.toLowerCase();
+      const accountName = profile.name || undefined;
+
+      if (!accountEmail) {
+        res.redirect(`${frontendUrl}/home?panel=settings&error=no_email`);
+        return;
+      }
+
+      // Duplicate check: same as user's own login email
+      if (accountEmail === user.email.toLowerCase()) {
+        res.redirect(`${frontendUrl}/home?panel=settings&error=duplicate_account`);
+        return;
+      }
+
+      // Duplicate check: email is another user's main (login) account
+      const otherUser = await prisma.user.findUnique({ where: { email: accountEmail } });
+      if (otherUser && otherUser.id !== userId) {
+        res.redirect(`${frontendUrl}/home?panel=settings&error=already_linked`);
+        return;
+      }
+
+      // Duplicate check: email is already linked to another user's CalendarAccount
+      const otherAccount = await prisma.calendarAccount.findFirst({
+        where: { email: accountEmail, userId: { not: userId } },
+      });
+      if (otherAccount) {
+        res.redirect(`${frontendUrl}/home?panel=settings&error=already_linked`);
+        return;
+      }
+
+      // Duplicate check: already linked to your own account
+      const existing = await prisma.calendarAccount.findUnique({
+        where: { userId_email: { userId, email: accountEmail } },
+      });
+      if (existing) {
+        // Re-activate and update tokens if it was deactivated
+        await prisma.calendarAccount.update({
+          where: { id: existing.id },
+          data: {
+            googleAccessToken: encryptToken(tokens.access_token!),
+            googleRefreshToken: tokens.refresh_token ? encryptToken(tokens.refresh_token) : existing.googleRefreshToken,
+            isActive: true,
+            name: accountName,
+          },
+        });
+        res.redirect(`${frontendUrl}/home?panel=settings&msg=account_refreshed`);
+        return;
+      }
+
+      // Create the new CalendarAccount
+      await prisma.calendarAccount.create({
+        data: {
+          userId,
+          email: accountEmail,
+          name: accountName,
+          googleAccessToken: encryptToken(tokens.access_token!),
+          googleRefreshToken: tokens.refresh_token ? encryptToken(tokens.refresh_token) : undefined,
+        },
+      });
+
+      res.redirect(`${frontendUrl}/home?panel=settings&msg=account_added`);
+    } catch (error) {
+      console.error('Add account callback error:', error);
+      res.redirect(`${frontendUrl}/home?panel=settings&error=add_account_failed`);
+    }
+    return;
+  }
+
+  // ── Normal login flow (via Passport) ──
+  console.log('OAuth callback received, redirecting to:', frontendUrl);
+  passport.authenticate('google', { session: false, failureRedirect: '/auth/failure' }, (err: Error | null, user: any) => {
+    if (err || !user) {
+      console.error('Auth failed:', err);
       res.redirect(`${frontendUrl}/login?error=auth_failed`);
       return;
     }
+
+    console.log('Auth successful, redirecting to:', frontendUrl);
 
     // Generate JWT token
     const token = generateToken({ userId: user.id, email: user.email });
@@ -39,10 +184,13 @@ router.get(
     // Set token as httpOnly cookie with strict security
     res.cookie('token', token, cookieConfig);
 
+    // Enrich user profile from Apollo in the background (non-blocking)
+    enrichUserProfile(user.id).catch(() => {});
+
     // Redirect to frontend home page
     res.redirect(`${frontendUrl}/home`);
-  }
-);
+  })(req, res, next);
+});
 
 // Auth failure redirect
 router.get('/failure', (req, res) => {
@@ -52,6 +200,55 @@ router.get('/failure', (req, res) => {
 // Get current user
 router.get('/me', authMiddleware, (req, res) => {
   res.json({ user: (req as AuthenticatedRequest).user });
+});
+
+// Update current user profile
+router.patch('/me', authMiddleware, async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+    const { name, title, companyDomain, linkedinUrl, headline, city, country } = req.body;
+
+    const updateData: Record<string, any> = {};
+    if (name !== undefined) updateData.name = name.trim() || undefined;
+    if (title !== undefined) updateData.title = title.trim() || null;
+    if (linkedinUrl !== undefined) updateData.linkedinUrl = linkedinUrl.trim() || null;
+    if (headline !== undefined) updateData.headline = headline.trim() || null;
+    if (city !== undefined) updateData.city = city.trim() || null;
+    if (country !== undefined) updateData.country = country.trim() || null;
+
+    // Company website → match to existing Company by domain
+    if (companyDomain !== undefined) {
+      const raw = (companyDomain as string).trim();
+      if (raw) {
+        // Normalise: strip protocol, www, trailing slashes → pure domain
+        const domain = raw.replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '').toLowerCase();
+        updateData.companyDomain = domain;
+
+        // Try to match an existing Company record
+        const existingCompany = await prisma.company.findUnique({ where: { domain } });
+        if (existingCompany) {
+          updateData.company = existingCompany.name;
+        } else {
+          // Keep domain as company name fallback (user can see it's unmatched)
+          updateData.company = domain;
+        }
+      } else {
+        updateData.companyDomain = null;
+        updateData.company = null;
+      }
+    }
+
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+      select: { id: true, email: true, name: true, avatar: true, title: true, company: true, companyDomain: true, linkedinUrl: true, headline: true, city: true, country: true },
+    });
+
+    res.json({ user });
+  } catch (error: any) {
+    console.error('Profile update error:', error.message);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
 });
 
 // Logout (POST for API calls)

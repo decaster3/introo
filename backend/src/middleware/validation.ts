@@ -34,6 +34,7 @@ export const schemas = {
     bidAmount: z.number().nonnegative().optional(),
     currency: z.string().max(10).optional(),
     spaceId: z.string().optional(),
+    connectionPeerId: z.string().optional(),
   }),
 
   updateRequestStatus: z.object({

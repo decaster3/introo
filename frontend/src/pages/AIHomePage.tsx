@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useAppState, useAppActions } from '../store';
-import { API_BASE, enrichmentApi, calendarApi, authApi, requestsApi, notificationsApi, offersApi } from '../lib/api';
+import { useAppState, useAppActions, useAppDispatch } from '../store';
+import { API_BASE, authApi, enrichmentApi, calendarApi, requestsApi, notificationsApi, offersApi, type CalendarAccountInfo } from '../lib/api';
 import { calculateStrength } from '../types';
 import { PersonAvatar, CompanyLogo } from '../components';
 import { openOfferIntroEmail, openDoubleIntroEmail } from '../lib/offerIntro';
@@ -153,6 +153,7 @@ interface DisplayContact {
   country?: string | null;
   headline?: string | null;
   enrichedAt?: string | null;
+  sourceAccountEmails?: string[];
   // Company enrichment (passed through for tile rendering)
   companyData?: {
     id?: string;
@@ -228,12 +229,13 @@ interface Hunt {
 }
 
 interface InlinePanel {
-  type: 'person' | 'intro-request' | 'intro-offer' | 'company' | 'space' | 'spaces-manage' | 'connection' | 'connections-manage' | 'network-manage' | 'settings' | 'notifications';
+  type: 'person' | 'intro-request' | 'intro-offer' | 'company' | 'space' | 'spaces-manage' | 'connection' | 'connections-manage' | 'network-manage' | 'profile' | 'settings' | 'notifications';
   company?: MergedCompany;
   contact?: DisplayContact | { id: string; name: string; email: string; title?: string; userName?: string };
   spaceId?: string;
   connectionId?: string;
   fromSpaceId?: string; // breadcrumb: which space the user navigated from
+  fromProfile?: boolean; // breadcrumb: navigated from profile edit panel
   introSourceFilter?: string; // snapshot of sourceFilter when opening intro panel
   introSpaceFilter?: string; // snapshot of spaceFilter when opening intro panel
   introConnectionFilter?: string; // snapshot of connectionFilter when opening intro panel
@@ -242,13 +244,13 @@ interface InlinePanel {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function AIHomePage() {
-  const { currentUser, contacts: storeContacts, isCalendarConnected } = useAppState();
-  const { logout, syncCalendar } = useAppActions();
+  const { currentUser, contacts: storeContacts, isCalendarConnected, isLoading: storeLoading } = useAppState();
+  const { logout, syncCalendar, refreshData } = useAppActions();
+  const dispatch = useAppDispatch();
   const searchRef = useRef<HTMLInputElement>(null);
 
   // UI State
   const [searchQuery, setSearchQuery] = useState('');
-  const [appliedSearchQuery, setAppliedSearchQuery] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
   const [selectedHunt, setSelectedHunt] = useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = useState<'all' | 'mine' | 'spaces' | 'both'>('all');
@@ -258,12 +260,16 @@ export function AIHomePage() {
   const [sortBy] = useState<'relevance' | 'contacts' | 'name' | 'strength'>('relevance');
   const [gridPage, setGridPage] = useState(0);
   const GRID_PAGE_SIZE = 50;
+  const [excludeMyContacts, setExcludeMyContacts] = useState(true);
   const [expandedDomain, setExpandedDomain] = useState<string | null>(null);
   const [inlinePanel, setInlinePanel] = useState<InlinePanel | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [introRequestText, setIntroRequestText] = useState('');
   const [introRequestSending, setIntroRequestSending] = useState(false);
   const [introRequestSent, setIntroRequestSent] = useState(false);
+  const [introSelectedThrough, setIntroSelectedThrough] = useState<string | null>(null);
+  const [introExpandedOption, setIntroExpandedOption] = useState<string | null>(null);
+  const [introTipOpen, setIntroTipOpen] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
   const [notifications, setNotifications] = useState<Awaited<ReturnType<typeof notificationsApi.getAll>>>([]);
   const [myIntroRequests, setMyIntroRequests] = useState<Awaited<ReturnType<typeof requestsApi.getMine>>>([]);
@@ -278,6 +284,13 @@ export function AIHomePage() {
   const [aiParsing, setAiParsing] = useState(false);
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
   const [lastAiQuery, setLastAiQuery] = useState<{ query: string; keywords: string[] } | null>(null);
+
+  // Profile form state
+  const [profileForm, setProfileForm] = useState({
+    name: '', title: '', companyDomain: '', linkedinUrl: '', headline: '', city: '', country: '',
+  });
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileDirty, setProfileDirty] = useState(false);
 
   // Space management state
   const [showCreateSpace, setShowCreateSpace] = useState(false);
@@ -294,7 +307,8 @@ export function AIHomePage() {
 
   // Calendar state
   const [calendarSyncing, setCalendarSyncing] = useState(false);
-  const [lastCalendarSync, setLastCalendarSync] = useState<string | null>(null);
+  const [calendarAccounts, setCalendarAccounts] = useState<CalendarAccountInfo[]>([]);
+  const [syncingAccountId, setSyncingAccountId] = useState<string | null>(null);
 
   // Enrichment state
   const [enriching, setEnriching] = useState(false);
@@ -302,11 +316,13 @@ export function AIHomePage() {
   const [enrichProgress, setEnrichProgress] = useState<{
     contacts: { total: number; enriched: number; skipped: number; errors: number; done: boolean } | null;
     companies: { total: number; enriched: number; skipped: number; errors: number; done: boolean } | null;
-    contactsFree?: { total: number; enriched: number; skipped: number; errors: number; done: boolean } | null;
-  }>({ contacts: null, companies: null });
+    contactsFree?: { total: number; enriched: number; skipped: number; errors: number; done: boolean; error?: string | null } | null;
+  }>({ contacts: null, companies: null, contactsFree: null });
+  const [enrichError, setEnrichError] = useState<string | null>(null);
   const [enrichStats, setEnrichStats] = useState<{
-    contacts: { total: number; enriched: number };
+    contacts: { total: number; enriched: number; notFound?: number };
     companies: { total: number; enriched: number };
+    lastEnrichedAt?: string | null;
   } | null>(null);
 
   // Sidebar filter section open/closed state
@@ -410,6 +426,43 @@ export function AIHomePage() {
   const [loading, setLoading] = useState(true);
   const [hunts, setHunts] = useState<Hunt[]>([]);
 
+  // ─── Profile ────────────────────────────────────────────────────────────────
+
+  // Sync form state when currentUser changes (e.g. after login or refresh)
+  useEffect(() => {
+    if (currentUser) {
+      setProfileForm({
+        name: currentUser.name || '',
+        title: currentUser.title || '',
+        companyDomain: currentUser.companyDomain || '',
+        linkedinUrl: currentUser.linkedinUrl || '',
+        headline: currentUser.headline || '',
+        city: currentUser.city || '',
+        country: currentUser.country || '',
+      });
+      setProfileDirty(false);
+    }
+  }, [currentUser]);
+
+  const updateProfileField = useCallback((field: string, value: string) => {
+    setProfileForm(prev => ({ ...prev, [field]: value }));
+    setProfileDirty(true);
+  }, []);
+
+  const saveProfile = useCallback(async () => {
+    if (profileSaving) return;
+    setProfileSaving(true);
+    try {
+      const { user } = await authApi.updateProfile(profileForm);
+      dispatch({ type: 'SET_AUTH', payload: { isAuthenticated: true, user } });
+      setProfileDirty(false);
+    } catch (e) {
+      console.error('Failed to save profile:', e);
+    } finally {
+      setProfileSaving(false);
+    }
+  }, [profileForm, profileSaving, dispatch]);
+
   // ─── Data transforms ────────────────────────────────────────────────────────
 
   const contacts: DisplayContact[] = useMemo(() => {
@@ -430,6 +483,7 @@ export function AIHomePage() {
       country: c.country,
       headline: c.headline,
       enrichedAt: c.enrichedAt,
+      sourceAccountEmails: c.sourceAccountEmails,
       companyData: c.company ? {
         id: c.company.id,
         employeeCount: c.company.employeeCount,
@@ -576,8 +630,36 @@ export function AIHomePage() {
       else if (co.spaceCount > 0 && co.myCount === 0) co.source = 'space';
     });
 
-    // Match hunts (keywords + saved filters)
+    // ── Compute smart company-level strength ──
+    // Uses the distribution of contact-level strengths, not just the best one.
+    // A company with many strong contacts is definitively "strong" even if
+    // some individual contacts are weak.
     const companies = Array.from(map.values());
+    companies.forEach(co => {
+      const my = co.myContacts;
+      if (my.length === 0) return; // space-only → keep 'none'
+
+      const strongCount = my.filter(c => c.connectionStrength === 'strong').length;
+      const mediumCount = my.filter(c => c.connectionStrength === 'medium').length;
+      const totalMeetings = my.reduce((sum, c) => sum + (c.meetingsCount || 0), 0);
+
+      // Strong company: 3+ strong contacts, OR 5+ medium+strong, OR 10+ total meetings
+      if (strongCount >= 3 || (strongCount + mediumCount) >= 5 || totalMeetings >= 15) {
+        co.bestStrength = 'strong';
+        co.hasStrongConnection = true;
+      }
+      // Medium company: any strong contact, OR 2+ medium, OR 5+ total meetings, OR 3+ contacts
+      else if (strongCount >= 1 || mediumCount >= 2 || totalMeetings >= 5 || my.length >= 3) {
+        co.bestStrength = 'medium';
+        if (strongCount > 0) co.hasStrongConnection = true;
+      }
+      // Weak: everything else (few contacts, few meetings)
+      else {
+        co.bestStrength = 'weak';
+      }
+    });
+
+    // Match hunts (keywords + saved filters)
     const parseRevM = (rev: string | null | undefined): number => {
       if (!rev) return 0;
       const m = rev.match(/([\d.]+)/);
@@ -686,11 +768,9 @@ export function AIHomePage() {
       result = result.filter(c => c.source === 'both');
     }
 
-    // Filter by connection strength
+    // Filter by connection strength (uses company-level computed strength)
     if (strengthFilter !== 'all') {
-      result = result.filter(c =>
-        c.myContacts.some(mc => mc.connectionStrength === strengthFilter)
-      );
+      result = result.filter(c => c.bestStrength === strengthFilter);
     }
 
     // Filter by connected time (year/month tags) — uses firstSeenAt (earliest calendar meeting)
@@ -719,15 +799,18 @@ export function AIHomePage() {
 
     // Hunt selected → don't filter, just sort matches to top (done after all filters)
 
-    // Filter by search (only applied on Enter)
-    if (appliedSearchQuery) {
-      const q = appliedSearchQuery.toLowerCase();
-      result = result.filter(c =>
-        c.name.toLowerCase().includes(q) ||
-        c.domain.toLowerCase().includes(q) ||
-        c.myContacts.some(contact => contact.name.toLowerCase().includes(q) || contact.title.toLowerCase().includes(q)) ||
-        c.spaceContacts.some(contact => contact.name.toLowerCase().includes(q) || (contact.title || '').toLowerCase().includes(q))
-      );
+    // Instant keyword filter (as you type)
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      const terms = q.split(/\s+/).filter(t => t.length > 0);
+      result = result.filter(c => {
+        const haystack = [
+          c.name, c.domain, c.industry, c.description, c.city, c.country,
+          ...c.myContacts.map(ct => `${ct.name} ${ct.title}`),
+          ...c.spaceContacts.map(ct => `${ct.name} ${ct.title || ''}`),
+        ].filter(Boolean).join(' ').toLowerCase();
+        return terms.every(t => haystack.includes(t));
+      });
     }
 
     // ── Business description / AI keywords / exclude ──
@@ -850,22 +933,10 @@ export function AIHomePage() {
     }
 
     return result;
-  }, [mergedCompanies, selectedHunt, appliedSearchQuery, sourceFilter, strengthFilter, spaceFilter, connectionFilter, sortBy, sidebarFilters]);
-
-  // When filtering by a connection or space, split into "new to you" and "overlap"
-  const { networkUnique, networkOverlap } = useMemo(() => {
-    if (connectionFilter === 'all' && spaceFilter === 'all') return { networkUnique: [], networkOverlap: [] };
-    const unique: MergedCompany[] = [];
-    const overlap: MergedCompany[] = [];
-    filteredCompanies.forEach(c => {
-      if (c.myCount > 0) overlap.push(c);
-      else unique.push(c);
-    });
-    return { networkUnique: unique, networkOverlap: overlap };
-  }, [filteredCompanies, connectionFilter, spaceFilter]);
+  }, [mergedCompanies, selectedHunt, searchQuery, sourceFilter, strengthFilter, spaceFilter, connectionFilter, sortBy, sidebarFilters]);
 
   // Reset page when filters change
-  useEffect(() => { setGridPage(0); }, [filteredCompanies.length]);
+  useEffect(() => { setGridPage(0); }, [filteredCompanies.length, excludeMyContacts]);
 
   // Hunt match counts
   // Dynamic country list from enriched data
@@ -1077,7 +1148,6 @@ export function AIHomePage() {
       if (e.key === 'Escape') {
         setInlinePanel(null);
         setSearchQuery('');
-        setAppliedSearchQuery('');
         setSelectedHunt(null);
       }
     };
@@ -1102,7 +1172,6 @@ export function AIHomePage() {
       isActive: true,
     }]);
     setSearchQuery('');
-    setAppliedSearchQuery('');
   }, [searchQuery]);
 
   // AI-powered search: parse natural language and directly fill sidebar filters
@@ -1162,7 +1231,6 @@ export function AIHomePage() {
       // Open the description section so user can see the AI keywords
       setOpenSections(prev => ({ ...prev, description: true }));
       setSearchQuery('');
-      setAppliedSearchQuery('');
       setAiExplanation(explanation || null);
 
       // Now expand keywords via AI (the same way Business Description input does)
@@ -1213,7 +1281,6 @@ export function AIHomePage() {
         setLastAiQuery({ query: query.trim(), keywords });
       }
       setSearchQuery('');
-      setAppliedSearchQuery('');
     } finally {
       setAiParsing(false);
     }
@@ -1243,6 +1310,8 @@ export function AIHomePage() {
   }, [selectedHunt]);
 
   const openIntroPanel = useCallback((company: MergedCompany, overrideSourceFilter?: string, overrideSpaceFilter?: string) => {
+    setIntroSelectedThrough(null);
+    setIntroExpandedOption(null);
     setInlinePanel({
       type: 'intro-request',
       company,
@@ -1407,6 +1476,37 @@ export function AIHomePage() {
     } catch (e) { console.error('Failed to reject member:', e); }
   }, [fetchSpacesList]);
 
+  const acceptSpaceInvite = useCallback(async (spaceId: string) => {
+    try {
+      await fetch(`${API_BASE}/api/spaces/${spaceId}/accept-invite`, {
+        method: 'POST', credentials: 'include',
+      });
+      fetchSpacesList();
+      notificationsApi.getAll().then(setNotifications).catch(() => {});
+      notificationsApi.getUnreadCount().then(r => setNotificationCount(r.count)).catch(() => {});
+    } catch (e) { console.error('Failed to accept space invite:', e); }
+  }, [fetchSpacesList]);
+
+  const removeSpaceMember = useCallback(async (spaceId: string, memberId: string) => {
+    try {
+      await fetch(`${API_BASE}/api/spaces/${spaceId}/members/${memberId}`, {
+        method: 'DELETE', credentials: 'include',
+      });
+      fetchSpacesList();
+    } catch (e) { console.error('Failed to remove member:', e); }
+  }, [fetchSpacesList]);
+
+  const rejectSpaceInvite = useCallback(async (spaceId: string) => {
+    try {
+      await fetch(`${API_BASE}/api/spaces/${spaceId}/reject-invite`, {
+        method: 'POST', credentials: 'include',
+      });
+      fetchSpacesList();
+      notificationsApi.getAll().then(setNotifications).catch(() => {});
+      notificationsApi.getUnreadCount().then(r => setNotificationCount(r.count)).catch(() => {});
+    } catch (e) { console.error('Failed to reject space invite:', e); }
+  }, [fetchSpacesList]);
+
   // ─── Connection management ─────────────────────────────────────────────────
 
   const sendConnectionRequest = useCallback(async (email: string) => {
@@ -1426,6 +1526,8 @@ export function AIHomePage() {
       setConnectEmail('');
       setShowConnectForm(false);
       fetchConnectionsList();
+      notificationsApi.getUnreadCount().then(r => setNotificationCount(r.count)).catch(() => {});
+      notificationsApi.getAll().then(setNotifications).catch(() => {});
     } catch (e) { console.error('Failed to send connection:', e); }
   }, [fetchConnectionsList]);
 
@@ -1433,6 +1535,8 @@ export function AIHomePage() {
     try {
       await fetch(`${API_BASE}/api/connections/${id}/accept`, { method: 'POST', credentials: 'include' });
       fetchConnectionsList();
+      notificationsApi.getUnreadCount().then(r => setNotificationCount(r.count)).catch(() => {});
+      notificationsApi.getAll().then(setNotifications).catch(() => {});
     } catch (e) { console.error('Failed to accept connection:', e); }
   }, [fetchConnectionsList]);
 
@@ -1440,6 +1544,8 @@ export function AIHomePage() {
     try {
       await fetch(`${API_BASE}/api/connections/${id}/reject`, { method: 'POST', credentials: 'include' });
       fetchConnectionsList();
+      notificationsApi.getUnreadCount().then(r => setNotificationCount(r.count)).catch(() => {});
+      notificationsApi.getAll().then(setNotifications).catch(() => {});
     } catch (e) { console.error('Failed to reject connection:', e); }
   }, [fetchConnectionsList]);
 
@@ -1452,44 +1558,96 @@ export function AIHomePage() {
 
   // ─── Enrichment ─────────────────────────────────────────────────────────────
 
-  // Fetch enrichment stats on mount
+  // Check if enrichment is running on the server (or already completed)
+  const checkEnrichmentRunning = useCallback(() => {
+    enrichmentApi.getProgress()
+      .then(progress => {
+        if (progress.contactsFree && !progress.contactsFree.done) {
+          // Enrichment is still in progress — start polling
+          setEnriching(true);
+          setEnrichProgress(progress);
+        } else if (progress.contactsFree && progress.contactsFree.done) {
+          // Enrichment already completed before we started polling —
+          // refresh data so the contact list reflects the enriched fields
+          enrichmentApi.getStatus().then(setEnrichStats).catch(() => {});
+          refreshData();
+        }
+      })
+      .catch(() => {});
+  }, [refreshData]);
+
+  // Fetch enrichment stats on mount + check if enrichment is already running
   useEffect(() => {
     enrichmentApi.getStatus()
       .then(setEnrichStats)
       .catch(() => {});
-  }, []);
+    checkEnrichmentRunning();
+  }, [checkEnrichmentRunning]);
+
+  // Re-check after store finishes loading (catches enrichment triggered during sign-up)
+  useEffect(() => {
+    if (!storeLoading && !enriching) {
+      // Small delay to let the enrichment POST register on the server
+      const timer = setTimeout(checkEnrichmentRunning, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [storeLoading, enriching, checkEnrichmentRunning]);
 
   // Poll progress when enrichment is running
   useEffect(() => {
     if (!enriching) return;
+    let pollCount = 0;
     const interval = setInterval(() => {
+      pollCount++;
       enrichmentApi.getProgress()
         .then(progress => {
           setEnrichProgress(progress);
+
+          // If server has no record of the job yet (null), wait a few polls before giving up
+          // This prevents the race condition where the job hasn't registered yet
+          if (!progress.contactsFree) {
+            if (pollCount > 5) {
+              // After 10 seconds with no record, assume it failed
+              setEnriching(false);
+              setEnrichError('Enrichment process was lost. Please try again.');
+              enrichmentApi.getStatus().then(setEnrichStats).catch(() => {});
+              refreshData();
+            }
+            return;
+          }
+
+          // Check for error
+          if ((progress.contactsFree as any)?.error) {
+            setEnrichError((progress.contactsFree as any).error);
+          }
+
           const contactsDone = !progress.contacts || progress.contacts.done;
           const companiesDone = !progress.companies || progress.companies.done;
-          const contactsFreeDone = !progress.contactsFree || progress.contactsFree.done;
+          const contactsFreeDone = progress.contactsFree.done;
           if (contactsDone && companiesDone && contactsFreeDone) {
             setEnriching(false);
-            // Refresh stats
+            // Refresh stats and reload updated contacts/companies into the store
             enrichmentApi.getStatus().then(setEnrichStats).catch(() => {});
+            refreshData();
           }
         })
         .catch(() => {});
     }, 2000);
     return () => clearInterval(interval);
-  }, [enriching]);
+  }, [enriching, refreshData]);
 
   // Start FREE enrichment (0 credits) — safe to run anytime
   const startEnrichment = useCallback(async () => {
     if (enriching) return;
     setEnriching(true);
-    setEnrichProgress({ contacts: null, companies: null });
+    setEnrichError(null);
+    setEnrichProgress({ contacts: null, companies: null, contactsFree: null });
     try {
-      await enrichmentApi.enrichContactsFree();
+      await enrichmentApi.enrichContactsFree({ force: true });
     } catch (err) {
       console.error('Failed to start free enrichment:', err);
       setEnriching(false);
+      setEnrichError('Failed to start enrichment. Please try again.');
     }
   }, [enriching]);
 
@@ -1539,27 +1697,82 @@ export function AIHomePage() {
     return () => clearInterval(interval);
   }, [refreshIntroData]);
 
-  // Fetch calendar last sync time
-  useEffect(() => {
-    calendarApi.getStatus()
-      .then(status => { setLastCalendarSync(status.lastSyncedAt); })
+  // Fetch calendar last sync time & connected accounts
+  const refreshCalendarAccounts = useCallback(() => {
+    calendarApi.getAccounts()
+      .then(setCalendarAccounts)
       .catch(() => {});
   }, []);
 
-  // Calendar sync handler
+  useEffect(() => {
+    refreshCalendarAccounts();
+
+    // Auto-open settings if redirected from add-account callback
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('panel') === 'settings') {
+      setInlinePanel({ type: 'settings' });
+
+      // Show error messages from add-account flow
+      const error = params.get('error');
+      if (error === 'already_linked') {
+        alert('This Google account is already linked to another user.');
+      } else if (error === 'duplicate_account') {
+        alert('This is already your main account.');
+      }
+
+      // Clean up URL
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, [refreshCalendarAccounts]);
+
+  // Auto-sync calendars every 2 hours while the app is open
+  useEffect(() => {
+    if (!isCalendarConnected) return;
+    const TWO_HOURS = 2 * 60 * 60 * 1000;
+    const interval = setInterval(() => {
+      console.log('[auto-sync] Running periodic calendar sync');
+      calendarApi.sync().then(() => refreshCalendarAccounts()).catch(() => {});
+    }, TWO_HOURS);
+    return () => clearInterval(interval);
+  }, [isCalendarConnected, refreshCalendarAccounts]);
+
+  // Calendar sync handler (syncs all accounts + legacy primary)
   const handleCalendarSync = useCallback(async () => {
     if (calendarSyncing) return;
     setCalendarSyncing(true);
     try {
       await syncCalendar();
-      const status = await calendarApi.getStatus();
-      setLastCalendarSync(status.lastSyncedAt);
+      refreshCalendarAccounts();
     } catch (err) {
       console.error('Calendar sync failed:', err);
     } finally {
       setCalendarSyncing(false);
     }
-  }, [calendarSyncing, syncCalendar]);
+  }, [calendarSyncing, syncCalendar, refreshCalendarAccounts]);
+
+  // Per-account sync handler
+  const handleAccountSync = useCallback(async (accountId: string) => {
+    if (syncingAccountId) return;
+    setSyncingAccountId(accountId);
+    try {
+      await calendarApi.syncAccount(accountId);
+      refreshCalendarAccounts();
+    } catch (err) {
+      console.error('Account sync failed:', err);
+    } finally {
+      setSyncingAccountId(null);
+    }
+  }, [syncingAccountId, refreshCalendarAccounts]);
+
+  // Delete account handler
+  const handleAccountDelete = useCallback(async (accountId: string) => {
+    try {
+      await calendarApi.deleteAccount(accountId);
+      refreshCalendarAccounts();
+    } catch (err) {
+      console.error('Account delete failed:', err);
+    }
+  }, [refreshCalendarAccounts]);
 
   // ─── Sidebar section helper ────────────────────────────────────────────────
 
@@ -1657,19 +1870,20 @@ export function AIHomePage() {
                 </div>
               )}
 
-              {/* Pending connection requests */}
+              {/* Pending incoming connection requests */}
               {connections.filter(c => c.status === 'pending' && c.direction === 'received').length > 0 && (
                 <div className="sb-spaces-list" style={{ marginTop: '0.35rem' }}>
                   {connections.filter(c => c.status === 'pending' && c.direction === 'received').map(c => (
                     <div key={c.id} className="sb-conn-pending">
                       <PersonAvatar email={c.peer.email} name={c.peer.name} avatarUrl={c.peer.avatar} size={20} />
                       <span className="sb-space-name" style={{ flex: 1 }}>{c.peer.name}</span>
-                      <button className="sb-space-action-btn primary" style={{ fontSize: '0.6rem', padding: '0.15rem 0.35rem' }} onClick={() => acceptConnection(c.id)}>Accept</button>
-                      <button className="sb-space-action-btn" style={{ fontSize: '0.6rem', padding: '0.15rem 0.35rem' }} onClick={() => rejectConnection(c.id)}>×</button>
+                      <button className="u-notif-accept-btn" style={{ fontSize: '0.6rem', padding: '0.15rem 0.4rem' }} onClick={() => acceptConnection(c.id)}>Accept</button>
+                      <button className="u-notif-reject-btn" style={{ fontSize: '0.6rem', padding: '0.15rem 0.4rem' }} onClick={() => rejectConnection(c.id)}>×</button>
                     </div>
                   ))}
                 </div>
               )}
+
 
             </SidebarSection>
 
@@ -2157,15 +2371,13 @@ export function AIHomePage() {
                 <input
                   ref={searchRef}
                   value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
+                  onChange={e => { setSearchQuery(e.target.value); setGridPage(0); }}
                   onFocus={() => setSearchFocused(true)}
                   onBlur={() => setSearchFocused(false)}
-                  placeholder={aiParsing ? 'Parsing with AI...' : hunts.length > 0 ? 'Refine or add a hunt...' : 'Search with AI: "fintech startups in NYC, 50+ people"'}
+                  placeholder={aiParsing ? 'Parsing with AI...' : 'Search companies, contacts...'}
                   onKeyDown={e => {
                     if (e.key === 'Enter' && searchQuery.trim().length > 2 && !aiParsing) {
                       aiSearch(searchQuery.trim());
-                    } else if (e.key === 'Enter' && searchQuery.trim().length > 0) {
-                      setAppliedSearchQuery(searchQuery.trim());
                     }
                   }}
                   disabled={aiParsing}
@@ -2175,11 +2387,21 @@ export function AIHomePage() {
                     <span className="u-spinner-sm" /> AI parsing...
                   </span>
                 )}
-                {searchQuery && !aiParsing && (
-                  <button className="u-omni-pin" title="Pin as keyword hunt (no AI)" onMouseDown={e => { e.preventDefault(); addHunt(); }}>📌</button>
+                {searchQuery.trim().length > 2 && !aiParsing && (
+                  <button
+                    className="u-ai-search-btn"
+                    title="Deep search with AI (Enter)"
+                    onMouseDown={e => { e.preventDefault(); aiSearch(searchQuery.trim()); }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"/><path d="M9 18h6"/><path d="M12 18v4"/>
+                      <path d="M8 22h8"/>
+                    </svg>
+                    AI Deep Search
+                  </button>
                 )}
                 {searchQuery && (
-                  <button className="u-search-clear" onClick={() => { setSearchQuery(''); setAppliedSearchQuery(''); }}>×</button>
+                  <button className="u-search-clear" onClick={() => setSearchQuery('')}>×</button>
                 )}
                 <kbd className="u-kbd">⌘K</kbd>
               </div>
@@ -2294,11 +2516,11 @@ export function AIHomePage() {
 
           {/* ── Company Grid ──────────────────────────────────── */}
           <div className="u-grid">
-            {loading ? (
+            {loading || storeLoading ? (
               <div className="u-grid-loading"><div className="u-spinner" /> Loading...</div>
             ) : filteredCompanies.length === 0 ? (
               <div className="u-grid-empty">
-                {activeFilterCount > 0 || appliedSearchQuery ? (
+                {activeFilterCount > 0 || searchQuery.trim() ? (
                   <>
                     <span className="u-grid-empty-icon">🔍</span>
                     <span>No companies match your filters</span>
@@ -2357,6 +2579,32 @@ export function AIHomePage() {
                     {company.country ? <span className="u-tile-meta-badge u-tile-meta-badge--enrich">{company.city ? `${company.city}, ` : ''}{company.country}</span> : null}
                     {company.lastFundingRound ? <span className="u-tile-meta-badge u-tile-meta-badge--funding">{formatFundingRound(company.lastFundingRound)}</span> : null}
                   </div>
+                  {company.spaceCount > 0 && (() => {
+                    // Resolve person names from connectionIds
+                    const personNames: string[] = [];
+                    company.connectionIds.forEach(cid => {
+                      const conn = connections.find(c => c.id === cid);
+                      if (conn?.peer?.name && !personNames.includes(conn.peer.name)) personNames.push(conn.peer.name);
+                    });
+                    // Resolve space names from spaceIds
+                    const spaceNames: string[] = [];
+                    company.spaceIds.forEach(sid => {
+                      const s = spaces.find(sp => sp.id === sid);
+                      if (s?.name && !spaceNames.includes(s.name)) spaceNames.push(s.name);
+                    });
+                    // When filtered by a person, show person names first; otherwise spaces first
+                    const viaNames = connectionFilter !== 'all'
+                      ? [...personNames, ...spaceNames]
+                      : [...spaceNames, ...personNames];
+                    if (viaNames.length === 0) return null;
+                    const display = viaNames.length <= 2 ? viaNames.join(', ') : `${viaNames.slice(0, 2).join(', ')} +${viaNames.length - 2}`;
+                    return (
+                      <div className="u-tile-overlap" onClick={() => setInlinePanel({ type: 'company', company })}>
+                        <span className="u-tile-overlap-text">via {display}</span>
+                        <span className="u-tile-overlap-count">{company.spaceCount}</span>
+                      </div>
+                    );
+                  })()}
                   {expandedDomain === company.domain && (
                     <div className="u-tile-body">
                       {company.myContacts.length > 0 && (
@@ -2411,48 +2659,26 @@ export function AIHomePage() {
                 </div>
               );
 
-              // When filtered by a connection or space, split into new vs already known
-              if (connectionFilter !== 'all' || spaceFilter !== 'all') {
-                const newToYou = filteredCompanies.filter(c => c.myCount === 0 || c.spaceCount > 0);
-                const alreadyKnown = filteredCompanies.filter(c => c.myCount > 0 && c.spaceCount === 0);
-                let sourceName = '';
-                if (connectionFilter !== 'all') {
-                  const connPeer = connections.find(c => c.id === connectionFilter)?.peer;
-                  sourceName = connPeer?.name || 'connection';
-                } else {
-                  const space = spaces.find(s => s.id === spaceFilter);
-                  sourceName = space?.name || 'space';
-                }
-                return (
-                  <>
-                    {newToYou.length > 0 && (
-                      <>
-                        <div className="u-grid-section-header">
-                          <span className="u-grid-section-title">New from {sourceName}</span>
-                          <span className="u-grid-section-count">{newToYou.length}</span>
-                        </div>
-                        {newToYou.map(renderCard)}
-                      </>
-                    )}
-                    {alreadyKnown.length > 0 && (
-                      <>
-                        <div className="u-grid-section-header u-grid-section-header--overlap">
-                          <span className="u-grid-section-title">Already in your network</span>
-                          <span className="u-grid-section-count">{alreadyKnown.length}</span>
-                        </div>
-                        {alreadyKnown.map(renderCard)}
-                      </>
-                    )}
-                  </>
-                );
-              }
+              const isNetworkView = connectionFilter !== 'all' || spaceFilter !== 'all';
+              const displayCompanies = isNetworkView && excludeMyContacts
+                ? filteredCompanies.filter(c => !(c.myCount > 0 && c.spaceCount === 0))
+                : filteredCompanies;
 
               const pageStart = gridPage * GRID_PAGE_SIZE;
               const pageEnd = pageStart + GRID_PAGE_SIZE;
-              const totalPages = Math.ceil(filteredCompanies.length / GRID_PAGE_SIZE);
+              const totalPages = Math.ceil(displayCompanies.length / GRID_PAGE_SIZE);
               return (
                 <>
-                  {filteredCompanies.slice(pageStart, pageEnd).map(renderCard)}
+                  {isNetworkView && (
+                    <div className="u-grid-filter-bar">
+                      <label className="u-grid-exclude-label">
+                        <input type="checkbox" checked={excludeMyContacts} onChange={e => { setExcludeMyContacts(e.target.checked); setGridPage(0); }} />
+                        Exclude my contacts
+                      </label>
+                      <span className="u-grid-section-count">{displayCompanies.length}</span>
+                    </div>
+                  )}
+                  {displayCompanies.slice(pageStart, pageEnd).map(renderCard)}
                   {totalPages > 1 && (
                     <div className="u-grid-pagination">
                       <button className="u-grid-page-btn" disabled={gridPage === 0} onClick={() => setGridPage(gridPage - 1)}>← Prev</button>
@@ -2510,6 +2736,17 @@ export function AIHomePage() {
                   )}
                   {dc?.enrichedAt && <span className="u-panel-badge u-panel-badge--enriched">Enriched</span>}
                 </div>
+
+                {/* Source account badges (only when user has multiple accounts) */}
+                {calendarAccounts.length > 1 && dc?.sourceAccountEmails && dc.sourceAccountEmails.length > 0 && (
+                  <div className="u-panel-source-accounts">
+                    {dc.sourceAccountEmails.map(email => (
+                      <span key={email} className="u-panel-badge u-panel-badge--source">
+                        {email}
+                      </span>
+                    ))}
+                  </div>
+                )}
 
                 {/* Contact details */}
                 <div className="u-panel-details">
@@ -2607,7 +2844,12 @@ export function AIHomePage() {
               const fromSpaceForCompany = inlinePanel.fromSpaceId ? spaces.find(s => s.id === inlinePanel.fromSpaceId) : null;
               return (
               <div className="u-panel-company">
-                {fromSpaceForCompany && (
+                {inlinePanel.fromProfile && (
+                  <button className="u-panel-breadcrumb" onClick={() => setInlinePanel({ type: 'profile' })}>
+                    ← My Profile
+                  </button>
+                )}
+                {fromSpaceForCompany && !inlinePanel.fromProfile && (
                   <button className="u-panel-breadcrumb" onClick={() => setInlinePanel({ type: 'space', spaceId: fromSpaceForCompany.id })}>
                     ← {fromSpaceForCompany.emoji} {fromSpaceForCompany.name}
                   </button>
@@ -2795,6 +3037,14 @@ export function AIHomePage() {
                           <span className="u-panel-contact-title">{m.role}</span>
                         </div>
                         {m.user.id === space.ownerId && <span className="u-panel-badge">owner</span>}
+                        {isOwner && m.user.id !== space.ownerId && (
+                          <button
+                            className="u-notif-reject-btn"
+                            style={{ fontSize: '0.6rem', padding: '0.1rem 0.35rem', flexShrink: 0 }}
+                            onClick={() => removeSpaceMember(space.id, m.user.id)}
+                            title="Remove member"
+                          >×</button>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -2818,6 +3068,22 @@ export function AIHomePage() {
                         }}
                       />
                     </div>
+                    {/* Pending invitations */}
+                    {(pendingMembers[space.id] || []).length > 0 && (
+                      <div style={{ marginTop: '0.5rem' }}>
+                        <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.35)', display: 'block', marginBottom: '0.3rem' }}>Pending invitations</span>
+                        {(pendingMembers[space.id] || []).map(m => (
+                          <div key={m.id} className="u-panel-contact-row" style={{ opacity: 0.7 }}>
+                            <PersonAvatar email={m.user.email} name={m.user.name} avatarUrl={m.user.avatar} size={24} />
+                            <div className="u-panel-contact-info">
+                              <span className="u-panel-contact-name">{m.user.name}</span>
+                              <span className="u-panel-contact-title">{m.user.email}</span>
+                            </div>
+                            <span className="u-panel-badge" style={{ background: 'rgba(251,191,36,0.15)', color: '#fbbf24', fontSize: '0.6rem' }}>invited</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -3061,11 +3327,129 @@ export function AIHomePage() {
               );
             })()}
 
+            {/* ── Profile Edit Panel ── */}
+            {inlinePanel.type === 'profile' && currentUser && (
+              <div className="u-panel-space">
+                <button className="u-panel-breadcrumb" onClick={() => setInlinePanel({ type: 'network-manage' })}>
+                  ← Network
+                </button>
+                <div className="u-panel-space-hero">
+                  <PersonAvatar email={currentUser.email} name={currentUser.name} avatarUrl={currentUser.avatar} size={56} />
+                  <div>
+                    <h2>{currentUser.name}</h2>
+                    <span className="u-panel-space-meta">{currentUser.email}</span>
+                  </div>
+                </div>
+
+                <div className="u-panel-section">
+                  <h4 className="u-panel-section-h">Edit Profile</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                    <label style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', marginBottom: '-0.2rem' }}>Name</label>
+                    <input className="sb-input" placeholder="Your name" value={profileForm.name} onChange={e => updateProfileField('name', e.target.value)} />
+                    <label style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', marginBottom: '-0.2rem' }}>Job title</label>
+                    <input className="sb-input" placeholder="e.g. Product Manager" value={profileForm.title} onChange={e => updateProfileField('title', e.target.value)} />
+                    <label style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', marginBottom: '-0.2rem' }}>Company website</label>
+                    <input className="sb-input" placeholder="e.g. acme.com" value={profileForm.companyDomain} onChange={e => updateProfileField('companyDomain', e.target.value)} />
+                    {currentUser.companyDomain && (
+                      <button
+                        className="u-panel-breadcrumb"
+                        style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.1rem', fontSize: '0.7rem', padding: '0.3rem 0.5rem', background: 'rgba(255,255,255,0.04)', borderRadius: '0.4rem' }}
+                        onClick={async () => {
+                          const domain = currentUser.companyDomain!;
+                          // 1) Check mergedCompanies first
+                          const existing = mergedCompanies.find(c => c.domain === domain);
+                          if (existing) {
+                            setInlinePanel({ type: 'company', company: existing, fromProfile: true });
+                            return;
+                          }
+                          // 2) Fetch from backend (DB or Apollo)
+                          try {
+                            const { company: co, source } = await enrichmentApi.lookupCompany(domain);
+                            const stub: MergedCompany = {
+                              id: co.id || undefined,
+                              domain: co.domain || domain,
+                              name: co.name || domain,
+                              myContacts: [], spaceContacts: [],
+                              myCount: 0, spaceCount: 0, totalCount: 0,
+                              hasStrongConnection: false, bestStrength: 'none',
+                              source: 'mine', matchingHunts: [], spaceIds: [], connectionIds: [],
+                              employeeCount: co.employeeCount, foundedYear: co.foundedYear,
+                              annualRevenue: co.annualRevenue, totalFunding: co.totalFunding,
+                              lastFundingRound: co.lastFundingRound, lastFundingDate: co.lastFundingDate,
+                              city: co.city, country: co.country,
+                              industry: co.industry, description: co.description,
+                              linkedinUrl: co.linkedinUrl,
+                              enrichedAt: source !== 'none' ? co.enrichedAt || new Date().toISOString() : null,
+                            };
+                            setInlinePanel({ type: 'company', company: stub, fromProfile: true });
+                          } catch {
+                            // Fallback: open minimal card
+                            setInlinePanel({ type: 'company', fromProfile: true, company: {
+                              domain, name: currentUser.company || domain,
+                              myContacts: [], spaceContacts: [],
+                              myCount: 0, spaceCount: 0, totalCount: 0,
+                              hasStrongConnection: false, bestStrength: 'none',
+                              source: 'mine', matchingHunts: [], spaceIds: [], connectionIds: [],
+                            }});
+                          }
+                        }}
+                      >
+                        <CompanyLogo domain={currentUser.companyDomain} name={currentUser.company || currentUser.companyDomain} size={16} />
+                        <span>{currentUser.company || currentUser.companyDomain}</span>
+                        <span style={{ color: 'rgba(255,255,255,0.3)' }}>→</span>
+                      </button>
+                    )}
+                    <label style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', marginBottom: '-0.2rem' }}>Headline / Bio</label>
+                    <input className="sb-input" placeholder="Short description about you" value={profileForm.headline} onChange={e => updateProfileField('headline', e.target.value)} />
+                    <label style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', marginBottom: '-0.2rem' }}>LinkedIn URL</label>
+                    <input className="sb-input" placeholder="https://linkedin.com/in/..." value={profileForm.linkedinUrl} onChange={e => updateProfileField('linkedinUrl', e.target.value)} />
+                    <div style={{ display: 'flex', gap: '0.4rem' }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', display: 'block', marginBottom: '0.15rem' }}>City</label>
+                        <input className="sb-input" placeholder="City" value={profileForm.city} onChange={e => updateProfileField('city', e.target.value)} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', display: 'block', marginBottom: '0.15rem' }}>Country</label>
+                        <input className="sb-input" placeholder="Country" value={profileForm.country} onChange={e => updateProfileField('country', e.target.value)} />
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    className={`u-action-btn ${profileDirty ? '' : 'u-action-btn--muted'}`}
+                    style={{ marginTop: '0.6rem', width: '100%' }}
+                    onClick={saveProfile}
+                    disabled={profileSaving || !profileDirty}
+                  >
+                    {profileSaving ? 'Saving...' : profileDirty ? 'Save changes' : 'No changes'}
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* ── Network Panel (Spaces + 1:1 Connections) ── */}
             {(inlinePanel.type === 'network-manage' || inlinePanel.type === 'spaces-manage' || inlinePanel.type === 'connections-manage') && (
               <div className="u-panel-spaces">
                 <h2>Your Network</h2>
                 <p className="u-panel-space-meta">{spaces.length} spaces · {connections.filter(c => c.status === 'accepted').length} connections</p>
+
+                {/* My Profile Card (compact) */}
+                {currentUser && (
+                  <div className="u-panel-space-card" onClick={() => setInlinePanel({ type: 'profile' })} style={{ cursor: 'pointer' }}>
+                    <PersonAvatar email={currentUser.email} name={currentUser.name} avatarUrl={currentUser.avatar} size={36} />
+                    <div className="u-panel-space-card-info" style={{ minWidth: 0 }}>
+                      <span className="u-panel-space-card-name">{currentUser.name}</span>
+                      <span className="u-panel-space-card-stats">
+                        {currentUser.title || currentUser.company
+                          ? [currentUser.title, currentUser.company].filter(Boolean).join(' at ')
+                          : currentUser.email}
+                      </span>
+                    </div>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    </svg>
+                  </div>
+                )}
 
                 {/* Spaces section */}
                 <div className="u-panel-section">
@@ -3094,18 +3478,21 @@ export function AIHomePage() {
                     {spaces.length === 0 && pendingSpaces.length === 0 && <div className="u-panel-spaces-empty">No spaces yet</div>}
                   </div>
 
-                  {/* Pending spaces I applied to */}
+                  {/* Pending spaces — invitations to accept or requests awaiting approval */}
                   {pendingSpaces.length > 0 && (
                     <div style={{ marginTop: '0.5rem' }}>
-                      <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '0.35rem' }}>Pending approval</span>
+                      <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '0.35rem' }}>Invitations</span>
                       {pendingSpaces.map(ps => (
-                        <div key={ps.id} className="u-panel-space-card" style={{ opacity: 0.6 }}>
+                        <div key={ps.id} className="u-panel-space-card">
                           <span className="u-panel-space-emoji">{ps.emoji}</span>
                           <div className="u-panel-space-card-info">
                             <span className="u-panel-space-card-name">{ps.name}</span>
-                            <span className="u-panel-space-card-stats">Waiting for owner approval</span>
+                            <span className="u-panel-space-card-stats">You've been invited</span>
                           </div>
-                          <span className="u-panel-badge" style={{ background: 'rgba(251,191,36,0.15)', color: '#fbbf24' }}>pending</span>
+                          <div style={{ display: 'flex', gap: '0.3rem', flexShrink: 0 }}>
+                            <button className="u-notif-accept-btn" style={{ fontSize: '0.6rem', padding: '0.15rem 0.4rem' }} onClick={() => acceptSpaceInvite(ps.id)}>Accept</button>
+                            <button className="u-notif-reject-btn" style={{ fontSize: '0.6rem', padding: '0.15rem 0.4rem' }} onClick={() => rejectSpaceInvite(ps.id)}>Decline</button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -3228,7 +3615,10 @@ export function AIHomePage() {
                             <span className="u-panel-space-card-stats">{c.direction === 'sent' ? 'Waiting for response' : 'Wants to connect'}</span>
                           </div>
                           {c.direction === 'received' && (
-                            <button className="u-action-btn" style={{ flex: 0, fontSize: '0.75rem', padding: '0.25rem 0.5rem' }} onClick={() => acceptConnection(c.id)}>Accept</button>
+                            <div style={{ display: 'flex', gap: '0.3rem', flexShrink: 0 }}>
+                              <button className="u-notif-accept-btn" style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }} onClick={() => acceptConnection(c.id)}>Accept</button>
+                              <button className="u-notif-reject-btn" style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }} onClick={() => rejectConnection(c.id)}>✕</button>
+                            </div>
                           )}
                         </div>
                       ))}
@@ -3483,12 +3873,30 @@ export function AIHomePage() {
                       else if (n.type === 'space_join_request') { icon = '📩'; accentClass = 'space-neutral'; }
                       else if (n.type === 'space_member_left') { icon = '👤'; accentClass = 'space-neutral'; }
                       else if (n.type === 'space_removed') { icon = '🚫'; accentClass = 'space-negative'; }
+                      else if (n.type === 'connection_request') { icon = '👋'; accentClass = 'space-positive'; }
+                      else if (n.type === 'connection_accepted') { icon = '🤝'; accentClass = 'space-positive'; }
+
+                      const connRequestId = data.connectionId as string | undefined;
+                      const isConnType = n.type === 'connection_request' || n.type === 'connection_accepted';
+                      const connRequestPending = n.type === 'connection_request' && connRequestId
+                        ? connections.find(c => c.id === connRequestId && c.status === 'pending' && c.direction === 'received')
+                        : null;
+                      const connFromNotif = isConnType && connRequestId
+                        ? connections.find(c => c.id === connRequestId)
+                        : null;
+
+                      const isClickableFinal = isClickable || !!(connFromNotif && connFromNotif.status === 'accepted');
 
                       return (
                         <div
                           key={n.id}
-                          className={`u-panel-notif-card ${!n.isRead ? 'unread' : ''} ${isClickable ? 'clickable' : ''}`}
+                          className={`u-panel-notif-card ${!n.isRead ? 'unread' : ''} ${isClickableFinal ? 'clickable' : ''}`}
                           onClick={() => {
+                            if (isConnType && connFromNotif && connFromNotif.status === 'accepted') {
+                              setInlinePanel({ type: 'connection', connectionId: connFromNotif.id });
+                              if (!n.isRead) notificationsApi.markAsRead(n.id);
+                              return;
+                            }
                             if (n.type === 'intro_request' && spaceId) {
                               // Connector sees request → go to space
                               setInlinePanel({ type: 'space', spaceId });
@@ -3537,14 +3945,49 @@ export function AIHomePage() {
                             {n.type === 'intro_declined' && reason && (
                               <div className="u-panel-notif-reason">"{reason}"</div>
                             )}
-                            <div className="u-panel-notif-footer">
-                              <span className="u-panel-notif-time">{timeAgo}</span>
-                              {!isIntroType && spaceId && spaceName && (
-                                <span className="u-panel-notif-space">{spaceEmoji || '🫛'} {spaceName}</span>
-                              )}
-                            </div>
+                            {/* Connection request actions */}
+                            {connRequestPending && (
+                              <>
+                                <div className="u-panel-notif-actions" onClick={e => e.stopPropagation()}>
+                                  <button className="u-notif-accept-btn" onClick={() => { acceptConnection(connRequestPending.id); notificationsApi.markAsRead(n.id); }}>Accept</button>
+                                  <button className="u-notif-reject-btn" onClick={() => { rejectConnection(connRequestPending.id); notificationsApi.markAsRead(n.id); }}>Decline</button>
+                                </div>
+                                <div className="u-panel-notif-footer"><span className="u-panel-notif-time">{timeAgo}</span></div>
+                              </>
+                            )}
+                            {n.type === 'connection_request' && !connRequestPending && (
+                              <div className="u-panel-notif-footer">
+                                <span className="u-panel-notif-time" style={{ fontStyle: 'italic' }}>Handled · {timeAgo}</span>
+                              </div>
+                            )}
+                            {n.type === 'connection_accepted' && (
+                              <div className="u-panel-notif-footer"><span className="u-panel-notif-time">{timeAgo}</span></div>
+                            )}
+                            {/* Space invitation actions */}
+                            {n.type === 'space_invited' && spaceId && pendingSpaces.some(ps => ps.id === spaceId) && (
+                              <>
+                                <div className="u-panel-notif-actions" onClick={e => e.stopPropagation()}>
+                                  <button className="u-notif-accept-btn" onClick={() => { acceptSpaceInvite(spaceId); notificationsApi.markAsRead(n.id); }}>Accept</button>
+                                  <button className="u-notif-reject-btn" onClick={() => { rejectSpaceInvite(spaceId); notificationsApi.markAsRead(n.id); }}>Decline</button>
+                                </div>
+                                <div className="u-panel-notif-footer"><span className="u-panel-notif-time">{timeAgo}</span></div>
+                              </>
+                            )}
+                            {n.type === 'space_invited' && spaceId && !pendingSpaces.some(ps => ps.id === spaceId) && (
+                              <div className="u-panel-notif-footer">
+                                <span className="u-panel-notif-time" style={{ fontStyle: 'italic' }}>Handled · {timeAgo}</span>
+                              </div>
+                            )}
+                            {!isConnType && n.type !== 'space_invited' && (
+                              <div className="u-panel-notif-footer">
+                                <span className="u-panel-notif-time">{timeAgo}</span>
+                                {!isIntroType && spaceId && spaceName && (
+                                  <span className="u-panel-notif-space">{spaceEmoji || '🫛'} {spaceName}</span>
+                                )}
+                              </div>
+                            )}
                           </div>
-                          {isClickable && <span className="u-panel-notif-arrow">→</span>}
+                          {isClickableFinal && <span className="u-panel-notif-arrow">→</span>}
                         </div>
                       );
                     };
@@ -3573,9 +4016,9 @@ export function AIHomePage() {
               <div className="u-panel-settings">
                 <h2>Settings</h2>
 
-                {/* Account */}
+                {/* Main Account */}
                 <div className="u-panel-section">
-                  <h4 className="u-panel-section-h">Account</h4>
+                  <h4 className="u-panel-section-h">Main Account</h4>
                   {currentUser && (
                     <div className="u-settings-account">
                       <PersonAvatar email={currentUser.email} name={currentUser.name} avatarUrl={currentUser.avatar} size={40} />
@@ -3583,53 +4026,73 @@ export function AIHomePage() {
                         <span className="u-settings-account-name">{currentUser.name}</span>
                         <span className="u-settings-account-email">{currentUser.email}</span>
                       </div>
+                      {isCalendarConnected && (() => {
+                        const primaryAcct = calendarAccounts.find(a => currentUser.email && a.email.toLowerCase() === currentUser.email.toLowerCase());
+                        return (
+                          <button
+                            className="u-action-btn"
+                            onClick={() => primaryAcct ? handleAccountSync(primaryAcct.id) : handleCalendarSync()}
+                            disabled={calendarSyncing || (primaryAcct ? syncingAccountId === primaryAcct.id : false)}
+                            style={{ marginLeft: 'auto', flexShrink: 0 }}
+                          >
+                            {(primaryAcct && syncingAccountId === primaryAcct.id) || (!primaryAcct && calendarSyncing) ? 'Syncing...' : 'Sync'}
+                          </button>
+                        );
+                      })()}
                     </div>
                   )}
-                  <button className="u-action-btn u-settings-logout" onClick={logout}>
-                    Log out
-                  </button>
                 </div>
 
-                {/* Connected Accounts */}
+                <span className="u-settings-hint">People can find and connect with you using your main or any connected email.</span>
+
+                {/* Connected Accounts (additional, non-primary) */}
                 <div className="u-panel-section">
                   <h4 className="u-panel-section-h">Connected Accounts</h4>
 
-                  {/* Google Calendar */}
-                  <div className="u-settings-row">
-                    <div className="u-settings-row-info">
-                      <span className="u-settings-row-label">Google Calendar</span>
-                      <span className="u-settings-row-status">
-                        {isCalendarConnected ? (
-                          <><span className="u-settings-dot connected" /> Connected</>
-                        ) : (
-                          <><span className="u-settings-dot" /> Not connected</>
-                        )}
-                      </span>
-                    </div>
-                    {isCalendarConnected ? (
-                      <button className="u-action-btn" onClick={handleCalendarSync} disabled={calendarSyncing}>
-                        {calendarSyncing ? 'Syncing...' : 'Sync'}
-                      </button>
-                    ) : (
-                      <button className="u-primary-btn" onClick={() => { window.location.href = authApi.getGoogleAuthUrl(); }}>
-                        Connect
-                      </button>
-                    )}
-                  </div>
-                  {lastCalendarSync && (
-                    <span className="u-settings-meta">Last synced: {new Date(lastCalendarSync).toLocaleDateString()} {new Date(lastCalendarSync).toLocaleTimeString()}</span>
-                  )}
+                  {/* Additional accounts list */}
+                  {calendarAccounts
+                    .filter(acct => !(currentUser?.email && acct.email.toLowerCase() === currentUser.email.toLowerCase()))
+                    .map(acct => (
+                      <div key={acct.id} className="u-settings-row">
+                        <div className="u-settings-row-info">
+                          <span className="u-settings-row-label">{acct.email}</span>
+                          <span className="u-settings-row-status">
+                            <span className="u-settings-dot connected" /> {acct.contactsCount} contacts
+                            {acct.lastSyncedAt && <> &middot; synced {new Date(acct.lastSyncedAt).toLocaleDateString()}</>}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.25rem' }}>
+                          <button
+                            className="u-action-btn"
+                            onClick={() => handleAccountSync(acct.id)}
+                            disabled={syncingAccountId === acct.id}
+                          >
+                            {syncingAccountId === acct.id ? 'Syncing...' : 'Sync'}
+                          </button>
+                          <button
+                            className="u-action-btn"
+                            style={{ color: 'var(--danger, #e55)' }}
+                            onClick={() => handleAccountDelete(acct.id)}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  }
 
                   {/* Add another Google account */}
-                  <div className="u-settings-row" style={{ borderTop: '1px solid var(--border)', paddingTop: '0.5rem', marginTop: '0.25rem' }}>
-                    <div className="u-settings-row-info">
-                      <span className="u-settings-row-label">Add Google Account</span>
-                      <span className="u-settings-row-status">Connect additional calendars</span>
+                  {isCalendarConnected && (
+                    <div className="u-settings-row" style={{ borderTop: '1px solid var(--border)', paddingTop: '0.5rem', marginTop: '0.25rem' }}>
+                      <div className="u-settings-row-info">
+                        <span className="u-settings-row-label">Add Google Account</span>
+                        <span className="u-settings-row-status">Connect additional calendars</span>
+                      </div>
+                      <button className="u-action-btn" onClick={() => { window.location.href = calendarApi.getAddAccountUrl(); }}>
+                        + Add
+                      </button>
                     </div>
-                    <button className="u-action-btn" onClick={() => { window.location.href = authApi.getGoogleAuthUrl(); }}>
-                      + Add
-                    </button>
-                  </div>
+                  )}
 
                   {/* Coming soon integrations */}
                   <div className="u-settings-row u-settings-row-disabled">
@@ -3665,7 +4128,7 @@ export function AIHomePage() {
                         {enriching ? (
                           <><span className="u-enrich-spinner" /> Running...</>
                         ) : enrichStats ? (
-                          <>{enrichStats.contacts.enriched}/{enrichStats.contacts.total} contacts enriched</>
+                          <>Updated {enrichStats.contacts.enriched}/{enrichStats.contacts.total}{enrichStats.contacts.notFound ? `, ${enrichStats.contacts.notFound} not identified` : ''}</>
                         ) : (
                           <>Loading...</>
                         )}
@@ -3680,8 +4143,16 @@ export function AIHomePage() {
                     </button>
                   </div>
                   <span className="u-settings-meta">
-                    Runs automatically once per week. Use "Run now" to trigger manually.
+                    {enrichStats?.lastEnrichedAt ? (
+                      <>Last updated {new Date(enrichStats.lastEnrichedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}. </>
+                    ) : null}
+                    Runs automatically every week.
                   </span>
+                  {enrichError && !enriching && (
+                    <div style={{ marginTop: '0.4rem', padding: '0.35rem 0.5rem', background: 'rgba(229,115,115,0.12)', border: '1px solid rgba(229,115,115,0.3)', borderRadius: '6px', fontSize: '0.72rem', color: '#e57373' }}>
+                      {enrichError}
+                    </div>
+                  )}
                   {enriching && (enrichProgress.contacts || enrichProgress.companies || enrichProgress.contactsFree) && (
                     <div className="u-enrich-progress" style={{ marginTop: '0.5rem' }}>
                       {enrichProgress.contactsFree && (
@@ -3702,37 +4173,68 @@ export function AIHomePage() {
                     </div>
                   )}
                 </div>
+
+                <button className="u-settings-logout-bottom" onClick={logout}>
+                  Log out
+                </button>
               </div>
             )}
 
             {inlinePanel.type === 'intro-request' && inlinePanel.company && (() => {
               const co = inlinePanel.company;
-              const iSrcFilter = inlinePanel.introSourceFilter || 'all';
-              const iSpaceFilter = inlinePanel.introSpaceFilter || 'all';
-              const iConnFilter = inlinePanel.introConnectionFilter || 'all';
 
-              // If the user was filtering to "mine" (1-1) or a specific connection, don't send to any space
-              const skipSpaces = iSrcFilter === 'mine' || iConnFilter !== 'all';
+              // Build all available "through" options from the company's actual overlaps
+              type IntroOption = { type: 'space'; id: string; label: string; emoji: string; count: number; titles: string[] }
+                              | { type: 'connection'; id: string; label: string; peerId: string; peerEmail: string; count: number; titles: string[] };
+              const introOptions: IntroOption[] = [];
 
-              // Group space contacts by space — only real spaces, not 1-1 connections
-              const bySpace: Record<string, { spaceName: string; spaceEmoji: string; count: number }> = {};
-              if (!skipSpaces) {
-                co.spaceContacts.forEach(c => {
-                  if (!c.spaceId) return; // skip 1-1 contacts
-                  // If filtered to a specific space, only include that space
-                  if (iSpaceFilter !== 'all' && c.spaceId !== iSpaceFilter) return;
-                  const sp = spaces.find(s => s.id === c.spaceId);
-                  if (!sp) return;
-                  if (!bySpace[c.spaceId]) bySpace[c.spaceId] = { spaceName: sp.name, spaceEmoji: sp.emoji || '🫛', count: 0 };
-                  bySpace[c.spaceId].count++;
+              // Collect contacts per space and their titles
+              const spaceContactData: Record<string, { count: number; titles: string[] }> = {};
+              co.spaceContacts.forEach(c => {
+                if (c.spaceId) {
+                  if (!spaceContactData[c.spaceId]) spaceContactData[c.spaceId] = { count: 0, titles: [] };
+                  spaceContactData[c.spaceId].count++;
+                  if (c.title && !spaceContactData[c.spaceId].titles.includes(c.title)) spaceContactData[c.spaceId].titles.push(c.title);
+                }
+              });
+              co.spaceIds.forEach(sid => {
+                const sp = spaces.find(s => s.id === sid);
+                const data = spaceContactData[sid] || { count: 0, titles: [] };
+                if (sp) introOptions.push({ type: 'space', id: sid, label: sp.name, emoji: sp.emoji || '🫛', count: data.count, titles: data.titles });
+              });
+
+              // Collect contacts per connection from the raw connectionCompanies data
+              co.connectionIds.forEach(cid => {
+                const conn = connections.find(c => c.id === cid);
+                if (!conn) return;
+                // Find the matching company in connectionCompanies for this connection + domain
+                const cc = connectionCompanies.find(c => c.connectionId === cid && c.domain === co.domain);
+                const count = cc?.contacts.length || 0;
+                const titles: string[] = [];
+                cc?.contacts.forEach(c => {
+                  if (c.title && !titles.includes(c.title)) titles.push(c.title);
                 });
-              }
-              const spaceIds = Object.keys(bySpace);
-              const hasSpaces = spaceIds.length > 0;
+                introOptions.push({ type: 'connection', id: cid, label: conn.peer.name, peerId: conn.peer.id, peerEmail: conn.peer.email, count, titles });
+              });
 
-              // For 1-1: find the connection person
-              const directConn = iConnFilter !== 'all' ? connections.find(c => c.id === iConnFilter) : null;
-              const isDirectIntro = skipSpaces && !hasSpaces;
+              // Auto-select: if filtered to a specific connection, pre-select it; if filtered to a space, pre-select it; otherwise first option
+              const iConnFilter = inlinePanel.introConnectionFilter || 'all';
+              const iSpaceFilter = inlinePanel.introSpaceFilter || 'all';
+              const defaultSelected = iConnFilter !== 'all'
+                ? introOptions.find(o => o.type === 'connection' && o.id === iConnFilter)?.id
+                : iSpaceFilter !== 'all'
+                  ? introOptions.find(o => o.type === 'space' && o.id === iSpaceFilter)?.id
+                  : introOptions[0]?.id;
+
+              // Use a ref-like pattern via state key to track selection within the IIFE
+              // We'll use introSelectedThrough state for this
+              const selectedId = introSelectedThrough || defaultSelected || '';
+              const selected = introOptions.find(o => o.id === selectedId) || introOptions[0];
+
+              // Auto-set default on first render
+              if (!introSelectedThrough && defaultSelected) {
+                setTimeout(() => setIntroSelectedThrough(defaultSelected), 0);
+              }
 
               return (
               <div className="u-panel-intro">
@@ -3744,44 +4246,56 @@ export function AIHomePage() {
 
                 <div className="u-panel-section">
                   <p className="u-panel-section-text" style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                    {hasSpaces
-                      ? `Contacts at this company are shared through ${spaceIds.length === 1 ? bySpace[spaceIds[0]].spaceName : `${spaceIds.length} spaces`}. Describe what you'd like to discuss and the right connectors will be notified.`
-                      : isDirectIntro && directConn
-                        ? `This is a direct request to ${directConn.peer.name}. Describe what you'd like to discuss.`
-                        : `You have ${co.myContacts.length} ${co.myContacts.length === 1 ? 'contact' : 'contacts'} at this company. Describe what you'd like to discuss.`}
+                    {selected?.type === 'connection'
+                      ? `This is a direct request to ${selected.label}. Describe what you'd like to discuss.`
+                      : selected?.type === 'space'
+                        ? `Contacts at this company are shared through ${selected.label}. Describe what you'd like to discuss and the right connectors will be notified.`
+                        : `Describe what you'd like to discuss.`}
                   </p>
                 </div>
 
-                {hasSpaces && (
-                  <div className="u-panel-section">
-                    <h4 className="u-panel-section-h">Will be sent to</h4>
-                    <div className="u-panel-intro-spaces">
-                      {spaceIds.map(sId => {
-                        const s = bySpace[sId];
-                        return (
-                          <div key={sId} className="u-panel-intro-space-row">
-                            <span className="u-panel-intro-space-name">{s.spaceEmoji} {s.spaceName}</span>
-                            <span className="u-panel-intro-space-count">{s.count} {s.count === 1 ? 'contact' : 'contacts'}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {isDirectIntro && directConn && (
+                {introOptions.length > 0 && (
                   <div className="u-panel-section">
                     <h4 className="u-panel-section-h">Through</h4>
                     <div className="u-panel-intro-spaces">
-                      <div className="u-panel-intro-space-row">
-                        <span className="u-panel-intro-space-name">👤 {directConn.peer.name}</span>
-                        <span className="u-panel-intro-space-count">{directConn.peer.email}</span>
-                      </div>
+                      {introOptions.map(opt => (
+                        <div key={opt.id} className="u-panel-intro-option-wrap">
+                          <div
+                            className={`u-panel-intro-space-row u-panel-intro-space-row--selectable ${selectedId === opt.id ? 'u-panel-intro-space-row--selected' : ''}`}
+                            onClick={() => setIntroSelectedThrough(opt.id)}
+                          >
+                            <div className="u-panel-intro-option-info">
+                              <span className="u-panel-intro-space-name">
+                                {opt.type === 'space' ? `${opt.emoji} ${opt.label}` : `👤 ${opt.label}`}
+                              </span>
+                              {opt.titles.length > 0 && (
+                                <span
+                                  className="u-panel-intro-option-titles"
+                                  onClick={e => { e.stopPropagation(); setIntroExpandedOption(introExpandedOption === opt.id ? null : opt.id); }}
+                                >
+                                  {opt.titles.slice(0, 3).join(', ')}{opt.titles.length > 3 ? ` +${opt.titles.length - 3}` : ''}
+                                  {opt.titles.length > 3 && <span className="u-panel-intro-option-expand">{introExpandedOption === opt.id ? '▲' : '▼'}</span>}
+                                </span>
+                              )}
+                            </div>
+                            <span className="u-panel-intro-space-count">
+                              {opt.count} {opt.count === 1 ? 'contact' : 'contacts'}
+                            </span>
+                          </div>
+                          {introExpandedOption === opt.id && opt.titles.length > 0 && (
+                            <div className="u-panel-intro-option-all-titles">
+                              {opt.titles.map((t, i) => (
+                                <span key={i} className="u-panel-intro-title-chip">{t}</span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
 
-                {isDirectIntro && !directConn && co.myContacts.length > 0 && (
+                {introOptions.length === 0 && co.myContacts.length > 0 && (
                   <div className="u-panel-section">
                     <h4 className="u-panel-section-h">Your contacts</h4>
                     <div className="u-panel-intro-spaces">
@@ -3800,53 +4314,60 @@ export function AIHomePage() {
                   </div>
                 )}
 
-                <textarea
-                  className="u-panel-textarea"
-                  placeholder="What would you like to discuss?"
-                  rows={3}
-                  value={introRequestText}
-                  onChange={e => setIntroRequestText(e.target.value)}
-                  disabled={introRequestSending || introRequestSent}
-                />
+                <div className="u-panel-textarea-wrap">
+                  <textarea
+                    className="u-panel-textarea"
+                    placeholder="What would you like to discuss?"
+                    rows={3}
+                    value={introRequestText}
+                    onChange={e => setIntroRequestText(e.target.value)}
+                    disabled={introRequestSending || introRequestSent}
+                  />
+                  <span className="u-panel-textarea-hint" onClick={() => setIntroTipOpen(!introTipOpen)}>?</span>
+                  {introTipOpen && (
+                    <div className="u-panel-textarea-tooltip">
+                      Be specific about what you need. Mention what's in it for them — rev share, partnership, deal %. Keep it to 2-3 sentences.
+                    </div>
+                  )}
+                </div>
 
                 {introRequestSent ? (
                   <div className="u-panel-actions">
                     <p style={{ color: 'var(--accent-primary)', fontSize: '0.85rem', margin: 0 }}>
-                      Request sent! {hasSpaces ? `Connectors in ${spaceIds.length === 1 ? bySpace[spaceIds[0]].spaceName : `${spaceIds.length} spaces`} will be notified.` : 'The connector will be notified.'}
+                      Request sent! {selected ? `${selected.label} will be notified.` : 'The connector will be notified.'}
                     </p>
                     <button className="u-action-btn" onClick={() => {
                       setInlinePanel(null);
                       setIntroRequestSent(false);
                       setIntroRequestText('');
+                      setIntroSelectedThrough(null);
                     }}>Close</button>
                   </div>
                 ) : (
                   <div className="u-panel-actions">
                     <button
                       className="u-primary-btn"
-                      disabled={!introRequestText.trim() || introRequestSending}
+                      disabled={!introRequestText.trim() || introRequestSending || !selected}
                       onClick={async () => {
                         setIntroRequestSending(true);
                         try {
-                          const normalizedQuery = {
+                          const normalizedQuery: Record<string, unknown> = {
                             companyName: co.name,
                             companyDomain: co.domain,
                             companyId: co.id,
                           };
-                          if (hasSpaces) {
-                            // Send a request to EACH relevant space
-                            await Promise.all(spaceIds.map(sId =>
-                              requestsApi.create({
-                                rawText: introRequestText.trim(),
-                                spaceId: sId,
-                                normalizedQuery,
-                              })
-                            ));
-                          } else {
-                            // No spaces — send as 1-1 request, notify the connection peer
+                          if (selected?.type === 'space') {
                             await requestsApi.create({
                               rawText: introRequestText.trim(),
-                              connectionPeerId: directConn?.peer.id || undefined,
+                              spaceId: selected.id,
+                              normalizedQuery,
+                            });
+                          } else if (selected?.type === 'connection') {
+                            normalizedQuery.connectionPeerId = selected.peerId;
+                            normalizedQuery.connectionPeerName = selected.label;
+                            await requestsApi.create({
+                              rawText: introRequestText.trim(),
+                              connectionPeerId: selected.peerId,
                               normalizedQuery,
                             });
                           }
@@ -3866,6 +4387,7 @@ export function AIHomePage() {
                     <button className="u-action-btn" onClick={() => {
                       setInlinePanel(null);
                       setIntroRequestText('');
+                      setIntroSelectedThrough(null);
                     }}>Cancel</button>
                   </div>
                 )}

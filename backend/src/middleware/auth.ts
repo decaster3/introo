@@ -57,6 +57,13 @@ export interface AuthUser {
   email: string;
   name: string;
   avatar?: string | null;
+  title?: string | null;
+  company?: string | null;
+  companyDomain?: string | null;
+  linkedinUrl?: string | null;
+  headline?: string | null;
+  city?: string | null;
+  country?: string | null;
 }
 
 export interface AuthenticatedRequest extends Request {
@@ -161,7 +168,7 @@ export const authMiddleware: RequestHandler = async (req, res, next) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
-      select: { id: true, email: true, name: true, avatar: true },
+      select: { id: true, email: true, name: true, avatar: true, title: true, company: true, companyDomain: true, linkedinUrl: true, headline: true, city: true, country: true },
     });
 
     if (!user) {
@@ -185,7 +192,7 @@ export const optionalAuthMiddleware: RequestHandler = async (req, res, next) => 
       try {
         const user = await prisma.user.findUnique({
           where: { id: payload.userId },
-          select: { id: true, email: true, name: true, avatar: true },
+          select: { id: true, email: true, name: true, avatar: true, title: true, company: true, companyDomain: true, linkedinUrl: true, headline: true, city: true, country: true },
         });
         if (user) {
           (req as AuthenticatedRequest).user = user;

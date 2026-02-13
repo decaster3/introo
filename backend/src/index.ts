@@ -6,6 +6,7 @@ import rateLimit from 'express-rate-limit';
 
 import { configurePassport } from './middleware/auth.js';
 import { securityHeaders, httpsRedirect } from './middleware/security.js';
+import { syncCalendarForUser, syncCalendarAccount } from './services/calendar.js';
 import authRoutes from './routes/auth.js';
 import calendarRoutes from './routes/calendar.js';
 import usersRoutes from './routes/users.js';
@@ -14,8 +15,9 @@ import offersRoutes from './routes/offers.js';
 import relationshipsRoutes from './routes/relationships.js';
 import spacesRoutes from './routes/spaces.js';
 import signalsRoutes from './routes/signals.js';
-import enrichmentRoutes from './routes/enrichment.js';
+import enrichmentRoutes, { runEnrichmentForUser } from './routes/enrichment.js';
 import connectionsRoutes from './routes/connections.js';
+import notificationsRoutes from './routes/notifications.js';
 import aiRoutes from './routes/ai.js';
 import prisma from './lib/prisma.js';
 
@@ -94,6 +96,7 @@ app.use('/api/spaces', spacesRoutes);
 app.use('/api/signals', signalsRoutes);
 app.use('/api/enrichment', enrichmentRoutes);
 app.use('/api/connections', connectionsRoutes);
+app.use('/api/notifications', notificationsRoutes);
 app.use('/api/ai', aiRoutes);
 
 // Health check with database connectivity
@@ -188,9 +191,76 @@ process.on('uncaughtException', (error) => {
   process.exit(1);
 });
 
+// ─── Background calendar sync (every 4 hours) ───────────────────────────────
+
+const SYNC_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+async function backgroundCalendarSync() {
+  console.log('[cron] Starting background calendar sync for all users...');
+  try {
+    // Get all users that have calendar connected (primary tokens)
+    const users = await prisma.user.findMany({
+      where: { googleAccessToken: { not: null } },
+      select: { id: true, email: true },
+    });
+
+    for (const user of users) {
+      try {
+        await syncCalendarForUser(user.id);
+        console.log(`[cron] Synced primary calendar for ${user.email}`);
+      } catch (err) {
+        console.error(`[cron] Failed to sync primary for ${user.email}:`, (err as Error).message);
+      }
+    }
+
+    // Sync all additional calendar accounts
+    const accounts = await prisma.calendarAccount.findMany({
+      where: { isActive: true },
+      select: { id: true, email: true, userId: true },
+    });
+
+    for (const acct of accounts) {
+      try {
+        // Skip primary accounts (already synced above via syncCalendarForUser)
+        const owner = users.find(u => u.id === acct.userId);
+        if (owner && acct.email.toLowerCase() === owner.email.toLowerCase()) continue;
+
+        await syncCalendarAccount(acct.userId, acct.id);
+        console.log(`[cron] Synced additional account ${acct.email}`);
+      } catch (err) {
+        console.error(`[cron] Failed to sync account ${acct.email}:`, (err as Error).message);
+      }
+    }
+
+    console.log('[cron] Background calendar sync complete');
+
+    // Run enrichment for all users with contacts (weekly cadence enforced by 7-day cache)
+    console.log('[cron] Starting background enrichment for all users...');
+    const allUsers = await prisma.user.findMany({
+      where: { contacts: { some: {} } },
+      select: { id: true, email: true },
+    });
+
+    for (const u of allUsers) {
+      try {
+        runEnrichmentForUser(u.id);
+        console.log(`[cron] Queued enrichment for ${u.email}`);
+      } catch (err) {
+        console.error(`[cron] Failed to queue enrichment for ${u.email}:`, (err as Error).message);
+      }
+    }
+  } catch (err) {
+    console.error('[cron] Background sync error:', err);
+  }
+}
+
 // Start server
 verifyDatabaseConnection().then(() => {
   server = app.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
+
+    // Start background sync interval
+    setInterval(backgroundCalendarSync, SYNC_INTERVAL_MS);
+    console.log(`[cron] Calendar background sync scheduled every ${SYNC_INTERVAL_MS / 3600000}h`);
   });
 });

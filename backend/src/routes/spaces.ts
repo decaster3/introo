@@ -608,10 +608,20 @@ router.post('/:id/members', async (req, res) => {
       return;
     }
 
-    // Find user by email
-    const userToAdd = await prisma.user.findUnique({
-      where: { email },
+    // Find user by primary email or any linked calendar account email
+    const normalizedEmail = email.trim().toLowerCase();
+    let userToAdd = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
     });
+    if (!userToAdd) {
+      const calAccount = await prisma.calendarAccount.findFirst({
+        where: { email: normalizedEmail, isActive: true },
+        select: { userId: true },
+      });
+      if (calAccount) {
+        userToAdd = await prisma.user.findUnique({ where: { id: calAccount.userId } });
+      }
+    }
 
     if (!userToAdd) {
       res.status(404).json({ error: 'User not found with that email' });
@@ -633,40 +643,23 @@ router.post('/:id/members', async (req, res) => {
         spaceId: id,
         userId: userToAdd.id,
         role: 'member',
-        status: 'approved', // Directly added by admin/owner, no approval needed
+        status: 'pending', // Invitation — user must accept first
       },
     });
 
-    // Notify the added user
+    // Notify the invited user
     const inviter = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
     await prisma.notification.create({
       data: {
         userId: userToAdd.id,
         type: 'space_invited',
-        title: `Added to ${space.name}`,
-        body: `${inviter?.name || 'Someone'} added you to ${space.emoji || ''} ${space.name}.`,
+        title: `Invitation to ${space.name}`,
+        body: `${inviter?.name || 'Someone'} invited you to join ${space.emoji || ''} ${space.name}.`,
         data: { spaceId: id, spaceName: space.name, spaceEmoji: space.emoji, inviterId: userId },
       },
     }).catch(() => {});
 
-    const updatedSpace = await prisma.space.findUnique({
-      where: { id },
-      include: {
-        owner: {
-          select: { id: true, name: true, avatar: true },
-        },
-        members: {
-          where: { status: 'approved' },
-          include: {
-            user: {
-              select: { id: true, name: true, avatar: true, email: true },
-            },
-          },
-        },
-      },
-    });
-
-    res.json(updatedSpace);
+    res.json({ success: true, message: 'Invitation sent', pending: true });
   } catch (error: unknown) {
     console.error('Error adding member:', error);
     res.status(500).json({ error: 'Failed to add member' });
@@ -795,6 +788,75 @@ router.post('/:id/leave', async (req, res) => {
   } catch (error: unknown) {
     console.error('Error leaving space:', error);
     res.status(500).json({ error: 'Failed to leave space' });
+  }
+});
+
+// Accept a space invitation (invited user)
+router.post('/:id/accept-invite', async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+    const { id } = req.params;
+
+    const membership = await prisma.spaceMember.findUnique({
+      where: { spaceId_userId: { spaceId: id, userId } },
+    });
+
+    if (!membership || membership.status !== 'pending') {
+      res.status(404).json({ error: 'No pending invitation found' });
+      return;
+    }
+
+    await prisma.spaceMember.update({
+      where: { id: membership.id },
+      data: { status: 'approved' },
+    });
+
+    const space = await prisma.space.findUnique({ where: { id }, select: { name: true, emoji: true, ownerId: true } });
+    const accepter = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+
+    // Notify space owner
+    if (space) {
+      await prisma.notification.create({
+        data: {
+          userId: space.ownerId,
+          type: 'space_member_joined',
+          title: `New member: ${space.name}`,
+          body: `${accepter?.name || 'Someone'} accepted the invitation to ${space.emoji || ''} ${space.name}.`,
+          data: { spaceId: id, spaceName: space.name, spaceEmoji: space.emoji, memberId: userId },
+        },
+      }).catch(() => {});
+    }
+
+    res.json({ success: true, message: 'Invitation accepted' });
+  } catch (error: unknown) {
+    console.error('Error accepting space invitation:', error);
+    res.status(500).json({ error: 'Failed to accept invitation' });
+  }
+});
+
+// Reject a space invitation (invited user)
+router.post('/:id/reject-invite', async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+    const { id } = req.params;
+
+    const membership = await prisma.spaceMember.findUnique({
+      where: { spaceId_userId: { spaceId: id, userId } },
+    });
+
+    if (!membership || membership.status !== 'pending') {
+      res.status(404).json({ error: 'No pending invitation found' });
+      return;
+    }
+
+    await prisma.spaceMember.delete({
+      where: { id: membership.id },
+    });
+
+    res.json({ success: true, message: 'Invitation declined' });
+  } catch (error: unknown) {
+    console.error('Error rejecting space invitation:', error);
+    res.status(500).json({ error: 'Failed to decline invitation' });
   }
 });
 

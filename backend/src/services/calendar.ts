@@ -1,4 +1,4 @@
-import { google, calendar_v3 } from 'googleapis';
+import { google } from 'googleapis';
 import prisma from '../lib/prisma.js';
 import { decryptToken, encryptToken } from '../middleware/auth.js';
 
@@ -128,9 +128,9 @@ export async function syncCalendarForUser(userId: string): Promise<{
 
   const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
-  // Fetch events from the past 12 months
+  // Fetch events from the past 5 years
   const now = new Date();
-  const oneYearAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+  const fiveYearsAgo = new Date(now.getTime() - 5 * 365 * 24 * 60 * 60 * 1000);
 
   const contactsMap = new Map<string, CalendarContact>();
   let pageToken: string | undefined;
@@ -138,7 +138,7 @@ export async function syncCalendarForUser(userId: string): Promise<{
   do {
     const response = await calendar.events.list({
       calendarId: 'primary',
-      timeMin: oneYearAgo.toISOString(),
+      timeMin: fiveYearsAgo.toISOString(),
       timeMax: now.toISOString(),
       maxResults: 250,
       singleEvents: true,
@@ -205,6 +205,21 @@ export async function syncCalendarForUser(userId: string): Promise<{
   const contacts = Array.from(contactsMap.values());
   const domainsSet = new Set(contacts.map(c => c.domain));
 
+  // Auto-create a CalendarAccount for the primary email so source tracking is uniform
+  const primaryAccount = await prisma.calendarAccount.upsert({
+    where: { userId_email: { userId, email: user.email } },
+    update: {
+      googleAccessToken: user.googleAccessToken,
+      googleRefreshToken: user.googleRefreshToken ?? undefined,
+    },
+    create: {
+      userId,
+      email: user.email,
+      googleAccessToken: user.googleAccessToken,
+      googleRefreshToken: user.googleRefreshToken ?? undefined,
+    },
+  });
+
   // Upsert companies
   const companyMap = new Map<string, string>(); // domain -> companyId
   for (const domain of domainsSet) {
@@ -247,6 +262,14 @@ export async function syncCalendarForUser(userId: string): Promise<{
       },
     });
 
+    // Track primary account as a source via many-to-many
+    await prisma.contact.update({
+      where: { id: dbContact.id },
+      data: {
+        sourceAccounts: { connect: { id: primaryAccount.id } },
+      },
+    });
+
     // Delete existing meetings and insert new ones (full refresh)
     await prisma.meeting.deleteMany({
       where: { contactId: dbContact.id },
@@ -272,10 +295,14 @@ export async function syncCalendarForUser(userId: string): Promise<{
   // Count unique companies (for stats)
   const relationshipsCreated = 0; // Now handled in approve flow
 
-  // Update user's sync timestamp
+  // Update user's sync timestamp and primary account sync timestamp
   await prisma.user.update({
     where: { id: userId },
     data: { calendarSyncedAt: now },
+  });
+  await prisma.calendarAccount.update({
+    where: { id: primaryAccount.id },
+    data: { lastSyncedAt: now },
   });
 
   return {
@@ -383,9 +410,9 @@ export async function syncCalendarAccount(userId: string, accountId: string): Pr
 
   const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
-  // Fetch events from the past 12 months
+  // Fetch events from the past 5 years
   const now = new Date();
-  const oneYearAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+  const fiveYearsAgo = new Date(now.getTime() - 5 * 365 * 24 * 60 * 60 * 1000);
 
   const contactsMap = new Map<string, CalendarContact>();
   let pageToken: string | undefined;
@@ -393,7 +420,7 @@ export async function syncCalendarAccount(userId: string, accountId: string): Pr
   do {
     const response = await calendar.events.list({
       calendarId: 'primary',
-      timeMin: oneYearAgo.toISOString(),
+      timeMin: fiveYearsAgo.toISOString(),
       timeMax: now.toISOString(),
       maxResults: 250,
       singleEvents: true,
@@ -501,6 +528,14 @@ export async function syncCalendarAccount(userId: string, accountId: string): Pr
         isApproved: true,
         source: 'google_calendar',
         sourceAccountId: accountId,
+      },
+    });
+
+    // Track this account as a source via many-to-many
+    await prisma.contact.update({
+      where: { id: dbContact.id },
+      data: {
+        sourceAccounts: { connect: { id: accountId } },
       },
     });
 

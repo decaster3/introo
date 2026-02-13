@@ -38,14 +38,29 @@ async function request<T>(
 export const authApi = {
   getStatus: () => request<{ authenticated: boolean }>('/auth/status'),
   getMe: () => request<{ user: User }>('/auth/me'),
+  updateProfile: (data: { name?: string; title?: string; companyDomain?: string; linkedinUrl?: string; headline?: string; city?: string; country?: string }) =>
+    request<{ user: User }>('/auth/me', { method: 'PATCH', body: JSON.stringify(data) }),
   logout: () => request<{ success: boolean }>('/auth/logout', { method: 'POST' }),
   getGoogleAuthUrl: () => `${API_BASE}/auth/google`,
 };
 
 // Calendar
+export interface CalendarAccountInfo {
+  id: string;
+  email: string;
+  name: string | null;
+  lastSyncedAt: string | null;
+  isActive: boolean;
+  contactsCount: number;
+}
+
 export const calendarApi = {
   sync: () => request<{ success: boolean; contactsFound: number; companiesFound: number; relationshipsCreated: number }>('/api/calendar/sync', { method: 'POST' }),
-  getStatus: () => request<{ isConnected: boolean; lastSyncedAt: string | null }>('/api/calendar/status'),
+  getStatus: () => request<{ isConnected: boolean; lastSyncedAt: string | null; accountsCount: number }>('/api/calendar/status'),
+  getAccounts: () => request<CalendarAccountInfo[]>('/api/calendar/accounts'),
+  syncAccount: (id: string) => request<{ success: boolean; contactsFound: number; companiesFound: number }>(`/api/calendar/accounts/${id}/sync`, { method: 'POST' }),
+  deleteAccount: (id: string) => request<{ success: boolean }>(`/api/calendar/accounts/${id}`, { method: 'DELETE' }),
+  getAddAccountUrl: () => `${API_BASE}/auth/google/add-account`,
 };
 
 // Relationships
@@ -120,11 +135,77 @@ export const enrichmentApi = {
     contactsFree: EnrichmentProgress | null;
   }>('/api/enrichment/progress'),
   // FREE enrichment — uses mixed_people/api_search, 0 credits
-  enrichContactsFree: () =>
+  enrichContactsFree: (options?: { force?: boolean }) =>
     request<{ message: string; key: string }>('/api/enrichment/contacts-free', {
       method: 'POST',
+      body: JSON.stringify({ force: options?.force ?? false }),
+    }),
+  lookupCompany: (domain: string) =>
+    request<{ company: any; source: 'db' | 'apollo' | 'none' }>(`/api/enrichment/company/${encodeURIComponent(domain)}`),
+};
+
+// Intro Requests
+export const requestsApi = {
+  create: (data: { rawText: string; spaceId?: string; connectionPeerId?: string; normalizedQuery?: Record<string, unknown> }) =>
+    request<IntroRequestResponse>('/api/requests', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getMine: () => request<IntroRequestResponse[]>('/api/requests/user/mine'),
+  getIncoming: () => request<IntroRequestResponse[]>('/api/requests/user/incoming'),
+  decline: (id: string, reason?: string) =>
+    request<IntroRequestResponse>(`/api/requests/${id}/decline`, {
+      method: 'PATCH',
+      body: JSON.stringify({ reason }),
+    }),
+  delete: (id: string) =>
+    request<{ success: boolean }>(`/api/requests/${id}`, {
+      method: 'DELETE',
     }),
 };
+
+// Intro Offers
+export const offersApi = {
+  create: (data: { requestId: string; message?: string }) =>
+    request<{ id: string; requestId: string; status: string }>('/api/offers', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+};
+
+// Notifications
+export interface Notification {
+  id: string;
+  userId: string;
+  type: string;
+  title: string;
+  body: string | null;
+  data: Record<string, unknown>;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export const notificationsApi = {
+  getAll: (unreadOnly?: boolean) =>
+    request<Notification[]>(`/api/notifications${unreadOnly ? '?unreadOnly=true' : ''}`),
+  getUnreadCount: () => request<{ count: number }>('/api/notifications/unread-count'),
+  markAsRead: (id: string) =>
+    request<Notification>(`/api/notifications/${id}/read`, { method: 'PATCH' }),
+  markAllRead: () =>
+    request<{ success: boolean }>('/api/notifications/mark-all-read', { method: 'POST' }),
+};
+
+export interface IntroRequestResponse {
+  id: string;
+  requesterId: string;
+  rawText: string;
+  normalizedQuery: Record<string, unknown>;
+  status: string;
+  spaceId: string | null;
+  createdAt: string;
+  requester: { id: string; name: string; avatar: string | null };
+  space: { id: string; name: string; emoji: string } | null;
+}
 
 // Additional types for API responses
 export interface Space {

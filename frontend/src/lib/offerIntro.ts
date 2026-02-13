@@ -29,3 +29,36 @@ export function openOfferIntroEmail({
   const mailtoUrl = `mailto:${requesterEmail}?subject=${subject}&body=${encodeURIComponent(body)}`;
   window.open(mailtoUrl, '_blank');
 }
+
+/**
+ * Opens an email client with a double-intro email — introducing the requester
+ * to a contact at the target company. Both are on the To line.
+ */
+export interface DoubleIntroParams {
+  requesterEmail: string;
+  requesterName: string;
+  contactEmail: string;
+  contactName: string;
+  targetCompany: string;
+  senderName?: string;
+}
+
+export function openDoubleIntroEmail({
+  requesterEmail,
+  requesterName,
+  contactEmail,
+  contactName,
+  targetCompany,
+  senderName = 'Me',
+}: DoubleIntroParams): void {
+  const subject = encodeURIComponent(`Introduction: ${requesterName} <> ${contactName} (${targetCompany})`);
+
+  let body = `Hi ${contactName} and ${requesterName},\n\n`;
+  body += `I'd like to introduce you to each other.\n\n`;
+  body += `${contactName} — ${requesterName} is interested in connecting with someone at ${targetCompany}.\n\n`;
+  body += `${requesterName} — ${contactName} is at ${targetCompany} and I thought you two should meet.\n\n`;
+  body += `I'll let you both take it from here!\n\nBest,\n${senderName}`;
+
+  const mailtoUrl = `mailto:${contactEmail},${requesterEmail}?subject=${subject}&body=${encodeURIComponent(body)}`;
+  window.open(mailtoUrl, '_blank');
+}
