@@ -1,5 +1,6 @@
 import { calendarApi, type CalendarAccountInfo } from '../../lib/api';
 import { PersonAvatar } from '../../components';
+import { resetOnboarding } from '../../components/OnboardingTour';
 import type { User } from '../../types';
 
 interface SettingsPanelProps {
@@ -184,6 +185,13 @@ export function SettingsPanel({
           </div>
         )}
       </div>
+
+      <button
+        className="u-settings-replay-tour"
+        onClick={() => { resetOnboarding(); window.location.reload(); }}
+      >
+        Replay onboarding tour
+      </button>
 
       <button className="u-settings-logout-bottom" onClick={onLogout}>
         Log out

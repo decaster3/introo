@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useAppState, useAppActions } from '../store';
 import { API_BASE, calendarApi, requestsApi, notificationsApi, offersApi, type CalendarAccountInfo } from '../lib/api';
 import { calculateStrength, type SpaceCompany, type DisplayContact, type MergedCompany, type HuntFilters, type Hunt, type InlinePanel } from '../types';
-import { PersonAvatar, CompanyLogo } from '../components';
+import { PersonAvatar, CompanyLogo, OnboardingTour } from '../components';
 import { ProfilePanel, SettingsPanel, NotificationsPanel } from '../components/panels';
 import { useProfile } from '../hooks/useProfile';
 import { useEnrichment } from '../hooks/useEnrichment';
@@ -690,13 +690,9 @@ export function AIHomePage() {
       });
     }
 
-    // When a hunt is selected, sort matching companies to the top
+    // When a hunt is selected, filter to only matching companies
     if (selectedHunt) {
-      result = [...result].sort((a, b) => {
-        const aMatch = a.matchingHunts.includes(selectedHunt) ? 0 : 1;
-        const bMatch = b.matchingHunts.includes(selectedHunt) ? 0 : 1;
-        return aMatch - bMatch;
-      });
+      result = result.filter(c => c.matchingHunts.includes(selectedHunt));
     }
 
     return result;
@@ -1188,6 +1184,11 @@ export function AIHomePage() {
   return (
     <div className="u-root">
       <div className="u-ambient" />
+
+      {/* Interactive onboarding tour — shown once for new users */}
+      {!storeLoading && !loading && contacts.length > 0 && (
+        <OnboardingTour />
+      )}
 
       <div className="u-layout">
         {/* ═══════ LEFT SIDEBAR ═══════ */}
