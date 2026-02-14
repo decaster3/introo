@@ -1809,7 +1809,10 @@ export function AIHomePage() {
               </button>
               {enriching && (
                 <span className="u-topbar-enriching" title="Auto-enriching contacts...">
-                  <span className="u-enrich-spinner" /> Enriching...
+                  <span className="u-enrich-spinner" />
+                  {enrichProgress.contactsFree
+                    ? `${enrichProgress.contactsFree.enriched}/${enrichProgress.contactsFree.total}`
+                    : 'Enriching...'}
                 </span>
               )}
               <button
@@ -1901,6 +1904,31 @@ export function AIHomePage() {
               </button>
             )}
           </div>
+
+          {/* ── Enrichment banner ── */}
+          {enriching && (
+            <div className="u-enrich-banner">
+              <div className="u-enrich-banner-icon"><span className="u-enrich-spinner" /></div>
+              <div className="u-enrich-banner-body">
+                <div className="u-enrich-banner-text">
+                  Enriching your contacts with company data, titles, and LinkedIn profiles...
+                </div>
+                {enrichProgress.contactsFree && enrichProgress.contactsFree.total > 0 && (
+                  <div className="u-enrich-banner-progress">
+                    <div className="u-enrich-banner-bar">
+                      <div
+                        className="u-enrich-banner-fill"
+                        style={{ width: `${Math.round(((enrichProgress.contactsFree.enriched + enrichProgress.contactsFree.skipped + enrichProgress.contactsFree.errors) / enrichProgress.contactsFree.total) * 100)}%` }}
+                      />
+                    </div>
+                    <span className="u-enrich-banner-count">
+                      {enrichProgress.contactsFree.enriched} of {enrichProgress.contactsFree.total}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* ── Company Grid ──────────────────────────────────── */}
           <div className="u-grid">
