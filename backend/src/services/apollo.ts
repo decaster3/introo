@@ -131,7 +131,7 @@ export async function enrichOrganization(domain: string): Promise<ApolloOrganiza
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
     });
     if (!res.ok) return null;
-    const data = await res.json();
+    const data: any = await res.json();
     return data.organization || null;
   } catch {
     return null;
@@ -163,7 +163,7 @@ async function matchPerson(params: {
       console.log(`[apollo] people/match ${res.status} for`, params);
       return null;
     }
-    const data = await res.json();
+    const data: any = await res.json();
     const person = data.person || null;
     // Debug: log raw response keys and key fields for first few calls
     if (person) {

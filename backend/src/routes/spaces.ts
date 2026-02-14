@@ -917,6 +917,17 @@ router.get('/:id/reach', async (req, res) => {
       industry: string | null;
       sizeBucket: string | null;
       logo: string | null;
+      employeeCount: number | null;
+      foundedYear: number | null;
+      annualRevenue: string | null;
+      totalFunding: string | null;
+      lastFundingRound: string | null;
+      lastFundingDate: Date | null;
+      city: string | null;
+      country: string | null;
+      description: string | null;
+      linkedinUrl: string | null;
+      enrichedAt: Date | null;
       contacts: {
         id: string;
         name: string;
