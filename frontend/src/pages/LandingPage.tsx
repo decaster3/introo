@@ -46,7 +46,7 @@ export function LandingPage() {
       <section className="lp-hero">
         <div className="lp-hero-badge">Relationship intelligence for professionals</div>
         <h1 className="lp-hero-title">
-          Your calendar knows<br />who you know.
+          Stop reaching out.<br />Start getting introduced.
         </h1>
         <p className="lp-hero-sub">
           Introo reads your meetings and builds a living map of your professional network.
