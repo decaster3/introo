@@ -1410,7 +1410,7 @@ body {
 }
 
 .u-ff-chip--mine.active { border-color: var(--accent-primary); background: rgba(91,141,239,0.1); color: var(--accent-primary); }
-.u-ff-chip--spaces.active { border-color: var(--success); background: rgba(74,222,128,0.1); color: var(--success); }
+.u-ff-chip--spaces.active { border-color: var(--accent-primary); background: rgba(91,141,239,0.1); color: var(--accent-primary); }
 .u-ff-chip--both.active { border-color: #facc15; background: rgba(250,204,21,0.1); color: #facc15; }
 
 .u-ff-chip--str-strong.active { border-color: var(--success); background: rgba(52,211,153,0.1); color: var(--success); }
@@ -2182,9 +2182,9 @@ body {
 }
 
 .sb-chip--spaces.active {
-  border-color: var(--success);
-  background: rgba(74,222,128,0.1);
-  color: var(--success);
+  border-color: var(--accent-primary);
+  background: rgba(91,141,239,0.1);
+  color: var(--accent-primary);
 }
 
 .sb-chip--both.active {
@@ -2920,8 +2920,8 @@ body {
 }
 
 .u-hunt-pill.has-matches .u-hunt-pill-count {
-  background: var(--success);
-  color: white;
+  background: rgba(91,141,239,0.2);
+  color: var(--accent-primary);
 }
 
 .u-hunt-pill-count {
@@ -3184,7 +3184,7 @@ body {
 
 /* Hunt match highlight */
 .u-tile--hunt-match {
-  border-color: rgba(91,141,239,0.25);
+  border-color: rgba(91,141,239,0.12);
 }
 
 .u-tile--hunt-match.u-tile--both {
@@ -3195,16 +3195,16 @@ body {
 .u-tile-hunt-tags {
   display: flex; flex-wrap: wrap; gap: 0.25rem;
   padding: 0.3rem 0.625rem;
-  background: rgba(52,211,153,0.05);
-  border-bottom: 1px solid rgba(52,211,153,0.1);
+  background: rgba(91,141,239,0.03);
+  border-bottom: 1px solid rgba(91,141,239,0.06);
 }
 
 .u-tile-hunt-tag {
   padding: 0.125rem 0.4rem;
-  background: rgba(52,211,153,0.15);
+  background: rgba(91,141,239,0.08);
   border-radius: 999px;
   font-size: 0.6rem; font-weight: 500;
-  color: var(--success);
+  color: rgba(91,141,239,0.6);
 }
 
 /* Tile header -- company name row */
@@ -4395,7 +4395,7 @@ body {
 }
 
 .hunt-matches {
-  color: var(--success);
+  color: var(--accent-primary);
   font-weight: 500;
 }
 

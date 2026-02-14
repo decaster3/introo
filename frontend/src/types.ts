@@ -240,6 +240,8 @@ export interface HuntFilters {
   technologies?: string[];
   sourceFilter?: string;
   strengthFilter?: string;
+  connectedYears?: string[];
+  connectedMonths?: string[];
 }
 
 export interface Hunt {

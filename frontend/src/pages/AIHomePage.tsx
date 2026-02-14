@@ -504,6 +504,22 @@ export function AIHomePage() {
             });
             if (!inRange) filterMatch = false;
           }
+          if (hf.connectedYears && hf.connectedYears.length > 0 && filterMatch) {
+            hasAnyFilter = true;
+            const hasMatchingContact = co.myContacts.some(c => {
+              const y = String(new Date(c.firstSeenAt).getFullYear());
+              return hf.connectedYears!.includes(y);
+            });
+            if (!hasMatchingContact) filterMatch = false;
+          }
+          if (hf.connectedMonths && hf.connectedMonths.length > 0 && filterMatch) {
+            hasAnyFilter = true;
+            const hasMatchingContact = co.myContacts.some(c => {
+              const m = String(new Date(c.firstSeenAt).getMonth() + 1);
+              return hf.connectedMonths!.includes(m);
+            });
+            if (!hasMatchingContact) filterMatch = false;
+          }
 
           if (hasAnyFilter && filterMatch) matches = true;
         }
@@ -1676,6 +1692,8 @@ export function AIHomePage() {
                 if (sf.foundedTo) savedFilters.foundedTo = sf.foundedTo;
                 if (sf.revenueRanges.length > 0) savedFilters.revenueRanges = [...sf.revenueRanges];
                 if (sf.technologies.length > 0) savedFilters.technologies = [...sf.technologies];
+                if (sf.connectedYears.length > 0) savedFilters.connectedYears = [...sf.connectedYears];
+                if (sf.connectedMonths.length > 0) savedFilters.connectedMonths = [...sf.connectedMonths];
                 if (sourceFilter !== 'all') savedFilters.sourceFilter = sourceFilter;
                 if (strengthFilter !== 'all') savedFilters.strengthFilter = strengthFilter;
 
