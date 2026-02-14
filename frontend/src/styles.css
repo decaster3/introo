@@ -1991,6 +1991,12 @@ body {
   background: rgba(99,102,241,0.12);
   color: var(--accent);
 }
+.sb-chip-count {
+  font-size: 0.6rem;
+  opacity: 0.5;
+  font-weight: 400;
+  margin-left: 0.1rem;
+}
 
 .sb-chip-count {
   padding: 0.05rem 0.25rem;

@@ -797,6 +797,21 @@ export function AIHomePage() {
     return n;
   }, [sourceFilter, strengthFilter, spaceFilter, connectionFilter, selectedHunt, sidebarFilters]);
 
+  // Compute year/month counts from contacts for "Connected since" filter
+  const timeFilterStats = useMemo(() => {
+    const yearCounts: Record<string, number> = {};
+    const monthCounts: Record<string, number> = {};
+    contacts.forEach(c => {
+      const d = new Date(c.firstSeenAt);
+      const y = String(d.getFullYear());
+      const m = String(d.getMonth() + 1);
+      yearCounts[y] = (yearCounts[y] || 0) + 1;
+      monthCounts[m] = (monthCounts[m] || 0) + 1;
+    });
+    const years = Object.keys(yearCounts).sort();
+    return { yearCounts, monthCounts, years };
+  }, [contacts]);
+
   const clearAllFilters = useCallback(() => {
     setSourceFilter('all');
     setStrengthFilter('all');
@@ -1390,7 +1405,7 @@ export function AIHomePage() {
               <div className="sb-chips-group">
                 <span className="sb-chips-label">Year</span>
                 <div className="sb-chips">
-                  {['2024', '2025', '2026'].map(y => (
+                  {timeFilterStats.years.map(y => (
                     <button
                       key={y}
                       className={`sb-chip sb-chip--time ${sidebarFilters.connectedYears.includes(y) ? 'active' : ''}`}
@@ -1401,7 +1416,7 @@ export function AIHomePage() {
                           : [...prev.connectedYears, y],
                       }))}
                     >
-                      {y}
+                      {y} <span className="sb-chip-count">{timeFilterStats.yearCounts[y]}</span>
                     </button>
                   ))}
                 </div>
@@ -1433,7 +1448,7 @@ export function AIHomePage() {
                           : [...prev.connectedMonths, m.value],
                       }))}
                     >
-                      {m.label}
+                      {m.label} {timeFilterStats.monthCounts[m.value] ? <span className="sb-chip-count">{timeFilterStats.monthCounts[m.value]}</span> : null}
                     </button>
                   ))}
                 </div>
