@@ -1,8 +1,13 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { useAppState, useAppActions, useAppDispatch } from '../store';
-import { API_BASE, authApi, enrichmentApi, calendarApi, requestsApi, notificationsApi, offersApi, type CalendarAccountInfo } from '../lib/api';
-import { calculateStrength } from '../types';
+import { useAppState, useAppActions } from '../store';
+import { API_BASE, calendarApi, requestsApi, notificationsApi, offersApi, type CalendarAccountInfo } from '../lib/api';
+import { calculateStrength, type SpaceCompany, type DisplayContact, type MergedCompany, type HuntFilters, type Hunt, type InlinePanel } from '../types';
 import { PersonAvatar, CompanyLogo } from '../components';
+import { ProfilePanel, SettingsPanel, NotificationsPanel } from '../components/panels';
+import { useProfile } from '../hooks/useProfile';
+import { useEnrichment } from '../hooks/useEnrichment';
+import { useSpaceManagement } from '../hooks/useSpaceManagement';
+import { useConnectionManagement } from '../hooks/useConnectionManagement';
 import { openOfferIntroEmail, openDoubleIntroEmail } from '../lib/offerIntro';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -56,197 +61,11 @@ function matchesFundingFilter(raw: string | null | undefined, totalFunding: stri
   }
 }
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-interface SpaceCompany {
-  id: string;
-  domain: string;
-  name: string;
-  industry?: string;
-  contactCount: number;
-  spaceId?: string;
-  employeeCount?: number | null;
-  foundedYear?: number | null;
-  annualRevenue?: string | null;
-  totalFunding?: string | null;
-  lastFundingRound?: string | null;
-  lastFundingDate?: string | null;
-  city?: string | null;
-  country?: string | null;
-  description?: string | null;
-  linkedinUrl?: string | null;
-  enrichedAt?: string | null;
-  contacts: {
-    id: string; name: string; email: string; title?: string;
-    userId: string; userName: string; spaceId?: string;
-  }[];
-}
-
-interface Space {
-  id: string;
-  name: string;
-  emoji: string;
-  memberCount?: number;
-  openRequestCount?: number;
-  description?: string | null;
-  inviteCode?: string;
-  ownerId?: string;
-  members?: { id: string; role: string; user: { id: string; name: string; email: string; avatar: string | null } }[];
-}
-
-interface PendingSpace {
-  id: string;
-  name: string;
-  emoji: string;
-  isPrivate: boolean;
-  membershipId: string;
-  appliedAt: string;
-}
-
-interface PendingMember {
-  id: string;
-  userId: string;
-  user: { id: string; name: string; email: string; avatar: string | null };
-}
-
-interface DirectConnection {
-  id: string;
-  status: 'pending' | 'accepted' | 'rejected';
-  direction: 'sent' | 'received';
-  createdAt: string;
-  peer: { id: string; name: string; email: string; avatar: string | null };
-}
-
-interface ConnectionCompany {
-  id: string;
-  domain: string;
-  name: string;
-  industry?: string | null;
-  contactCount: number;
-  connectionId: string;
-  employeeCount?: number | null;
-  foundedYear?: number | null;
-  annualRevenue?: string | null;
-  totalFunding?: string | null;
-  lastFundingRound?: string | null;
-  lastFundingDate?: string | null;
-  city?: string | null;
-  country?: string | null;
-  description?: string | null;
-  linkedinUrl?: string | null;
-  enrichedAt?: string | null;
-  contacts: {
-    id: string; name: string; email: string; title?: string;
-    userId: string; userName: string; connectionId?: string;
-  }[];
-}
-
-interface DisplayContact {
-  id: string; name: string; email: string; title: string;
-  company: string; companyDomain: string;
-  lastSeenAt: string; meetingsCount: number;
-  firstSeenAt: string;
-  connectionStrength: 'strong' | 'medium' | 'weak';
-  linkedinUrl?: string | null;
-  photoUrl?: string | null;
-  city?: string | null;
-  country?: string | null;
-  headline?: string | null;
-  enrichedAt?: string | null;
-  sourceAccountEmails?: string[];
-  // Company enrichment (passed through for tile rendering)
-  companyData?: {
-    id?: string;
-    employeeCount?: number | null;
-    foundedYear?: number | null;
-    annualRevenue?: string | null;
-    totalFunding?: string | null;
-    lastFundingRound?: string | null;
-    lastFundingDate?: string | null;
-    city?: string | null;
-    country?: string | null;
-    industry?: string | null;
-    description?: string | null;
-    linkedinUrl?: string | null;
-    enrichedAt?: string | null;
-  };
-}
-
-interface MergedCompany {
-  id?: string; // DB company id for deep enrichment
-  domain: string;
-  name: string;
-  myContacts: DisplayContact[];
-  spaceContacts: { id: string; name: string; email: string; title?: string; userName: string; spaceId?: string }[];
-  myCount: number;
-  spaceCount: number;
-  totalCount: number;
-  hasStrongConnection: boolean;
-  bestStrength: 'strong' | 'medium' | 'weak' | 'none';
-  source: 'mine' | 'space' | 'both';
-  matchingHunts: string[];
-  spaceIds: string[];
-  connectionIds: string[];
-  // Enrichment data
-  employeeCount?: number | null;
-  foundedYear?: number | null;
-  annualRevenue?: string | null;
-  totalFunding?: string | null;
-  lastFundingRound?: string | null;
-  lastFundingDate?: string | null;
-  city?: string | null;
-  country?: string | null;
-  industry?: string | null;
-  description?: string | null;
-  linkedinUrl?: string | null;
-  enrichedAt?: string | null;
-}
-
-interface HuntFilters {
-  description?: string;
-  categories?: string[];
-  aiKeywords?: string[];
-  excludeKeywords?: string;
-  employeeRanges?: string[];
-  country?: string;
-  city?: string;
-  fundingRounds?: string[];
-  fundingRecency?: string;
-  foundedFrom?: string;
-  foundedTo?: string;
-  revenueRanges?: string[];
-  technologies?: string[];
-  sourceFilter?: string;
-  strengthFilter?: string;
-}
-
-interface Hunt {
-  id: string;
-  title: string;
-  keywords: string[];
-  filters?: HuntFilters;
-  isActive: boolean;
-}
-
-interface InlinePanel {
-  type: 'person' | 'intro-request' | 'intro-offer' | 'company' | 'space' | 'spaces-manage' | 'connection' | 'connections-manage' | 'network-manage' | 'profile' | 'settings' | 'notifications';
-  company?: MergedCompany;
-  contact?: DisplayContact | { id: string; name: string; email: string; title?: string; userName?: string };
-  spaceId?: string;
-  connectionId?: string;
-  fromSpaceId?: string; // breadcrumb: which space the user navigated from
-  fromProfile?: boolean; // breadcrumb: navigated from profile edit panel
-  introSourceFilter?: string; // snapshot of sourceFilter when opening intro panel
-  introSpaceFilter?: string; // snapshot of spaceFilter when opening intro panel
-  introConnectionFilter?: string; // snapshot of connectionFilter when opening intro panel
-}
-
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function AIHomePage() {
   const { currentUser, contacts: storeContacts, isCalendarConnected, isLoading: storeLoading } = useAppState();
   const { logout, syncCalendar, refreshData } = useAppActions();
-  const dispatch = useAppDispatch();
   const searchRef = useRef<HTMLInputElement>(null);
 
   // UI State
@@ -285,45 +104,45 @@ export function AIHomePage() {
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
   const [lastAiQuery, setLastAiQuery] = useState<{ query: string; keywords: string[] } | null>(null);
 
-  // Profile form state
-  const [profileForm, setProfileForm] = useState({
-    name: '', title: '', companyDomain: '', linkedinUrl: '', headline: '', city: '', country: '',
-  });
-  const [profileSaving, setProfileSaving] = useState(false);
-  const [profileDirty, setProfileDirty] = useState(false);
+  // Profile form
+  const { profileForm, profileSaving, profileDirty, updateProfileField, saveProfile } = useProfile(currentUser);
 
-  // Space management state
-  const [showCreateSpace, setShowCreateSpace] = useState(false);
-  const [showJoinSpace, setShowJoinSpace] = useState(false);
-  const [newSpaceName, setNewSpaceName] = useState('');
-  const [newSpaceEmoji, setNewSpaceEmoji] = useState('🫛');
-  const [joinCode, setJoinCode] = useState('');
-  const [joinStatus, setJoinStatus] = useState<{ type: 'success' | 'error' | 'pending'; message: string } | null>(null);
+  // Notification refresh helper (passed to hooks)
+  const refreshNotifications = useCallback(() => {
+    notificationsApi.getAll().then(setNotifications).catch(() => {});
+    notificationsApi.getUnreadCount().then(r => setNotificationCount(r.count)).catch(() => {});
+  }, []);
 
-  // Connection management state
-  const [, setShowConnectForm] = useState(false);
-  const [connectEmail, setConnectEmail] = useState('');
-  const [copiedCode, setCopiedCode] = useState(false);
+  // Space management (hook)
+  const {
+    spaces, pendingSpaces, pendingMembers, loading,
+    showCreateSpace, setShowCreateSpace,
+    showJoinSpace, setShowJoinSpace,
+    newSpaceName, setNewSpaceName,
+    newSpaceEmoji, setNewSpaceEmoji,
+    joinCode, setJoinCode,
+    joinStatus, setJoinStatus, copiedCode,
+    fetchSpacesList,
+    createSpace, joinSpace, copyInviteCode,
+    leaveSpace, inviteMemberToSpace,
+    approveSpaceMember, rejectSpaceMember,
+    acceptSpaceInvite, removeSpaceMember, rejectSpaceInvite,
+  } = useSpaceManagement(currentUser?.id, refreshNotifications);
+
+  // Connection management (hook)
+  const {
+    connections, connectionCompanies,
+    connectEmail, setConnectEmail,
+    sendConnectionRequest, acceptConnection, rejectConnection, removeConnection,
+  } = useConnectionManagement(refreshNotifications);
 
   // Calendar state
   const [calendarSyncing, setCalendarSyncing] = useState(false);
   const [calendarAccounts, setCalendarAccounts] = useState<CalendarAccountInfo[]>([]);
   const [syncingAccountId, setSyncingAccountId] = useState<string | null>(null);
 
-  // Enrichment state
-  const [enriching, setEnriching] = useState(false);
-  const [autoEnrichTriggered, setAutoEnrichTriggered] = useState(false);
-  const [enrichProgress, setEnrichProgress] = useState<{
-    contacts: { total: number; enriched: number; skipped: number; errors: number; done: boolean } | null;
-    companies: { total: number; enriched: number; skipped: number; errors: number; done: boolean } | null;
-    contactsFree?: { total: number; enriched: number; skipped: number; errors: number; done: boolean; error?: string | null } | null;
-  }>({ contacts: null, companies: null, contactsFree: null });
-  const [enrichError, setEnrichError] = useState<string | null>(null);
-  const [enrichStats, setEnrichStats] = useState<{
-    contacts: { total: number; enriched: number; notFound?: number };
-    companies: { total: number; enriched: number };
-    lastEnrichedAt?: string | null;
-  } | null>(null);
+  // Enrichment (hook)
+  const { enriching, enrichProgress, enrichError, enrichStats, startEnrichment } = useEnrichment(refreshData, storeLoading);
 
   // Sidebar filter section open/closed state
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
@@ -363,15 +182,6 @@ export function AIHomePage() {
 
   const toggleSection = useCallback((key: string) => {
     setOpenSections(prev => ({ ...prev, [key]: !prev[key] }));
-  }, []);
-
-  const toggleCategory = useCallback((cat: string) => {
-    setSidebarFilters(prev => ({
-      ...prev,
-      categories: prev.categories.includes(cat)
-        ? prev.categories.filter(c => c !== cat)
-        : [...prev.categories, cat],
-    }));
   }, []);
 
   // AI keyword expansion for business description
@@ -417,51 +227,8 @@ export function AIHomePage() {
   }, []);
 
   // Data
-  const [spaces, setSpaces] = useState<Space[]>([]);
   const [spaceCompanies, setSpaceCompanies] = useState<SpaceCompany[]>([]);
-  const [pendingSpaces, setPendingSpaces] = useState<PendingSpace[]>([]);
-  const [pendingMembers, setPendingMembers] = useState<Record<string, PendingMember[]>>({});
-  const [connections, setConnections] = useState<DirectConnection[]>([]);
-  const [connectionCompanies, setConnectionCompanies] = useState<ConnectionCompany[]>([]);
-  const [loading, setLoading] = useState(true);
   const [hunts, setHunts] = useState<Hunt[]>([]);
-
-  // ─── Profile ────────────────────────────────────────────────────────────────
-
-  // Sync form state when currentUser changes (e.g. after login or refresh)
-  useEffect(() => {
-    if (currentUser) {
-      setProfileForm({
-        name: currentUser.name || '',
-        title: currentUser.title || '',
-        companyDomain: currentUser.companyDomain || '',
-        linkedinUrl: currentUser.linkedinUrl || '',
-        headline: currentUser.headline || '',
-        city: currentUser.city || '',
-        country: currentUser.country || '',
-      });
-      setProfileDirty(false);
-    }
-  }, [currentUser]);
-
-  const updateProfileField = useCallback((field: string, value: string) => {
-    setProfileForm(prev => ({ ...prev, [field]: value }));
-    setProfileDirty(true);
-  }, []);
-
-  const saveProfile = useCallback(async () => {
-    if (profileSaving) return;
-    setProfileSaving(true);
-    try {
-      const { user } = await authApi.updateProfile(profileForm);
-      dispatch({ type: 'SET_AUTH', payload: { isAuthenticated: true, user } });
-      setProfileDirty(false);
-    } catch (e) {
-      console.error('Failed to save profile:', e);
-    } finally {
-      setProfileSaving(false);
-    }
-  }, [profileForm, profileSaving, dispatch]);
 
   // ─── Data transforms ────────────────────────────────────────────────────────
 
@@ -1093,50 +860,6 @@ export function AIHomePage() {
     });
   }, [spaces]);
 
-  // ─── Connections data fetching ──────────────────────────────────────────────
-
-  const fetchConnectionsList = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/connections`, { credentials: 'include' });
-      const data = await res.json();
-      if (Array.isArray(data)) setConnections(data);
-    } catch (e) { console.error('Failed to fetch connections:', e); }
-  }, []);
-
-  useEffect(() => {
-    fetchConnectionsList();
-  }, [fetchConnectionsList]);
-
-  // Fetch reach for accepted connections
-  useEffect(() => {
-    const accepted = connections.filter(c => c.status === 'accepted');
-    if (accepted.length === 0) { setConnectionCompanies([]); return; }
-
-    Promise.all(
-      accepted.map(c =>
-        fetch(`${API_BASE}/api/connections/${c.id}/reach`, { credentials: 'include' })
-          .then(r => r.ok ? r.json() : { companies: [] }).catch(() => ({ companies: [] }))
-          .then(r => ({ connectionId: c.id, companies: (r.companies || []) as ConnectionCompany[] }))
-      )
-    ).then(results => {
-      const map = new Map<string, ConnectionCompany>();
-      results.forEach(({ connectionId, companies }) => {
-        companies.forEach(c => {
-          c.connectionId = connectionId;
-          c.contacts.forEach(ct => { ct.connectionId = connectionId; });
-          if (!map.has(c.domain)) {
-            map.set(c.domain, c);
-          } else {
-            const ex = map.get(c.domain)!;
-            const emails = new Set(ex.contacts.map(x => x.email));
-            c.contacts.forEach(x => { if (!emails.has(x.email)) { ex.contacts.push(x); ex.contactCount++; } });
-          }
-        });
-      });
-      setConnectionCompanies(Array.from(map.values()));
-    });
-  }, [connections]);
-
   // ─── Keyboard ───────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -1161,18 +884,6 @@ export function AIHomePage() {
     setSelectedHunt(prev => prev === huntId ? null : huntId);
     setExpandedDomain(null);
   }, []);
-
-  const addHunt = useCallback(() => {
-    if (!searchQuery.trim() || searchQuery.trim().length < 3) return;
-    const keywords = searchQuery.toLowerCase().split(/[\s,]+/).filter(k => k.length > 2);
-    setHunts(prev => [...prev, {
-      id: Date.now().toString(),
-      title: searchQuery.trim(),
-      keywords,
-      isActive: true,
-    }]);
-    setSearchQuery('');
-  }, [searchQuery]);
 
   // AI-powered search: parse natural language and directly fill sidebar filters
   const aiSearch = useCallback(async (query: string) => {
@@ -1333,340 +1044,6 @@ export function AIHomePage() {
       senderName: currentUser?.name,
     });
   }, [currentUser]);
-
-  // ─── Space management ──────────────────────────────────────────────────────
-
-  const fetchSpacesList = useCallback(async () => {
-    try {
-      const [spacesRes, pendingRes] = await Promise.all([
-        fetch(`${API_BASE}/api/spaces`, { credentials: 'include' }),
-        fetch(`${API_BASE}/api/spaces/my-pending`, { credentials: 'include' }),
-      ]);
-      const data = await spacesRes.json();
-      const pendingData = await pendingRes.json().catch(() => []);
-      if (Array.isArray(data)) {
-        const spacesList = data.map((s: any) => ({
-          id: s.id, name: s.name, emoji: s.emoji,
-          memberCount: s.members?.length || 0,
-          openRequestCount: s._count?.requests || 0,
-          description: s.description,
-          inviteCode: s.inviteCode,
-          ownerId: s.ownerId,
-          members: s.members,
-        }));
-        setSpaces(spacesList);
-
-        // Fetch pending members for spaces I own
-        const ownedSpaces = spacesList.filter((s: Space) => s.ownerId === currentUser?.id);
-        if (ownedSpaces.length > 0) {
-          const pendingResults = await Promise.all(
-            ownedSpaces.map((s: Space) =>
-              fetch(`${API_BASE}/api/spaces/${s.id}/pending`, { credentials: 'include' })
-                .then(r => r.ok ? r.json() : [])
-                .then(members => ({ spaceId: s.id, members: members as PendingMember[] }))
-                .catch(() => ({ spaceId: s.id, members: [] as PendingMember[] }))
-            )
-          );
-          const pm: Record<string, PendingMember[]> = {};
-          pendingResults.forEach(r => { if (r.members.length > 0) pm[r.spaceId] = r.members; });
-          setPendingMembers(pm);
-        } else {
-          setPendingMembers({});
-        }
-      }
-      if (Array.isArray(pendingData)) setPendingSpaces(pendingData);
-    } catch (e) { console.error('Failed to fetch spaces:', e); }
-  }, [currentUser?.id]);
-
-  useEffect(() => {
-    setLoading(true);
-    fetchSpacesList().finally(() => setLoading(false));
-  }, [fetchSpacesList]);
-
-  // Refresh spaces & pending members every 30 seconds
-  useEffect(() => {
-    const interval = setInterval(() => { fetchSpacesList(); }, 30000);
-    return () => clearInterval(interval);
-  }, [fetchSpacesList]);
-
-  const createSpace = useCallback(async () => {
-    if (!newSpaceName.trim()) return;
-    try {
-      await fetch(`${API_BASE}/api/spaces`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ name: newSpaceName, emoji: newSpaceEmoji }),
-      });
-      setNewSpaceName('');
-      setNewSpaceEmoji('🫛');
-      setShowCreateSpace(false);
-      fetchSpacesList();
-    } catch (e) { console.error('Failed to create space:', e); }
-  }, [newSpaceName, newSpaceEmoji, fetchSpacesList]);
-
-  const joinSpace = useCallback(async () => {
-    if (!joinCode.trim()) return;
-    setJoinStatus(null);
-    try {
-      const res = await fetch(`${API_BASE}/api/spaces/join/${joinCode.trim()}`, {
-        method: 'POST', credentials: 'include',
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        if (data.pending) {
-          setJoinStatus({ type: 'pending', message: 'Request sent! Waiting for owner approval.' });
-        } else {
-          setJoinStatus({ type: 'success', message: 'Joined successfully!' });
-        }
-        setJoinCode('');
-        fetchSpacesList();
-        setTimeout(() => { setJoinStatus(null); setShowJoinSpace(false); }, 2000);
-      } else {
-        setJoinStatus({ type: 'error', message: data.error || 'Failed to join space' });
-      }
-    } catch (e) {
-      console.error('Failed to join space:', e);
-      setJoinStatus({ type: 'error', message: 'Network error. Please try again.' });
-    }
-  }, [joinCode, fetchSpacesList]);
-
-  const copyInviteCode = useCallback((code: string) => {
-    navigator.clipboard.writeText(code);
-    setCopiedCode(true);
-    setTimeout(() => setCopiedCode(false), 2000);
-  }, []);
-
-  const leaveSpace = useCallback(async (spaceId: string) => {
-    try {
-      await fetch(`${API_BASE}/api/spaces/${spaceId}/leave`, {
-        method: 'POST', credentials: 'include',
-      });
-      fetchSpacesList();
-    } catch (e) { console.error('Failed to leave space:', e); }
-  }, [fetchSpacesList]);
-
-  const inviteMemberToSpace = useCallback(async (spaceId: string, email: string) => {
-    try {
-      await fetch(`${API_BASE}/api/spaces/${spaceId}/members`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ email }),
-      });
-      fetchSpacesList();
-    } catch (e) { console.error('Failed to invite member:', e); }
-  }, [fetchSpacesList]);
-
-  const approveSpaceMember = useCallback(async (spaceId: string, memberId: string) => {
-    try {
-      await fetch(`${API_BASE}/api/spaces/${spaceId}/members/${memberId}/approve`, {
-        method: 'POST', credentials: 'include',
-      });
-      fetchSpacesList();
-    } catch (e) { console.error('Failed to approve member:', e); }
-  }, [fetchSpacesList]);
-
-  const rejectSpaceMember = useCallback(async (spaceId: string, memberId: string) => {
-    try {
-      await fetch(`${API_BASE}/api/spaces/${spaceId}/members/${memberId}/reject`, {
-        method: 'POST', credentials: 'include',
-      });
-      fetchSpacesList();
-    } catch (e) { console.error('Failed to reject member:', e); }
-  }, [fetchSpacesList]);
-
-  const acceptSpaceInvite = useCallback(async (spaceId: string) => {
-    try {
-      await fetch(`${API_BASE}/api/spaces/${spaceId}/accept-invite`, {
-        method: 'POST', credentials: 'include',
-      });
-      fetchSpacesList();
-      notificationsApi.getAll().then(setNotifications).catch(() => {});
-      notificationsApi.getUnreadCount().then(r => setNotificationCount(r.count)).catch(() => {});
-    } catch (e) { console.error('Failed to accept space invite:', e); }
-  }, [fetchSpacesList]);
-
-  const removeSpaceMember = useCallback(async (spaceId: string, memberId: string) => {
-    try {
-      await fetch(`${API_BASE}/api/spaces/${spaceId}/members/${memberId}`, {
-        method: 'DELETE', credentials: 'include',
-      });
-      fetchSpacesList();
-    } catch (e) { console.error('Failed to remove member:', e); }
-  }, [fetchSpacesList]);
-
-  const rejectSpaceInvite = useCallback(async (spaceId: string) => {
-    try {
-      await fetch(`${API_BASE}/api/spaces/${spaceId}/reject-invite`, {
-        method: 'POST', credentials: 'include',
-      });
-      fetchSpacesList();
-      notificationsApi.getAll().then(setNotifications).catch(() => {});
-      notificationsApi.getUnreadCount().then(r => setNotificationCount(r.count)).catch(() => {});
-    } catch (e) { console.error('Failed to reject space invite:', e); }
-  }, [fetchSpacesList]);
-
-  // ─── Connection management ─────────────────────────────────────────────────
-
-  const sendConnectionRequest = useCallback(async (email: string) => {
-    if (!email.trim()) return;
-    try {
-      const res = await fetch(`${API_BASE}/api/connections`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ email }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || 'Failed to send connection request');
-        return;
-      }
-      setConnectEmail('');
-      setShowConnectForm(false);
-      fetchConnectionsList();
-      notificationsApi.getUnreadCount().then(r => setNotificationCount(r.count)).catch(() => {});
-      notificationsApi.getAll().then(setNotifications).catch(() => {});
-    } catch (e) { console.error('Failed to send connection:', e); }
-  }, [fetchConnectionsList]);
-
-  const acceptConnection = useCallback(async (id: string) => {
-    try {
-      await fetch(`${API_BASE}/api/connections/${id}/accept`, { method: 'POST', credentials: 'include' });
-      fetchConnectionsList();
-      notificationsApi.getUnreadCount().then(r => setNotificationCount(r.count)).catch(() => {});
-      notificationsApi.getAll().then(setNotifications).catch(() => {});
-    } catch (e) { console.error('Failed to accept connection:', e); }
-  }, [fetchConnectionsList]);
-
-  const rejectConnection = useCallback(async (id: string) => {
-    try {
-      await fetch(`${API_BASE}/api/connections/${id}/reject`, { method: 'POST', credentials: 'include' });
-      fetchConnectionsList();
-      notificationsApi.getUnreadCount().then(r => setNotificationCount(r.count)).catch(() => {});
-      notificationsApi.getAll().then(setNotifications).catch(() => {});
-    } catch (e) { console.error('Failed to reject connection:', e); }
-  }, [fetchConnectionsList]);
-
-  const removeConnection = useCallback(async (id: string) => {
-    try {
-      await fetch(`${API_BASE}/api/connections/${id}`, { method: 'DELETE', credentials: 'include' });
-      fetchConnectionsList();
-    } catch (e) { console.error('Failed to remove connection:', e); }
-  }, [fetchConnectionsList]);
-
-  // ─── Enrichment ─────────────────────────────────────────────────────────────
-
-  // Check if enrichment is running on the server (or already completed)
-  const checkEnrichmentRunning = useCallback(() => {
-    enrichmentApi.getProgress()
-      .then(progress => {
-        if (progress.contactsFree && !progress.contactsFree.done) {
-          // Enrichment is still in progress — start polling
-          setEnriching(true);
-          setEnrichProgress(progress);
-        } else if (progress.contactsFree && progress.contactsFree.done) {
-          // Enrichment already completed before we started polling —
-          // refresh data so the contact list reflects the enriched fields
-          enrichmentApi.getStatus().then(setEnrichStats).catch(() => {});
-          refreshData();
-        }
-      })
-      .catch(() => {});
-  }, [refreshData]);
-
-  // Fetch enrichment stats on mount + check if enrichment is already running
-  useEffect(() => {
-    enrichmentApi.getStatus()
-      .then(setEnrichStats)
-      .catch(() => {});
-    checkEnrichmentRunning();
-  }, [checkEnrichmentRunning]);
-
-  // Re-check after store finishes loading (catches enrichment triggered during sign-up)
-  useEffect(() => {
-    if (!storeLoading && !enriching) {
-      // Small delay to let the enrichment POST register on the server
-      const timer = setTimeout(checkEnrichmentRunning, 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [storeLoading, enriching, checkEnrichmentRunning]);
-
-  // Poll progress when enrichment is running
-  useEffect(() => {
-    if (!enriching) return;
-    let pollCount = 0;
-    const interval = setInterval(() => {
-      pollCount++;
-      enrichmentApi.getProgress()
-        .then(progress => {
-          setEnrichProgress(progress);
-
-          // If server has no record of the job yet (null), wait a few polls before giving up
-          // This prevents the race condition where the job hasn't registered yet
-          if (!progress.contactsFree) {
-            if (pollCount > 5) {
-              // After 10 seconds with no record, assume it failed
-              setEnriching(false);
-              setEnrichError('Enrichment process was lost. Please try again.');
-              enrichmentApi.getStatus().then(setEnrichStats).catch(() => {});
-              refreshData();
-            }
-            return;
-          }
-
-          // Check for error
-          if ((progress.contactsFree as any)?.error) {
-            setEnrichError((progress.contactsFree as any).error);
-          }
-
-          const contactsDone = !progress.contacts || progress.contacts.done;
-          const companiesDone = !progress.companies || progress.companies.done;
-          const contactsFreeDone = progress.contactsFree.done;
-          if (contactsDone && companiesDone && contactsFreeDone) {
-            setEnriching(false);
-            // Refresh stats and reload updated contacts/companies into the store
-            enrichmentApi.getStatus().then(setEnrichStats).catch(() => {});
-            refreshData();
-          }
-        })
-        .catch(() => {});
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [enriching, refreshData]);
-
-  // Start FREE enrichment (0 credits) — safe to run anytime
-  const startEnrichment = useCallback(async () => {
-    if (enriching) return;
-    setEnriching(true);
-    setEnrichError(null);
-    setEnrichProgress({ contacts: null, companies: null, contactsFree: null });
-    try {
-      await enrichmentApi.enrichContactsFree({ force: true });
-    } catch (err) {
-      console.error('Failed to start free enrichment:', err);
-      setEnriching(false);
-      setEnrichError('Failed to start enrichment. Please try again.');
-    }
-  }, [enriching]);
-
-  // Auto-enrich once per week (check localStorage timestamp)
-  useEffect(() => {
-    if (autoEnrichTriggered || enriching) return;
-    if (!enrichStats) return;
-    setAutoEnrichTriggered(true);
-
-    const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-    const lastRun = localStorage.getItem('pods_last_enrich');
-    const lastRunTime = lastRun ? parseInt(lastRun, 10) : 0;
-    const elapsed = Date.now() - lastRunTime;
-
-    if (elapsed >= WEEK_MS && enrichStats.contacts.enriched < enrichStats.contacts.total) {
-      localStorage.setItem('pods_last_enrich', String(Date.now()));
-      startEnrichment();
-    }
-  }, [enrichStats, autoEnrichTriggered, enriching, startEnrichment]);
 
   // Fetch space detail requests when space panel opens
   useEffect(() => {
@@ -2341,6 +1718,18 @@ export function AIHomePage() {
           </button>
         )}
 
+        {/* Mobile filter toggle (FAB) */}
+        {!sidebarOpen && (
+          <button className="sb-mobile-toggle" onClick={() => setSidebarOpen(true)}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 12h10M4 18h6" /></svg>
+            Filters
+            {activeFilterCount > 0 && <span className="sb-mobile-badge">{activeFilterCount}</span>}
+          </button>
+        )}
+
+        {/* Mobile backdrop (closes sidebar) */}
+        {sidebarOpen && <div className="sb-mobile-backdrop" onClick={() => setSidebarOpen(false)} />}
+
         {/* ═══════ MAIN CONTENT ═══════ */}
         <div className={`u-canvas ${inlinePanel ? 'has-panel' : ''}`}>
           {/* ── Top Bar ─────────────────────────────────────────── */}
@@ -2479,7 +1868,6 @@ export function AIHomePage() {
                   className={`u-ff-chip ${sourceFilter === f.key ? 'active' : ''} u-ff-chip--${f.key}`}
                   onClick={() => setSourceFilter(f.key)}
                 >
-                  {'icon' in f && f.icon && <span className="u-ff-icon">{f.icon}</span>}
                   <span>{f.label}</span>
                   <span className="u-ff-count">{f.count}</span>
                 </button>
@@ -3329,101 +2717,16 @@ export function AIHomePage() {
 
             {/* ── Profile Edit Panel ── */}
             {inlinePanel.type === 'profile' && currentUser && (
-              <div className="u-panel-space">
-                <button className="u-panel-breadcrumb" onClick={() => setInlinePanel({ type: 'network-manage' })}>
-                  ← Network
-                </button>
-                <div className="u-panel-space-hero">
-                  <PersonAvatar email={currentUser.email} name={currentUser.name} avatarUrl={currentUser.avatar} size={56} />
-                  <div>
-                    <h2>{currentUser.name}</h2>
-                    <span className="u-panel-space-meta">{currentUser.email}</span>
-                  </div>
-                </div>
-
-                <div className="u-panel-section">
-                  <h4 className="u-panel-section-h">Edit Profile</h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                    <label style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', marginBottom: '-0.2rem' }}>Name</label>
-                    <input className="sb-input" placeholder="Your name" value={profileForm.name} onChange={e => updateProfileField('name', e.target.value)} />
-                    <label style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', marginBottom: '-0.2rem' }}>Job title</label>
-                    <input className="sb-input" placeholder="e.g. Product Manager" value={profileForm.title} onChange={e => updateProfileField('title', e.target.value)} />
-                    <label style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', marginBottom: '-0.2rem' }}>Company website</label>
-                    <input className="sb-input" placeholder="e.g. acme.com" value={profileForm.companyDomain} onChange={e => updateProfileField('companyDomain', e.target.value)} />
-                    {currentUser.companyDomain && (
-                      <button
-                        className="u-panel-breadcrumb"
-                        style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.1rem', fontSize: '0.7rem', padding: '0.3rem 0.5rem', background: 'rgba(255,255,255,0.04)', borderRadius: '0.4rem' }}
-                        onClick={async () => {
-                          const domain = currentUser.companyDomain!;
-                          // 1) Check mergedCompanies first
-                          const existing = mergedCompanies.find(c => c.domain === domain);
-                          if (existing) {
-                            setInlinePanel({ type: 'company', company: existing, fromProfile: true });
-                            return;
-                          }
-                          // 2) Fetch from backend (DB or Apollo)
-                          try {
-                            const { company: co, source } = await enrichmentApi.lookupCompany(domain);
-                            const stub: MergedCompany = {
-                              id: co.id || undefined,
-                              domain: co.domain || domain,
-                              name: co.name || domain,
-                              myContacts: [], spaceContacts: [],
-                              myCount: 0, spaceCount: 0, totalCount: 0,
-                              hasStrongConnection: false, bestStrength: 'none',
-                              source: 'mine', matchingHunts: [], spaceIds: [], connectionIds: [],
-                              employeeCount: co.employeeCount, foundedYear: co.foundedYear,
-                              annualRevenue: co.annualRevenue, totalFunding: co.totalFunding,
-                              lastFundingRound: co.lastFundingRound, lastFundingDate: co.lastFundingDate,
-                              city: co.city, country: co.country,
-                              industry: co.industry, description: co.description,
-                              linkedinUrl: co.linkedinUrl,
-                              enrichedAt: source !== 'none' ? co.enrichedAt || new Date().toISOString() : null,
-                            };
-                            setInlinePanel({ type: 'company', company: stub, fromProfile: true });
-                          } catch {
-                            // Fallback: open minimal card
-                            setInlinePanel({ type: 'company', fromProfile: true, company: {
-                              domain, name: currentUser.company || domain,
-                              myContacts: [], spaceContacts: [],
-                              myCount: 0, spaceCount: 0, totalCount: 0,
-                              hasStrongConnection: false, bestStrength: 'none',
-                              source: 'mine', matchingHunts: [], spaceIds: [], connectionIds: [],
-                            }});
-                          }
-                        }}
-                      >
-                        <CompanyLogo domain={currentUser.companyDomain} name={currentUser.company || currentUser.companyDomain} size={16} />
-                        <span>{currentUser.company || currentUser.companyDomain}</span>
-                        <span style={{ color: 'rgba(255,255,255,0.3)' }}>→</span>
-                      </button>
-                    )}
-                    <label style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', marginBottom: '-0.2rem' }}>Headline / Bio</label>
-                    <input className="sb-input" placeholder="Short description about you" value={profileForm.headline} onChange={e => updateProfileField('headline', e.target.value)} />
-                    <label style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', marginBottom: '-0.2rem' }}>LinkedIn URL</label>
-                    <input className="sb-input" placeholder="https://linkedin.com/in/..." value={profileForm.linkedinUrl} onChange={e => updateProfileField('linkedinUrl', e.target.value)} />
-                    <div style={{ display: 'flex', gap: '0.4rem' }}>
-                      <div style={{ flex: 1 }}>
-                        <label style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', display: 'block', marginBottom: '0.15rem' }}>City</label>
-                        <input className="sb-input" placeholder="City" value={profileForm.city} onChange={e => updateProfileField('city', e.target.value)} />
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <label style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', display: 'block', marginBottom: '0.15rem' }}>Country</label>
-                        <input className="sb-input" placeholder="Country" value={profileForm.country} onChange={e => updateProfileField('country', e.target.value)} />
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    className={`u-action-btn ${profileDirty ? '' : 'u-action-btn--muted'}`}
-                    style={{ marginTop: '0.6rem', width: '100%' }}
-                    onClick={saveProfile}
-                    disabled={profileSaving || !profileDirty}
-                  >
-                    {profileSaving ? 'Saving...' : profileDirty ? 'Save changes' : 'No changes'}
-                  </button>
-                </div>
-              </div>
+              <ProfilePanel
+                currentUser={currentUser}
+                profileForm={profileForm}
+                profileDirty={profileDirty}
+                profileSaving={profileSaving}
+                mergedCompanies={mergedCompanies}
+                onUpdateField={updateProfileField}
+                onSave={saveProfile}
+                onNavigate={setInlinePanel}
+              />
             )}
 
             {/* ── Network Panel (Spaces + 1:1 Connections) ── */}
@@ -3826,358 +3129,37 @@ export function AIHomePage() {
 
             {/* ── Notifications Panel ── */}
             {inlinePanel.type === 'notifications' && (
-              <div className="u-panel-notifs">
-                <h2>Notifications</h2>
-                {notifications.length === 0 ? (
-                  <div className="u-panel-empty">
-                    <span className="u-panel-empty-icon">🔔</span>
-                    <p>No notifications yet</p>
-                  </div>
-                ) : (() => {
-                  const unread = notifications.filter(n => !n.isRead);
-                  const read = notifications.filter(n => n.isRead);
-                  const renderNotif = (n: (typeof notifications)[number]) => {
-                      const data = (n.data || {}) as Record<string, unknown>;
-                      const spaceId = data.spaceId as string | undefined;
-                      const spaceEmoji = data.spaceEmoji as string | undefined;
-                      const spaceName = data.spaceName as string | undefined;
-                      const companyName = data.companyName as string | undefined;
-                      const companyDomain = data.companyDomain as string | undefined;
-                      const reason = data.reason as string | undefined;
-                      const connPeerId = data.connectionPeerId as string | undefined;
-                      const connPeerName = data.connectionPeerName as string | undefined;
-                      const requesterId = data.requesterId as string | undefined;
-                      const timeAgo = getTimeAgo(n.createdAt);
-                      const isIntroType = ['intro_request', 'intro_offered', 'intro_declined'].includes(n.type);
-                      const is1to1 = isIntroType && !spaceId && !!(connPeerId || requesterId);
-
-                      // Find the connection for 1-1 notifications
-                      const notifConn = connPeerId || requesterId
-                        ? connections.find(c => c.peer.id === connPeerId || c.peer.id === requesterId)
-                        : null;
-                      // Find matching company for intro notifications
-                      const notifCompanyId = data.companyId as string | undefined;
-                      const matchedNotifCompany = isIntroType
-                        ? mergedCompanies.find(c => (notifCompanyId && c.id === notifCompanyId) || (companyDomain && c.domain === companyDomain))
-                        : undefined;
-                      const isClickable = !!(spaceId || notifConn || matchedNotifCompany);
-
-                      // Determine icon based on notification type
-                      let icon = '🔔';
-                      let accentClass = '';
-                      if (n.type === 'intro_request') { icon = '🤝'; accentClass = 'intro'; }
-                      else if (n.type === 'intro_offered') { icon = '✨'; accentClass = 'offered'; }
-                      else if (n.type === 'intro_declined') { icon = '✗'; accentClass = 'declined'; }
-                      else if (n.type === 'space_invited' || n.type === 'space_approved') { icon = '🎉'; accentClass = 'space-positive'; }
-                      else if (n.type === 'space_member_joined') { icon = '👋'; accentClass = 'space-positive'; }
-                      else if (n.type === 'space_join_request') { icon = '📩'; accentClass = 'space-neutral'; }
-                      else if (n.type === 'space_member_left') { icon = '👤'; accentClass = 'space-neutral'; }
-                      else if (n.type === 'space_removed') { icon = '🚫'; accentClass = 'space-negative'; }
-                      else if (n.type === 'connection_request') { icon = '👋'; accentClass = 'space-positive'; }
-                      else if (n.type === 'connection_accepted') { icon = '🤝'; accentClass = 'space-positive'; }
-
-                      const connRequestId = data.connectionId as string | undefined;
-                      const isConnType = n.type === 'connection_request' || n.type === 'connection_accepted';
-                      const connRequestPending = n.type === 'connection_request' && connRequestId
-                        ? connections.find(c => c.id === connRequestId && c.status === 'pending' && c.direction === 'received')
-                        : null;
-                      const connFromNotif = isConnType && connRequestId
-                        ? connections.find(c => c.id === connRequestId)
-                        : null;
-
-                      const isClickableFinal = isClickable || !!(connFromNotif && connFromNotif.status === 'accepted');
-
-                      return (
-                        <div
-                          key={n.id}
-                          className={`u-panel-notif-card ${!n.isRead ? 'unread' : ''} ${isClickableFinal ? 'clickable' : ''}`}
-                          onClick={() => {
-                            if (isConnType && connFromNotif && connFromNotif.status === 'accepted') {
-                              setInlinePanel({ type: 'connection', connectionId: connFromNotif.id });
-                              if (!n.isRead) notificationsApi.markAsRead(n.id);
-                              return;
-                            }
-                            if (n.type === 'intro_request' && spaceId) {
-                              // Connector sees request → go to space
-                              setInlinePanel({ type: 'space', spaceId });
-                            } else if (n.type === 'intro_request' && notifConn) {
-                              // Connector sees 1-1 request → go to connection
-                              setInlinePanel({ type: 'connection', connectionId: notifConn.id });
-                            } else if (is1to1 && notifConn) {
-                              // 1-1 declined/offered → go to person page
-                              setInlinePanel({ type: 'connection', connectionId: notifConn.id });
-                            } else if (matchedNotifCompany) {
-                              // Requester sees declined/offered → go to company
-                              setInlinePanel({ type: 'company', company: matchedNotifCompany });
-                            } else if (spaceId) {
-                              setInlinePanel({ type: 'space', spaceId });
-                            } else if (notifConn) {
-                              setInlinePanel({ type: 'connection', connectionId: notifConn.id });
-                            }
-                          }}
-                        >
-                          <div className={`u-panel-notif-icon ${accentClass}`}>{icon}</div>
-                          <div className="u-panel-notif-body">
-                            <div className="u-panel-notif-title">{n.title}</div>
-                            {n.body && <div className="u-panel-notif-text">{n.body}</div>}
-                            {/* Intro details: company + space/person tags */}
-                            {isIntroType && (companyName || spaceName || is1to1) && (
-                              <div className="u-panel-notif-tags">
-                                {companyName && (
-                                  <span className="u-panel-notif-tag u-panel-notif-tag--company">
-                                    {companyDomain && <CompanyLogo domain={companyDomain} name={companyName} size={12} />}
-                                    {companyName}
-                                  </span>
-                                )}
-                                {spaceName && (
-                                  <span className="u-panel-notif-tag u-panel-notif-tag--space">
-                                    {spaceEmoji || '🫛'} {spaceName}
-                                  </span>
-                                )}
-                                {is1to1 && (notifConn || connPeerName) && (
-                                  <span className="u-panel-notif-tag u-panel-notif-tag--space">
-                                    👤 {notifConn?.peer.name || connPeerName}
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                            {/* Decline reason */}
-                            {n.type === 'intro_declined' && reason && (
-                              <div className="u-panel-notif-reason">"{reason}"</div>
-                            )}
-                            {/* Connection request actions */}
-                            {connRequestPending && (
-                              <>
-                                <div className="u-panel-notif-actions" onClick={e => e.stopPropagation()}>
-                                  <button className="u-notif-accept-btn" onClick={() => { acceptConnection(connRequestPending.id); notificationsApi.markAsRead(n.id); }}>Accept</button>
-                                  <button className="u-notif-reject-btn" onClick={() => { rejectConnection(connRequestPending.id); notificationsApi.markAsRead(n.id); }}>Decline</button>
-                                </div>
-                                <div className="u-panel-notif-footer"><span className="u-panel-notif-time">{timeAgo}</span></div>
-                              </>
-                            )}
-                            {n.type === 'connection_request' && !connRequestPending && (
-                              <div className="u-panel-notif-footer">
-                                <span className="u-panel-notif-time" style={{ fontStyle: 'italic' }}>Handled · {timeAgo}</span>
-                              </div>
-                            )}
-                            {n.type === 'connection_accepted' && (
-                              <div className="u-panel-notif-footer"><span className="u-panel-notif-time">{timeAgo}</span></div>
-                            )}
-                            {/* Space invitation actions */}
-                            {n.type === 'space_invited' && spaceId && pendingSpaces.some(ps => ps.id === spaceId) && (
-                              <>
-                                <div className="u-panel-notif-actions" onClick={e => e.stopPropagation()}>
-                                  <button className="u-notif-accept-btn" onClick={() => { acceptSpaceInvite(spaceId); notificationsApi.markAsRead(n.id); }}>Accept</button>
-                                  <button className="u-notif-reject-btn" onClick={() => { rejectSpaceInvite(spaceId); notificationsApi.markAsRead(n.id); }}>Decline</button>
-                                </div>
-                                <div className="u-panel-notif-footer"><span className="u-panel-notif-time">{timeAgo}</span></div>
-                              </>
-                            )}
-                            {n.type === 'space_invited' && spaceId && !pendingSpaces.some(ps => ps.id === spaceId) && (
-                              <div className="u-panel-notif-footer">
-                                <span className="u-panel-notif-time" style={{ fontStyle: 'italic' }}>Handled · {timeAgo}</span>
-                              </div>
-                            )}
-                            {!isConnType && n.type !== 'space_invited' && (
-                              <div className="u-panel-notif-footer">
-                                <span className="u-panel-notif-time">{timeAgo}</span>
-                                {!isIntroType && spaceId && spaceName && (
-                                  <span className="u-panel-notif-space">{spaceEmoji || '🫛'} {spaceName}</span>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                          {isClickableFinal && <span className="u-panel-notif-arrow">→</span>}
-                        </div>
-                      );
-                    };
-                  return (
-                    <div className="u-panel-notif-list">
-                      {unread.length > 0 && (
-                        <>
-                          <div className="u-panel-notif-section-label">New</div>
-                          {unread.map(renderNotif)}
-                        </>
-                      )}
-                      {read.length > 0 && (
-                        <>
-                          <div className="u-panel-notif-section-label u-panel-notif-section-label--earlier">Earlier</div>
-                          {read.map(renderNotif)}
-                        </>
-                      )}
-                    </div>
-                  );
-                })()}
-              </div>
+              <NotificationsPanel
+                notifications={notifications}
+                connections={connections}
+                mergedCompanies={mergedCompanies}
+                pendingSpaces={pendingSpaces}
+                onNavigate={setInlinePanel}
+                onAcceptConnection={acceptConnection}
+                onRejectConnection={rejectConnection}
+                onAcceptSpaceInvite={acceptSpaceInvite}
+                onRejectSpaceInvite={rejectSpaceInvite}
+              />
             )}
 
             {/* ── Settings Panel ── */}
             {inlinePanel.type === 'settings' && (
-              <div className="u-panel-settings">
-                <h2>Settings</h2>
-
-                {/* Main Account */}
-                <div className="u-panel-section">
-                  <h4 className="u-panel-section-h">Main Account</h4>
-                  {currentUser && (
-                    <div className="u-settings-account">
-                      <PersonAvatar email={currentUser.email} name={currentUser.name} avatarUrl={currentUser.avatar} size={40} />
-                      <div className="u-settings-account-info">
-                        <span className="u-settings-account-name">{currentUser.name}</span>
-                        <span className="u-settings-account-email">{currentUser.email}</span>
-                      </div>
-                      {isCalendarConnected && (() => {
-                        const primaryAcct = calendarAccounts.find(a => currentUser.email && a.email.toLowerCase() === currentUser.email.toLowerCase());
-                        return (
-                          <button
-                            className="u-action-btn"
-                            onClick={() => primaryAcct ? handleAccountSync(primaryAcct.id) : handleCalendarSync()}
-                            disabled={calendarSyncing || (primaryAcct ? syncingAccountId === primaryAcct.id : false)}
-                            style={{ marginLeft: 'auto', flexShrink: 0 }}
-                          >
-                            {(primaryAcct && syncingAccountId === primaryAcct.id) || (!primaryAcct && calendarSyncing) ? 'Syncing...' : 'Sync'}
-                          </button>
-                        );
-                      })()}
-                    </div>
-                  )}
-                </div>
-
-                <span className="u-settings-hint">People can find and connect with you using your main or any connected email.</span>
-
-                {/* Connected Accounts (additional, non-primary) */}
-                <div className="u-panel-section">
-                  <h4 className="u-panel-section-h">Connected Accounts</h4>
-
-                  {/* Additional accounts list */}
-                  {calendarAccounts
-                    .filter(acct => !(currentUser?.email && acct.email.toLowerCase() === currentUser.email.toLowerCase()))
-                    .map(acct => (
-                      <div key={acct.id} className="u-settings-row">
-                        <div className="u-settings-row-info">
-                          <span className="u-settings-row-label">{acct.email}</span>
-                          <span className="u-settings-row-status">
-                            <span className="u-settings-dot connected" /> {acct.contactsCount} contacts
-                            {acct.lastSyncedAt && <> &middot; synced {new Date(acct.lastSyncedAt).toLocaleDateString()}</>}
-                          </span>
-                        </div>
-                        <div style={{ display: 'flex', gap: '0.25rem' }}>
-                          <button
-                            className="u-action-btn"
-                            onClick={() => handleAccountSync(acct.id)}
-                            disabled={syncingAccountId === acct.id}
-                          >
-                            {syncingAccountId === acct.id ? 'Syncing...' : 'Sync'}
-                          </button>
-                          <button
-                            className="u-action-btn"
-                            style={{ color: 'var(--danger, #e55)' }}
-                            onClick={() => handleAccountDelete(acct.id)}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      </div>
-                    ))
-                  }
-
-                  {/* Add another Google account */}
-                  {isCalendarConnected && (
-                    <div className="u-settings-row" style={{ borderTop: '1px solid var(--border)', paddingTop: '0.5rem', marginTop: '0.25rem' }}>
-                      <div className="u-settings-row-info">
-                        <span className="u-settings-row-label">Add Google Account</span>
-                        <span className="u-settings-row-status">Connect additional calendars</span>
-                      </div>
-                      <button className="u-action-btn" onClick={() => { window.location.href = calendarApi.getAddAccountUrl(); }}>
-                        + Add
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Coming soon integrations */}
-                  <div className="u-settings-row u-settings-row-disabled">
-                    <div className="u-settings-row-info">
-                      <span className="u-settings-row-label">LinkedIn</span>
-                      <span className="u-settings-row-status">Import connections</span>
-                    </div>
-                    <span className="u-settings-coming-soon">Coming soon</span>
-                  </div>
-                  <div className="u-settings-row u-settings-row-disabled">
-                    <div className="u-settings-row-info">
-                      <span className="u-settings-row-label">Microsoft Outlook</span>
-                      <span className="u-settings-row-status">Calendar & email contacts</span>
-                    </div>
-                    <span className="u-settings-coming-soon">Coming soon</span>
-                  </div>
-                  <div className="u-settings-row u-settings-row-disabled">
-                    <div className="u-settings-row-info">
-                      <span className="u-settings-row-label">Email (Gmail / IMAP)</span>
-                      <span className="u-settings-row-status">People you've emailed</span>
-                    </div>
-                    <span className="u-settings-coming-soon">Coming soon</span>
-                  </div>
-                </div>
-
-                {/* Data Enrichment */}
-                <div className="u-panel-section">
-                  <h4 className="u-panel-section-h">Data Enrichment</h4>
-                  <div className="u-settings-row">
-                    <div className="u-settings-row-info">
-                      <span className="u-settings-row-label">Auto-enrich</span>
-                      <span className="u-settings-row-status">
-                        {enriching ? (
-                          <><span className="u-enrich-spinner" /> Running...</>
-                        ) : enrichStats ? (
-                          <>Updated {enrichStats.contacts.enriched}/{enrichStats.contacts.total}{enrichStats.contacts.notFound ? `, ${enrichStats.contacts.notFound} not identified` : ''}</>
-                        ) : (
-                          <>Loading...</>
-                        )}
-                      </span>
-                    </div>
-                    <button
-                      className={`u-action-btn ${enriching ? 'enriching' : ''}`}
-                      onClick={startEnrichment}
-                      disabled={enriching}
-                    >
-                      {enriching ? 'Enriching...' : 'Run now'}
-                    </button>
-                  </div>
-                  <span className="u-settings-meta">
-                    {enrichStats?.lastEnrichedAt ? (
-                      <>Last updated {new Date(enrichStats.lastEnrichedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}. </>
-                    ) : null}
-                    Runs automatically every week.
-                  </span>
-                  {enrichError && !enriching && (
-                    <div style={{ marginTop: '0.4rem', padding: '0.35rem 0.5rem', background: 'rgba(229,115,115,0.12)', border: '1px solid rgba(229,115,115,0.3)', borderRadius: '6px', fontSize: '0.72rem', color: '#e57373' }}>
-                      {enrichError}
-                    </div>
-                  )}
-                  {enriching && (enrichProgress.contacts || enrichProgress.companies || enrichProgress.contactsFree) && (
-                    <div className="u-enrich-progress" style={{ marginTop: '0.5rem' }}>
-                      {enrichProgress.contactsFree && (
-                        <div className="u-enrich-progress-row">
-                          <span className="u-enrich-progress-label">Contacts</span>
-                          <div className="u-enrich-progress-bar">
-                            <div
-                              className="u-enrich-progress-fill"
-                              style={{ width: `${enrichProgress.contactsFree.total > 0 ? ((enrichProgress.contactsFree.enriched + enrichProgress.contactsFree.skipped + enrichProgress.contactsFree.errors) / enrichProgress.contactsFree.total) * 100 : 0}%` }}
-                            />
-                          </div>
-                          <span className="u-enrich-progress-text">
-                            {enrichProgress.contactsFree.enriched}/{enrichProgress.contactsFree.total}
-                            {enrichProgress.contactsFree.done && ' ✓'}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <button className="u-settings-logout-bottom" onClick={logout}>
-                  Log out
-                </button>
-              </div>
+              <SettingsPanel
+                currentUser={currentUser}
+                isCalendarConnected={isCalendarConnected}
+                calendarAccounts={calendarAccounts}
+                calendarSyncing={calendarSyncing}
+                syncingAccountId={syncingAccountId}
+                enriching={enriching}
+                enrichStats={enrichStats}
+                enrichError={enrichError}
+                enrichProgress={enrichProgress}
+                onCalendarSync={handleCalendarSync}
+                onAccountSync={handleAccountSync}
+                onAccountDelete={handleAccountDelete}
+                onStartEnrichment={startEnrichment}
+                onLogout={logout}
+              />
             )}
 
             {inlinePanel.type === 'intro-request' && inlinePanel.company && (() => {

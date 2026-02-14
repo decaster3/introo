@@ -3822,8 +3822,86 @@ body {
 
 /* ── Responsive ────────────────────────────────────── */
 
+/* ── Mobile filter toggle & backdrop (hidden on desktop) ── */
+.sb-mobile-toggle {
+  display: none;
+}
+.sb-mobile-backdrop {
+  display: none;
+}
+
 @media (max-width: 768px) {
-  .sb { display: none; }
+  /* Sidebar becomes a slide-over drawer */
+  .sb {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    z-index: 200;
+    width: 300px;
+    max-width: 85vw;
+    transform: translateX(-100%);
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.28s;
+    opacity: 0;
+    border-right: 1px solid var(--border-subtle);
+    box-shadow: 4px 0 24px rgba(0,0,0,0.4);
+  }
+  .sb.open {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  .sb.closed {
+    width: 300px; /* keep width so the slide anim works */
+    opacity: 0;
+    border-right: none;
+  }
+
+  /* Backdrop behind the drawer */
+  .sb-mobile-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 199;
+    background: rgba(0,0,0,0.5);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+  }
+
+  /* Show the mobile filter FAB */
+  .sb-mobile-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    position: fixed;
+    bottom: 1rem; left: 1rem;
+    z-index: 50;
+    padding: 0.55rem 1rem;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-medium);
+    border-radius: 999px;
+    color: var(--text-primary);
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .sb-mobile-toggle:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent-primary);
+  }
+  .sb-mobile-toggle .sb-mobile-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: var(--accent-primary);
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 700;
+  }
+
   .sb-reopen { display: none; }
   .u-layout { flex-direction: column; }
 
