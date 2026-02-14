@@ -2814,6 +2814,100 @@ body {
   text-align: center; color: var(--text-muted);
 }
 
+/* ── Rich loading state ── */
+.u-grid-loading-rich {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 5rem 2rem 4rem;
+  text-align: center;
+}
+
+/* Animated orb */
+.u-loading-orb {
+  position: relative;
+  width: 72px; height: 72px;
+  margin-bottom: 0.5rem;
+}
+.u-loading-orb-ring {
+  position: absolute; inset: 0;
+  border: 2.5px solid transparent;
+  border-top-color: var(--accent-primary);
+  border-right-color: rgba(91,141,239,0.3);
+  border-radius: 50%;
+  animation: u-orb-spin 1.4s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+}
+.u-loading-orb-ring--2 {
+  inset: 8px;
+  border-top-color: rgba(91,141,239,0.5);
+  border-right-color: rgba(91,141,239,0.15);
+  animation-duration: 1.8s;
+  animation-direction: reverse;
+}
+.u-loading-orb-core {
+  position: absolute;
+  inset: 20px;
+  background: radial-gradient(circle, rgba(91,141,239,0.15) 0%, transparent 70%);
+  border-radius: 50%;
+  animation: u-orb-pulse 2s ease-in-out infinite;
+}
+
+@keyframes u-orb-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes u-orb-pulse {
+  0%, 100% { transform: scale(0.85); opacity: 0.5; }
+  50% { transform: scale(1.1); opacity: 1; }
+}
+
+/* Step indicators */
+.u-loading-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  align-items: flex-start;
+}
+.u-loading-step {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  opacity: 0.35;
+  transition: all 0.4s ease;
+}
+.u-loading-step.active {
+  color: var(--text-primary);
+  opacity: 1;
+}
+.u-loading-step.active .u-loading-step-icon {
+  animation: u-step-bounce 1s ease-in-out infinite;
+}
+.u-loading-step.done {
+  color: var(--accent-primary);
+  opacity: 0.7;
+}
+.u-loading-step-icon {
+  font-size: 0.85rem;
+  width: 1.2rem;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+@keyframes u-step-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+
+.u-loading-hint {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  opacity: 0.5;
+  margin-top: 0.5rem;
+}
+
 .u-grid-empty-icon { font-size: 2rem; opacity: 0.5; }
 
 .u-grid-empty button {

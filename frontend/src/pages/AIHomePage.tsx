@@ -1948,7 +1948,28 @@ export function AIHomePage() {
           {/* ── Company Grid ──────────────────────────────────── */}
           <div className="u-grid">
             {loading || storeLoading ? (
-              <div className="u-grid-loading"><div className="u-spinner" /> Loading...</div>
+              <div className="u-grid-loading-rich">
+                <div className="u-loading-orb">
+                  <div className="u-loading-orb-ring" />
+                  <div className="u-loading-orb-ring u-loading-orb-ring--2" />
+                  <div className="u-loading-orb-core" />
+                </div>
+                <div className="u-loading-steps">
+                  <div className={`u-loading-step ${calendarSyncing ? 'active' : 'done'}`}>
+                    <span className="u-loading-step-icon">{calendarSyncing ? '⏳' : '✓'}</span>
+                    <span>Syncing calendar events</span>
+                  </div>
+                  <div className={`u-loading-step ${calendarSyncing ? 'pending' : 'active'}`}>
+                    <span className="u-loading-step-icon">{calendarSyncing ? '○' : '⏳'}</span>
+                    <span>Importing contacts &amp; meetings</span>
+                  </div>
+                  <div className="u-loading-step pending">
+                    <span className="u-loading-step-icon">○</span>
+                    <span>Building your network map</span>
+                  </div>
+                </div>
+                <span className="u-loading-hint">This may take a moment on first sync...</span>
+              </div>
             ) : filteredCompanies.length === 0 ? (
               <div className="u-grid-empty">
                 {activeFilterCount > 0 || searchQuery.trim() ? (
