@@ -11,9 +11,7 @@ const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
 const APP_NAME = 'Introo';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
-if (!resend) {
-  console.warn('[email] RESEND_API_KEY not set — emails will be logged to console only.');
-}
+// Silently no-op when RESEND_API_KEY is not configured.
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

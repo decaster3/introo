@@ -71,6 +71,25 @@ const authLimiter = rateLimit({
 // so that req.ip, req.secure, and rate limiting work correctly.
 app.set('trust proxy', 1);
 
+// Health check — placed before all middleware so Railway's internal
+// HTTP healthcheck isn't blocked by HTTPS redirect or rate limiting.
+app.get('/health', async (req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ 
+      status: 'ok', 
+      timestamp: new Date().toISOString(),
+      database: 'connected'
+    });
+  } catch (error) {
+    res.status(503).json({ 
+      status: 'unhealthy', 
+      timestamp: new Date().toISOString(),
+      database: 'disconnected'
+    });
+  }
+});
+
 // Middleware
 // Security headers first
 app.use(securityHeaders);
@@ -107,24 +126,6 @@ app.use('/api/notifications', notificationsRoutes);
 app.use('/api/tags', tagsRoutes);
 app.use('/api/ai', aiRoutes);
 // app.use('/api/email', emailRoutes);
-
-// Health check with database connectivity
-app.get('/health', async (req, res) => {
-  try {
-    await prisma.$queryRaw`SELECT 1`;
-    res.json({ 
-      status: 'ok', 
-      timestamp: new Date().toISOString(),
-      database: 'connected'
-    });
-  } catch (error) {
-    res.status(503).json({ 
-      status: 'unhealthy', 
-      timestamp: new Date().toISOString(),
-      database: 'disconnected'
-    });
-  }
-});
 
 // Debug endpoint - development only
 if (!isProduction) {
