@@ -92,7 +92,6 @@ export function AIHomePage() {
   const [introRequestSending, setIntroRequestSending] = useState(false);
   const [introRequestSent, setIntroRequestSent] = useState(false);
   const [introSelectedThrough, setIntroSelectedThrough] = useState<string | null>(null);
-  const [introExpandedOption, setIntroExpandedOption] = useState<string | null>(null);
   const [introTipOpen, setIntroTipOpen] = useState(false);
   const [connMenuOpen, setConnMenuOpen] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
