@@ -11,8 +11,6 @@ const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
 const APP_NAME = 'Introo';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
-// Silently no-op when RESEND_API_KEY is not configured.
-
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface EmailResult {
@@ -22,49 +20,84 @@ export interface EmailResult {
 }
 
 export type EmailPreferences = {
-  intros?: boolean;       // intro offer / double intro emails
-  notifications?: boolean; // mirrors of in-app notifications
-  digests?: boolean;       // weekly digest
+  intros?: boolean;
+  notifications?: boolean;
+  digests?: boolean;
 };
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Base layout ─────────────────────────────────────────────────────────────
 
-function baseLayout(content: string): string {
+function baseLayout(content: string, options?: { preheader?: string }): string {
+  const preheader = options?.preheader
+    ? `<div style="display:none;max-height:0;overflow:hidden;mso-hide:all">${options.preheader}</div>`
+    : '';
+
   return `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light" />
+  <meta name="supported-color-schemes" content="light" />
+  <!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
   <style>
-    body { margin: 0; padding: 0; background: #f6f8fa; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-    .wrapper { max-width: 560px; margin: 0 auto; padding: 40px 24px; }
-    .card { background: #fff; border-radius: 12px; padding: 32px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-    .logo { font-size: 20px; font-weight: 700; color: #111; margin-bottom: 24px; letter-spacing: -0.5px; }
-    h1 { font-size: 22px; font-weight: 600; color: #111; margin: 0 0 12px; }
-    p { font-size: 15px; line-height: 1.6; color: #333; margin: 0 0 16px; }
-    .btn { display: inline-block; background: #111; color: #fff !important; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-size: 14px; font-weight: 600; margin-top: 8px; }
-    .muted { font-size: 13px; color: #888; margin-top: 24px; }
-    .footer { text-align: center; margin-top: 32px; font-size: 12px; color: #aaa; }
-    .footer a { color: #888; text-decoration: underline; }
-    .divider { border: none; border-top: 1px solid #eee; margin: 24px 0; }
-    .stat { display: inline-block; text-align: center; padding: 0 16px; }
-    .stat-value { font-size: 28px; font-weight: 700; color: #111; }
-    .stat-label { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.5px; }
+    body { margin: 0; padding: 0; background: #f4f4f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif; -webkit-font-smoothing: antialiased; }
+    .wrapper { max-width: 520px; margin: 0 auto; padding: 48px 20px 32px; }
+    .card { background: #ffffff; border-radius: 16px; padding: 40px 36px 36px; }
+    .logo { font-size: 18px; font-weight: 700; color: #18181b; letter-spacing: -0.3px; margin-bottom: 28px; }
+    .logo span { color: #6366f1; }
+    h1 { font-size: 21px; font-weight: 700; color: #18181b; margin: 0 0 8px; line-height: 1.3; }
+    h2 { font-size: 17px; font-weight: 600; color: #18181b; margin: 0 0 8px; line-height: 1.4; }
+    p { font-size: 15px; line-height: 1.65; color: #3f3f46; margin: 0 0 16px; }
+    .highlight { color: #18181b; font-weight: 600; }
+    .btn { display: inline-block; background: #18181b; color: #ffffff !important; text-decoration: none; padding: 13px 28px; border-radius: 10px; font-size: 14px; font-weight: 600; letter-spacing: -0.2px; margin-top: 4px; }
+    .btn:hover { background: #27272a; }
+    .btn-outline { display: inline-block; background: #ffffff; color: #18181b !important; text-decoration: none; padding: 11px 24px; border-radius: 10px; font-size: 14px; font-weight: 600; border: 1.5px solid #e4e4e7; margin-top: 4px; }
+    .muted { font-size: 13px; color: #a1a1aa; margin-top: 24px; line-height: 1.5; }
+    .footer { text-align: center; margin-top: 28px; padding: 0 12px; }
+    .footer p { font-size: 12px; color: #a1a1aa; margin: 0 0 6px; }
+    .footer a { color: #71717a; text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+    .divider { border: none; border-top: 1px solid #f4f4f5; margin: 24px 0; }
+    .step { display: flex; align-items: flex-start; margin-bottom: 14px; }
+    .step-num { flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; background: #f4f4f5; color: #18181b; font-size: 13px; font-weight: 700; text-align: center; line-height: 28px; margin-right: 14px; margin-top: 1px; }
+    .step-text { font-size: 15px; line-height: 1.5; color: #3f3f46; padding-top: 3px; }
+    .callout { background: #fafafa; border-radius: 12px; padding: 20px 22px; margin: 20px 0; }
+    .callout p { margin: 0; font-size: 14px; color: #52525b; }
+    .stat-row { text-align: center; margin: 28px 0; }
+    .stat { display: inline-block; text-align: center; padding: 0 18px; vertical-align: top; }
+    .stat-value { font-size: 32px; font-weight: 800; color: #18181b; line-height: 1.2; }
+    .stat-label { font-size: 11px; color: #a1a1aa; text-transform: uppercase; letter-spacing: 0.8px; margin-top: 4px; font-weight: 500; }
+    .avatar { width: 40px; height: 40px; border-radius: 50%; background: #e4e4e7; display: inline-block; vertical-align: middle; margin-right: 12px; }
+    .person { margin-bottom: 16px; }
+    .person-name { font-size: 15px; font-weight: 600; color: #18181b; vertical-align: middle; }
+    .person-detail { font-size: 13px; color: #71717a; vertical-align: middle; }
+    @media only screen and (max-width: 560px) {
+      .wrapper { padding: 24px 12px 20px; }
+      .card { padding: 28px 22px 24px; border-radius: 12px; }
+      h1 { font-size: 19px; }
+      .stat { padding: 0 12px; }
+      .stat-value { font-size: 26px; }
+    }
   </style>
 </head>
 <body>
+  ${preheader}
   <div class="wrapper">
     <div class="card">
-      <div class="logo">${APP_NAME}</div>
+      <div class="logo"><span>&#9679;</span> ${APP_NAME}</div>
       ${content}
     </div>
     <div class="footer">
-      <a href="${FRONTEND_URL}">Open ${APP_NAME}</a>
+      <p><a href="${FRONTEND_URL}">Open ${APP_NAME}</a></p>
+      <p style="margin-top: 8px; font-size: 11px; color: #d4d4d8;">${APP_NAME} &mdash; Your network, organized.</p>
     </div>
   </div>
 </body>
 </html>`;
 }
+
+// ─── Send helper ─────────────────────────────────────────────────────────────
 
 async function send(params: {
   to: string | string[];
@@ -100,7 +133,7 @@ async function send(params: {
   }
 }
 
-// ─── Check user email preferences before sending ─────────────────────────────
+// ─── User preferences ────────────────────────────────────────────────────────
 
 async function getUserEmailPrefs(userId: string): Promise<EmailPreferences> {
   try {
@@ -112,7 +145,7 @@ async function getUserEmailPrefs(userId: string): Promise<EmailPreferences> {
       return user.emailPreferences as EmailPreferences;
     }
   } catch {
-    // Ignore — column may not exist yet
+    // Column may not exist yet
   }
   return { intros: true, notifications: true, digests: true };
 }
@@ -125,25 +158,44 @@ async function getUserEmail(userId: string): Promise<string | null> {
   return user?.email || null;
 }
 
-// ─── Email functions ─────────────────────────────────────────────────────────
+// ─── Email templates ─────────────────────────────────────────────────────────
 
 /** Welcome email — sent after first signup */
 export async function sendWelcomeEmail(user: { id: string; email: string; name: string }): Promise<EmailResult> {
-  const html = baseLayout(`
-    <h1>Welcome to ${APP_NAME}, ${user.name.split(' ')[0]}!</h1>
-    <p>Your calendar is the key to your professional network. We turn your meeting history into a searchable, organized map of who you know.</p>
-    <p>Here's what happens next:</p>
-    <p><strong>1.</strong> We sync your calendar and extract contacts<br/>
-    <strong>2.</strong> We enrich each contact with company data<br/>
-    <strong>3.</strong> You get a powerful view of your network</p>
-    <a href="${FRONTEND_URL}/home" class="btn">Open ${APP_NAME}</a>
-    <p class="muted">You're receiving this because you signed up for ${APP_NAME}.</p>
-  `);
+  const firstName = user.name.split(' ')[0] || 'there';
 
-  return send({ to: user.email, subject: `Welcome to ${APP_NAME}!` , html });
+  const html = baseLayout(`
+    <h1>Hey ${firstName}, welcome aboard!</h1>
+    <p>Thanks for signing up for ${APP_NAME}. We're already working on mapping your professional network from your calendar.</p>
+
+    <div style="margin: 24px 0 28px;">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-text"><span class="highlight">Calendar sync</span> &mdash; we're pulling your meetings right now</div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-text"><span class="highlight">Contact enrichment</span> &mdash; we add company, role &amp; LinkedIn data</div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-text"><span class="highlight">Your network map</span> &mdash; search, filter, and discover who you know</div>
+      </div>
+    </div>
+
+    <p>This usually takes just a minute or two. Once it's done, you'll have a searchable view of every person you've met with.</p>
+
+    <div style="margin-top: 24px;">
+      <a href="${FRONTEND_URL}/home" class="btn">Open ${APP_NAME}</a>
+    </div>
+
+    <p class="muted">You received this because you just signed up for ${APP_NAME}. No action needed &mdash; we're setting everything up for you.</p>
+  `, { preheader: `We're syncing your calendar and building your network map.` });
+
+  return send({ to: user.email, subject: `Welcome to ${APP_NAME}, ${firstName}!`, html });
 }
 
-/** Intro offer email — "I can intro you to someone at X" */
+/** Intro offer email — someone can intro the recipient to a target company */
 export async function sendIntroOfferEmail(params: {
   senderName: string;
   senderEmail: string;
@@ -153,23 +205,33 @@ export async function sendIntroOfferEmail(params: {
   contactName?: string;
 }): Promise<EmailResult> {
   const { senderName, senderEmail, recipientEmail, recipientName, targetCompany, contactName } = params;
+  const recipientFirst = recipientName.split(' ')[0];
+  const senderFirst = senderName.split(' ')[0];
 
   const connectionLine = contactName
-    ? `I know <strong>${contactName}</strong> there and would be happy to make an introduction.`
-    : `I have a contact there and would be happy to make an introduction.`;
+    ? `They know <span class="highlight">${contactName}</span> at ${targetCompany} and offered to make an introduction for you.`
+    : `They have a connection at ${targetCompany} and offered to make an introduction for you.`;
 
   const html = baseLayout(`
-    <h1>Intro Offer: ${targetCompany}</h1>
-    <p>Hi ${recipientName},</p>
-    <p>I saw your request for an intro to someone at <strong>${targetCompany}</strong>. ${connectionLine}</p>
-    <p>Let me know if you'd like me to proceed!</p>
+    <h1>Good news, ${recipientFirst}!</h1>
+    <p><span class="highlight">${senderName}</span> saw that you're looking for an intro to someone at <span class="highlight">${targetCompany}</span>.</p>
+    <p>${connectionLine}</p>
+
+    <div class="callout">
+      <p>Just reply to this email to connect directly with ${senderFirst} and take it from there.</p>
+    </div>
+
+    <div style="margin-top: 24px;">
+      <a href="mailto:${senderEmail}?subject=Re: Intro to ${targetCompany}" class="btn">Reply to ${senderFirst}</a>
+    </div>
+
     <hr class="divider" />
-    <p class="muted">Sent by ${senderName} via ${APP_NAME}. Reply directly to this email to respond.</p>
-  `);
+    <p class="muted">This email was sent via ${APP_NAME} on behalf of ${senderName}. You can also reply directly to this email &mdash; it goes straight to ${senderFirst}'s inbox.</p>
+  `, { preheader: `${senderName} can introduce you to someone at ${targetCompany}.` });
 
   return send({
     to: recipientEmail,
-    subject: `${senderName} can intro you to someone at ${targetCompany}`,
+    subject: `${senderFirst} can intro you to someone at ${targetCompany}`,
     html,
     replyTo: senderEmail,
   });
@@ -186,27 +248,36 @@ export async function sendDoubleIntroEmail(params: {
   targetCompany: string;
 }): Promise<EmailResult> {
   const { senderName, senderEmail, requesterEmail, requesterName, contactEmail, contactName, targetCompany } = params;
+  const senderFirst = senderName.split(' ')[0];
+  const requesterFirst = requesterName.split(' ')[0];
+  const contactFirst = contactName.split(' ')[0];
 
   const html = baseLayout(`
-    <h1>Introduction: ${requesterName} ↔ ${contactName}</h1>
-    <p>Hi ${contactName} and ${requesterName},</p>
-    <p>I'd like to introduce you to each other.</p>
-    <p><strong>${contactName}</strong> — ${requesterName} is interested in connecting with someone at ${targetCompany}.</p>
-    <p><strong>${requesterName}</strong> — ${contactName} is at ${targetCompany} and I thought you two should meet.</p>
-    <p>I'll let you both take it from here!</p>
+    <h1>Meet each other!</h1>
+    <p>Hi ${contactFirst} and ${requesterFirst},</p>
+    <p>I'd love to connect you two. Here's a bit of context:</p>
+
+    <div class="callout">
+      <p><span class="highlight">${contactName}</span> &mdash; ${requesterFirst} has been looking to connect with someone at ${targetCompany}, and I thought you'd be the perfect person.</p>
+      <br/>
+      <p><span class="highlight">${requesterName}</span> &mdash; ${contactFirst} is at ${targetCompany}. I think you'll have a lot to talk about.</p>
+    </div>
+
+    <p>I'll leave it to you both to take it from here. Feel free to reply-all or reach out to each other directly.</p>
+
     <hr class="divider" />
-    <p class="muted">Sent by ${senderName} via ${APP_NAME}.</p>
-  `);
+    <p class="muted">Intro made by ${senderName} via ${APP_NAME}. Both parties are CC'd on this email.</p>
+  `, { preheader: `${senderFirst} just introduced ${requesterFirst} and ${contactFirst}.` });
 
   return send({
     to: [contactEmail, requesterEmail],
-    subject: `Introduction: ${requesterName} ↔ ${contactName} (${targetCompany})`,
+    subject: `${senderFirst} intro: ${requesterFirst} ↔ ${contactFirst} (${targetCompany})`,
     html,
     replyTo: senderEmail,
   });
 }
 
-/** Direct contact email — simple email to a contact */
+/** Direct contact email — a message from one user to a contact */
 export async function sendContactEmail(params: {
   senderName: string;
   senderEmail: string;
@@ -216,13 +287,20 @@ export async function sendContactEmail(params: {
   body: string;
 }): Promise<EmailResult> {
   const { senderName, senderEmail, recipientEmail, recipientName, subject, body } = params;
+  const recipientFirst = recipientName.split(' ')[0];
+  const senderFirst = senderName.split(' ')[0];
 
   const html = baseLayout(`
-    <p>Hi ${recipientName},</p>
+    <p>Hi ${recipientFirst},</p>
     <p>${body.replace(/\n/g, '<br/>')}</p>
+
+    <div style="margin-top: 24px;">
+      <a href="mailto:${senderEmail}?subject=Re: ${subject}" class="btn">Reply to ${senderFirst}</a>
+    </div>
+
     <hr class="divider" />
-    <p class="muted">Sent by ${senderName} via ${APP_NAME}. Reply directly to respond.</p>
-  `);
+    <p class="muted">Sent by ${senderName} via ${APP_NAME}. You can also reply directly to this email.</p>
+  `, { preheader: `${senderName} sent you a message.` });
 
   return send({
     to: recipientEmail,
@@ -232,7 +310,7 @@ export async function sendContactEmail(params: {
   });
 }
 
-/** Notification email — mirrors an in-app notification as email */
+/** Notification email — mirrors an in-app notification */
 export async function sendNotificationEmail(
   userId: string,
   notification: { type: string; title: string; body?: string | null }
@@ -246,11 +324,15 @@ export async function sendNotificationEmail(
   if (!email) return { success: false, error: 'User email not found' };
 
   const html = baseLayout(`
-    <h1>${notification.title}</h1>
+    <h2>${notification.title}</h2>
     ${notification.body ? `<p>${notification.body}</p>` : ''}
-    <a href="${FRONTEND_URL}/home" class="btn">View in ${APP_NAME}</a>
-    <p class="muted">You're receiving this because you have email notifications enabled.</p>
-  `);
+
+    <div style="margin-top: 20px;">
+      <a href="${FRONTEND_URL}/home" class="btn">View in ${APP_NAME}</a>
+    </div>
+
+    <p class="muted">You're receiving this because you have email notifications turned on. You can change this anytime in <a href="${FRONTEND_URL}/home?panel=settings" style="color: #71717a;">Settings</a>.</p>
+  `, { preheader: notification.body || notification.title });
 
   return send({
     to: email,
@@ -284,15 +366,23 @@ export async function sendWeeklyDigest(
   });
   const firstName = user?.name?.split(' ')[0] || 'there';
 
+  const hasActivity = stats.newContacts > 0 || stats.newMeetings > 0 || stats.introRequests > 0 || stats.introOffers > 0;
+
   const topCompaniesHtml = stats.topCompanies.length > 0
-    ? `<p><strong>Most active companies this week:</strong></p>
-       <p>${stats.topCompanies.map(c => `${c.name} (${c.contactCount} contacts)`).join('<br/>')}</p>`
+    ? `<hr class="divider" />
+       <h2>Top companies this week</h2>
+       <p>${stats.topCompanies.map(c => `<span class="highlight">${c.name}</span> &mdash; ${c.contactCount} contact${c.contactCount !== 1 ? 's' : ''}`).join('<br/>')}</p>`
     : '';
 
+  const summaryLine = hasActivity
+    ? `Here's what happened in your network this past week.`
+    : `It was a quiet week. Here's a quick snapshot of your network.`;
+
   const html = baseLayout(`
-    <h1>Your weekly network update</h1>
-    <p>Hi ${firstName}, here's what happened in your network this week:</p>
-    <div style="text-align: center; margin: 24px 0;">
+    <h1>Your week in review</h1>
+    <p>Hey ${firstName}, ${summaryLine}</p>
+
+    <div class="stat-row">
       <div class="stat">
         <div class="stat-value">${stats.newContacts}</div>
         <div class="stat-label">New Contacts</div>
@@ -303,21 +393,26 @@ export async function sendWeeklyDigest(
       </div>
       <div class="stat">
         <div class="stat-value">${stats.introRequests}</div>
-        <div class="stat-label">Intro Requests</div>
+        <div class="stat-label">Requests</div>
       </div>
       <div class="stat">
         <div class="stat-value">${stats.introOffers}</div>
         <div class="stat-label">Offers</div>
       </div>
     </div>
+
     ${topCompaniesHtml}
-    <a href="${FRONTEND_URL}/home" class="btn">See Full Network</a>
-    <p class="muted">You're receiving this weekly digest. You can disable it in Settings.</p>
-  `);
+
+    <div style="margin-top: 28px;">
+      <a href="${FRONTEND_URL}/home" class="btn">See Your Network</a>
+    </div>
+
+    <p class="muted">This is your weekly digest from ${APP_NAME}. You can turn it off anytime in <a href="${FRONTEND_URL}/home?panel=settings" style="color: #71717a;">Settings</a>.</p>
+  `, { preheader: `${stats.newContacts} new contacts, ${stats.newMeetings} meetings this week.` });
 
   return send({
     to: email,
-    subject: `Your ${APP_NAME} weekly update — ${stats.newContacts} new contacts`,
+    subject: `${firstName}, your week: ${stats.newContacts} new contacts & ${stats.newMeetings} meetings`,
     html,
   });
 }
