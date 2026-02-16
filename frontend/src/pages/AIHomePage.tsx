@@ -3790,11 +3790,13 @@ export function AIHomePage() {
                             <span className="u-panel-space-card-name">{c.peer.name}</span>
                             <span className="u-panel-space-card-stats">{c.direction === 'sent' ? 'Waiting for response' : 'Wants to connect'}</span>
                           </div>
-                          {c.direction === 'received' && (
+                          {c.direction === 'received' ? (
                             <div style={{ display: 'flex', gap: '0.3rem', flexShrink: 0 }}>
                               <button className="u-notif-accept-btn" style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }} onClick={() => acceptConnection(c.id)}>Accept</button>
                               <button className="u-notif-reject-btn" style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }} onClick={() => rejectConnection(c.id)}>✕</button>
                             </div>
+                          ) : (
+                            <button className="u-notif-reject-btn" style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem', flexShrink: 0 }} onClick={() => removeConnection(c.id)} title="Revoke invitation">✕</button>
                           )}
                         </div>
                       ))}
