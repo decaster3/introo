@@ -102,7 +102,13 @@ export function AIHomePage() {
   const [declineReason, setDeclineReason] = useState('');
   const [dismissedRequestIds, setDismissedRequestIds] = useState<Set<string>>(new Set());
   const [incomingRequests, setIncomingRequests] = useState<{ id: string; rawText: string; status: string; createdAt: string; normalizedQuery: Record<string, unknown>; requester: { id: string; name: string; email?: string; avatar: string | null } }[]>([]);
-  const [introPickerRequestId, setIntroPickerRequestId] = useState<string | null>(null);
+  const [introActionRequestId, setIntroActionRequestId] = useState<string | null>(null);
+  const [introActionType, setIntroActionType] = useState<'ask-details' | 'make-intro' | 'ask-permission' | null>(null);
+  const [introEmailSubject, setIntroEmailSubject] = useState('');
+  const [introEmailBody, setIntroEmailBody] = useState('');
+  const [introSelectedContact, setIntroSelectedContact] = useState<{ id: string; name: string; email: string; title?: string } | null>(null);
+  const [introSending, setIntroSending] = useState(false);
+  const [introToast, setIntroToast] = useState<string | null>(null);
 
   // ─── Onboarding activation state ────────────────────────────────────────────
   const [showNetworkSplash, setShowNetworkSplash] = useState(false);
@@ -1492,6 +1498,12 @@ export function AIHomePage() {
   return (
     <div className="u-root">
       <div className="u-ambient" />
+
+      {introToast && (
+        <div className={`u-toast ${introToast.includes('Failed') ? 'u-toast--error' : 'u-toast--success'}`}>
+          {introToast}
+        </div>
+      )}
 
       {/* #1 Network stats splash screen after first sync */}
       {showNetworkSplash && networkSplashData && (
@@ -3344,7 +3356,6 @@ export function AIHomePage() {
                         const myContactsAtCompany = matchedCompany?.myContacts || [];
                         const isOpen = r.status === 'open';
                         const isDeclining = decliningRequestId === r.id;
-                        const isPickingContact = introPickerRequestId === r.id;
 
                         return (
                           <div key={r.id} className={`u-panel-request-card ${isMe ? 'sent' : ''} ${!isOpen ? 'resolved' : ''}`}>
@@ -3429,34 +3440,39 @@ export function AIHomePage() {
                             )}
 
                             {/* Action buttons — only for others' requests that are still open */}
-                            {!isMe && isOpen && !isDeclining && !isPickingContact && (
+                            {!isMe && isOpen && !isDeclining && introActionRequestId !== r.id && (
                               <div className="u-panel-request-actions">
                                 <button
                                   className="u-req-action-btn u-req-action-btn--intro"
                                   onClick={() => {
-                                    if (myContactsAtCompany.length === 0) {
-                                      emailApi.sendIntroOffer({
-                                        recipientEmail: r.requester.email || '',
-                                        recipientName: r.requester.name,
-                                        targetCompany: companyName,
-                                      }).catch(() => {});
-                                      offersApi.create({ requestId: r.id, message: 'Intro offered via email' }).catch(() => {});
-                                    } else if (myContactsAtCompany.length === 1) {
-                                      const contact = myContactsAtCompany[0];
-                                      emailApi.sendDoubleIntro({
-                                        requesterEmail: r.requester.email || '',
-                                        requesterName: r.requester.name,
-                                        contactEmail: contact.email,
-                                        contactName: contact.name,
-                                        targetCompany: companyName,
-                                      }).catch(() => {});
-                                      offersApi.create({ requestId: r.id, message: `Intro to ${contact.name}` }).catch(() => {});
-                                    } else {
-                                      setIntroPickerRequestId(r.id);
-                                    }
+                                    setIntroActionRequestId(r.id);
+                                    setIntroActionType(null);
+                                    setIntroEmailSubject('');
+                                    setIntroEmailBody('');
+                                    setIntroSelectedContact(myContactsAtCompany.length === 1 ? myContactsAtCompany[0] : null);
                                   }}
                                 >
                                   Make Intro
+                                </button>
+                                <button
+                                  className="u-req-action-btn u-req-action-btn--done"
+                                  onClick={async () => {
+                                    try {
+                                      await requestsApi.markDone(r.id);
+                                      setSpaceRequests(prev => ({
+                                        ...prev,
+                                        [space.id]: (prev[space.id] || []).map(req =>
+                                          req.id === r.id ? { ...req, status: 'accepted' } : req
+                                        ),
+                                      }));
+                                      setIntroToast('Intro marked as done!');
+                                      setTimeout(() => setIntroToast(null), 3000);
+                                    } catch (err) {
+                                      console.error('Failed to mark as done:', err);
+                                    }
+                                  }}
+                                >
+                                  Intro Done
                                 </button>
                                 <button
                                   className="u-req-action-btn u-req-action-btn--decline"
@@ -3467,34 +3483,137 @@ export function AIHomePage() {
                               </div>
                             )}
 
-                            {/* Contact picker for Make Intro */}
-                            {isPickingContact && (
-                              <div className="u-req-picker">
-                                <span className="u-req-picker-label">Pick a contact to introduce:</span>
-                                {myContactsAtCompany.map(c => (
+                            {/* Intro action flow */}
+                            {introActionRequestId === r.id && !introActionType && (() => {
+                              return (
+                                <div className="u-intro-flow">
+                                  {myContactsAtCompany.length > 1 && !introSelectedContact && (
+                                    <div className="u-intro-contact-pick">
+                                      <span className="u-intro-contact-pick-label">Who do you want to introduce?</span>
+                                      {myContactsAtCompany.map(c => (
+                                        <button key={c.id} className="u-intro-contact-pick-item" onClick={() => setIntroSelectedContact(c)}>
+                                          {c.name}{c.title && <span className="u-intro-contact-pick-title"> · {c.title}</span>}
+                                        </button>
+                                      ))}
+                                      <button className="u-intro-cancel" onClick={() => { setIntroActionRequestId(null); setIntroSelectedContact(null); }}>Cancel</button>
+                                    </div>
+                                  )}
+                                  {(myContactsAtCompany.length <= 1 || introSelectedContact) && (() => {
+                                    const cn = introSelectedContact?.name || myContactsAtCompany[0]?.name || 'your contact';
+                                    const cf = cn.split(' ')[0];
+                                    const rn = r.requester.name;
+                                    const rf = rn.split(' ')[0];
+                                    return (
+                                    <div className="u-intro-tags">
+                                      <button className="u-intro-tag" onClick={() => {
+                                        setIntroActionType('ask-details');
+                                        setIntroEmailSubject(`About your intro request to ${companyName}`);
+                                        setIntroEmailBody(`Hi ${rf},\n\nI saw your request for an intro to someone at ${companyName}. I know ${cf} there and may be able to help.\n\nBefore I reach out, could you share a bit more about what you're looking for? For example:\n- What's the context for this intro?\n- What would you like to discuss with them?\n- Any specific goals or topics?\n\nJust want to make sure the intro is as useful as possible for both of you. Reply to this email and let me know.\n\nBest,\n${currentUser?.name || ''}`);
+                                      }}>
+                                        Ask {rf} for details
+                                      </button>
+                                      <button className="u-intro-tag" onClick={() => {
+                                        setIntroActionType('make-intro');
+                                        setIntroEmailSubject(`Introduction: ${rn} ↔ ${cn} (${companyName})`);
+                                        setIntroEmailBody(`Hi ${cf} and ${rf},\n\nI'd love to connect you two.\n\n${cf} — ${rf} is interested in connecting with someone at ${companyName}, and I thought you'd be a great person to talk to.\n\n${rf} — ${cf} is at ${companyName}. I think you'll have a lot to discuss.\n\nFeel free to reply all to continue the conversation right here in this thread.\n\nBest,\n${currentUser?.name || ''}`);
+                                      }}>
+                                        Make intro
+                                      </button>
+                                      <button className="u-intro-tag" onClick={() => {
+                                        setIntroActionType('ask-permission');
+                                        setIntroEmailSubject(`Would you be open to an intro? (${companyName})`);
+                                        setIntroEmailBody(`Hi ${cf},\n\nI have someone in my network who's looking to connect with someone at ${companyName}. I thought of you and wanted to check — would you be open to an introduction?\n\nNo pressure at all — just reply to this email and let me know.\n\nBest,\n${currentUser?.name || ''}`);
+                                      }}>
+                                        Ask {cf} if OK to make intro
+                                      </button>
+                                      <button className="u-intro-cancel" onClick={() => { setIntroActionRequestId(null); setIntroSelectedContact(null); }}>Cancel</button>
+                                    </div>
+                                    );
+                                  })()}
+                                </div>
+                              );
+                            })()}
+
+                            {/* Email composer */}
+                            {introActionRequestId === r.id && introActionType && (() => {
+                              const contact = introSelectedContact || myContactsAtCompany[0];
+                              const recipientLabel = introActionType === 'ask-details'
+                                ? `To: ${r.requester.email || r.requester.name}`
+                                : introActionType === 'ask-permission' && contact
+                                ? `To: ${contact.email || contact.name}`
+                                : `To: ${contact?.email || ''}, ${r.requester.email || ''}`;
+                              const ccLabel = `CC: ${currentUser?.email || 'you'}`;
+                              return (
+                              <div className="u-intro-email">
+                                <div className="u-intro-email-recipients">
+                                  <span className="u-intro-email-recipient">{recipientLabel}</span>
+                                  <span className="u-intro-email-cc">{ccLabel}</span>
+                                </div>
+                                <label className="u-intro-email-label">Subject</label>
+                                <input
+                                  className="u-intro-email-subject"
+                                  value={introEmailSubject}
+                                  onChange={e => setIntroEmailSubject(e.target.value)}
+                                />
+                                <label className="u-intro-email-label">Message</label>
+                                <textarea
+                                  className="u-intro-email-body"
+                                  rows={8}
+                                  value={introEmailBody}
+                                  onChange={e => setIntroEmailBody(e.target.value)}
+                                />
+                                <div className="u-intro-email-actions">
                                   <button
-                                    key={c.id}
-                                    className="u-req-picker-item"
-                                    onClick={() => {
-                                      emailApi.sendDoubleIntro({
-                                        requesterEmail: r.requester.email || '',
-                                        requesterName: r.requester.name,
-                                        contactEmail: c.email,
-                                        contactName: c.name,
-                                        targetCompany: companyName,
-                                      }).catch(() => {});
-                                      offersApi.create({ requestId: r.id, message: `Intro to ${c.name}` }).catch(() => {});
-                                      setIntroPickerRequestId(null);
+                                    className="u-intro-email-send"
+                                    disabled={introSending}
+                                    onClick={async () => {
+                                      setIntroSending(true);
+                                      try {
+                                        if (introActionType === 'make-intro' && contact) {
+                                          await emailApi.sendDoubleIntro({
+                                            requesterEmail: r.requester.email || '',
+                                            requesterName: r.requester.name,
+                                            contactEmail: contact.email,
+                                            contactName: contact.name,
+                                            targetCompany: companyName,
+                                          });
+                                          await offersApi.create({ requestId: r.id, message: `Intro to ${contact.name}` });
+                                        } else if (introActionType === 'ask-details') {
+                                          await emailApi.sendContact({
+                                            recipientEmail: r.requester.email || '',
+                                            recipientName: r.requester.name,
+                                            subject: introEmailSubject,
+                                            body: introEmailBody,
+                                          });
+                                        } else if (introActionType === 'ask-permission' && contact) {
+                                          await emailApi.sendContact({
+                                            recipientEmail: contact.email,
+                                            recipientName: contact.name,
+                                            subject: introEmailSubject,
+                                            body: introEmailBody,
+                                          });
+                                        }
+                                        setIntroActionRequestId(null);
+                                        setIntroActionType(null);
+                                        setIntroSelectedContact(null);
+                                        setIntroToast('Email sent!');
+                                        setTimeout(() => setIntroToast(null), 3000);
+                                      } catch (err) {
+                                        console.error('Failed to send intro email:', err);
+                                        setIntroToast('Failed to send email');
+                                        setTimeout(() => setIntroToast(null), 3000);
+                                      } finally {
+                                        setIntroSending(false);
+                                      }
                                     }}
                                   >
-                                    <PersonAvatar email={c.email} name={c.name} avatarUrl={c.photoUrl} size={22} />
-                                    <span className="u-req-picker-name">{c.name}</span>
-                                    {c.title && <span className="u-req-picker-title">{c.title}</span>}
+                                    {introSending ? 'Sending...' : 'Send Email'}
                                   </button>
-                                ))}
-                                <button className="u-req-picker-cancel" onClick={() => setIntroPickerRequestId(null)}>Cancel</button>
+                                  <button className="u-intro-cancel" onClick={() => { setIntroActionType(null); }}>Back</button>
+                                </div>
                               </div>
-                            )}
+                              );
+                            })()}
 
                             {/* Decline form */}
                             {isDeclining && (
@@ -3885,7 +4004,6 @@ export function AIHomePage() {
                         const myContactsAtCompany = matchedCompany?.myContacts || [];
                         const isOpen = r.status === 'open';
                         const isDeclining = decliningRequestId === r.id;
-                        const isPickingContact = introPickerRequestId === r.id;
 
                         return (
                           <div key={r.id} className={`u-panel-request-card ${isMe ? 'sent' : ''} ${!isOpen ? 'resolved' : ''}`}>
@@ -3944,43 +4062,161 @@ export function AIHomePage() {
                               </div>
                             )}
 
-                            {!isMe && isOpen && !isDeclining && !isPickingContact && (
+                            {!isMe && isOpen && !isDeclining && introActionRequestId !== r.id && (
                               <div className="u-panel-request-actions">
                                 <button
                                   className="u-req-action-btn u-req-action-btn--intro"
                                   onClick={() => {
-                                    if (myContactsAtCompany.length === 0) {
-                                      emailApi.sendIntroOffer({ recipientEmail: r.requester.email || '', recipientName: r.requester.name, targetCompany: companyName }).catch(() => {});
-                                      offersApi.create({ requestId: r.id, message: 'Intro offered via email' }).catch(() => {});
-                                    } else if (myContactsAtCompany.length === 1) {
-                                      const contact = myContactsAtCompany[0];
-                                      emailApi.sendDoubleIntro({ requesterEmail: r.requester.email || '', requesterName: r.requester.name, contactEmail: contact.email, contactName: contact.name, targetCompany: companyName }).catch(() => {});
-                                      offersApi.create({ requestId: r.id, message: `Intro to ${contact.name}` }).catch(() => {});
-                                    } else {
-                                      setIntroPickerRequestId(r.id);
-                                    }
+                                    setIntroActionRequestId(r.id);
+                                    setIntroActionType(null);
+                                    setIntroEmailSubject('');
+                                    setIntroEmailBody('');
+                                    setIntroSelectedContact(myContactsAtCompany.length === 1 ? myContactsAtCompany[0] : null);
                                   }}
                                 >Make Intro</button>
+                                <button className="u-req-action-btn u-req-action-btn--done" onClick={async () => {
+                                  try {
+                                    await requestsApi.markDone(r.id);
+                                    setIncomingRequests(prev => prev.map(req => req.id === r.id ? { ...req, status: 'accepted' } : req));
+                                    setIntroToast('Intro marked as done!');
+                                    setTimeout(() => setIntroToast(null), 3000);
+                                  } catch (err) { console.error('Failed to mark as done:', err); }
+                                }}>Intro Done</button>
                                 <button className="u-req-action-btn u-req-action-btn--decline" onClick={() => { setDecliningRequestId(r.id); setDeclineReason(''); }}>Decline</button>
                               </div>
                             )}
 
-                            {isPickingContact && (
-                              <div className="u-req-picker">
-                                <span className="u-req-picker-label">Pick a contact to introduce:</span>
-                                {myContactsAtCompany.map(c => (
-                                  <button key={c.id} className="u-req-picker-item" onClick={() => {
-                                    emailApi.sendDoubleIntro({ requesterEmail: r.requester.email || '', requesterName: r.requester.name, contactEmail: c.email, contactName: c.name, targetCompany: companyName }).catch(() => {});
-                                    offersApi.create({ requestId: r.id, message: `Intro to ${c.name}` }).catch(() => {});
-                                    setIntroPickerRequestId(null);
-                                  }}>
-                                    <span className="u-req-picker-name">{c.name}</span>
-                                    {c.title && <span className="u-req-picker-title">{c.title}</span>}
+                            {/* Intro action flow */}
+                            {introActionRequestId === r.id && !introActionType && (() => {
+                              return (
+                                <div className="u-intro-flow">
+                                  {myContactsAtCompany.length > 1 && !introSelectedContact && (
+                                    <div className="u-intro-contact-pick">
+                                      <span className="u-intro-contact-pick-label">Who do you want to introduce?</span>
+                                      {myContactsAtCompany.map(c => (
+                                        <button key={c.id} className="u-intro-contact-pick-item" onClick={() => setIntroSelectedContact(c)}>
+                                          {c.name}{c.title && <span className="u-intro-contact-pick-title"> · {c.title}</span>}
+                                        </button>
+                                      ))}
+                                      <button className="u-intro-cancel" onClick={() => { setIntroActionRequestId(null); setIntroSelectedContact(null); }}>Cancel</button>
+                                    </div>
+                                  )}
+                                  {(myContactsAtCompany.length <= 1 || introSelectedContact) && (() => {
+                                    const cn = introSelectedContact?.name || myContactsAtCompany[0]?.name || 'your contact';
+                                    const cf = cn.split(' ')[0];
+                                    const rn = r.requester.name;
+                                    const rf = rn.split(' ')[0];
+                                    return (
+                                    <div className="u-intro-tags">
+                                      <button className="u-intro-tag" onClick={() => {
+                                        setIntroActionType('ask-details');
+                                        setIntroEmailSubject(`About your intro request to ${companyName}`);
+                                        setIntroEmailBody(`Hi ${rf},\n\nI saw your request for an intro to someone at ${companyName}. I know ${cf} there and may be able to help.\n\nBefore I reach out, could you share a bit more about what you're looking for? For example:\n- What's the context for this intro?\n- What would you like to discuss with them?\n- Any specific goals or topics?\n\nJust want to make sure the intro is as useful as possible for both of you. Reply to this email and let me know.\n\nBest,\n${currentUser?.name || ''}`);
+                                      }}>
+                                        Ask {rf} for details
+                                      </button>
+                                      <button className="u-intro-tag" onClick={() => {
+                                        setIntroActionType('make-intro');
+                                        setIntroEmailSubject(`Introduction: ${rn} ↔ ${cn} (${companyName})`);
+                                        setIntroEmailBody(`Hi ${cf} and ${rf},\n\nI'd love to connect you two.\n\n${cf} — ${rf} is interested in connecting with someone at ${companyName}, and I thought you'd be a great person to talk to.\n\n${rf} — ${cf} is at ${companyName}. I think you'll have a lot to discuss.\n\nFeel free to reply all to continue the conversation right here in this thread.\n\nBest,\n${currentUser?.name || ''}`);
+                                      }}>
+                                        Make intro
+                                      </button>
+                                      <button className="u-intro-tag" onClick={() => {
+                                        setIntroActionType('ask-permission');
+                                        setIntroEmailSubject(`Would you be open to an intro? (${companyName})`);
+                                        setIntroEmailBody(`Hi ${cf},\n\nI have someone in my network who's looking to connect with someone at ${companyName}. I thought of you and wanted to check — would you be open to an introduction?\n\nNo pressure at all — just reply to this email and let me know.\n\nBest,\n${currentUser?.name || ''}`);
+                                      }}>
+                                        Ask {cf} if OK to make intro
+                                      </button>
+                                      <button className="u-intro-cancel" onClick={() => { setIntroActionRequestId(null); setIntroSelectedContact(null); }}>Cancel</button>
+                                    </div>
+                                    );
+                                  })()}
+                                </div>
+                              );
+                            })()}
+
+                            {/* Email composer */}
+                            {introActionRequestId === r.id && introActionType && (() => {
+                              const contact = introSelectedContact || myContactsAtCompany[0];
+                              const recipientLabel = introActionType === 'ask-details'
+                                ? `To: ${r.requester.email || r.requester.name}`
+                                : introActionType === 'ask-permission' && contact
+                                ? `To: ${contact.email || contact.name}`
+                                : `To: ${contact?.email || ''}, ${r.requester.email || ''}`;
+                              const ccLabel = `CC: ${currentUser?.email || 'you'}`;
+                              return (
+                              <div className="u-intro-email">
+                                <div className="u-intro-email-recipients">
+                                  <span className="u-intro-email-recipient">{recipientLabel}</span>
+                                  <span className="u-intro-email-cc">{ccLabel}</span>
+                                </div>
+                                <label className="u-intro-email-label">Subject</label>
+                                <input
+                                  className="u-intro-email-subject"
+                                  value={introEmailSubject}
+                                  onChange={e => setIntroEmailSubject(e.target.value)}
+                                />
+                                <label className="u-intro-email-label">Message</label>
+                                <textarea
+                                  className="u-intro-email-body"
+                                  rows={8}
+                                  value={introEmailBody}
+                                  onChange={e => setIntroEmailBody(e.target.value)}
+                                />
+                                <div className="u-intro-email-actions">
+                                  <button
+                                    className="u-intro-email-send"
+                                    disabled={introSending}
+                                    onClick={async () => {
+                                      setIntroSending(true);
+                                      try {
+                                        if (introActionType === 'make-intro' && contact) {
+                                          await emailApi.sendDoubleIntro({
+                                            requesterEmail: r.requester.email || '',
+                                            requesterName: r.requester.name,
+                                            contactEmail: contact.email,
+                                            contactName: contact.name,
+                                            targetCompany: companyName,
+                                          });
+                                          await offersApi.create({ requestId: r.id, message: `Intro to ${contact.name}` });
+                                        } else if (introActionType === 'ask-details') {
+                                          await emailApi.sendContact({
+                                            recipientEmail: r.requester.email || '',
+                                            recipientName: r.requester.name,
+                                            subject: introEmailSubject,
+                                            body: introEmailBody,
+                                          });
+                                        } else if (introActionType === 'ask-permission' && contact) {
+                                          await emailApi.sendContact({
+                                            recipientEmail: contact.email,
+                                            recipientName: contact.name,
+                                            subject: introEmailSubject,
+                                            body: introEmailBody,
+                                          });
+                                        }
+                                        setIntroActionRequestId(null);
+                                        setIntroActionType(null);
+                                        setIntroSelectedContact(null);
+                                        setIntroToast('Email sent!');
+                                        setTimeout(() => setIntroToast(null), 3000);
+                                      } catch (err) {
+                                        console.error('Failed to send intro email:', err);
+                                        setIntroToast('Failed to send email');
+                                        setTimeout(() => setIntroToast(null), 3000);
+                                      } finally {
+                                        setIntroSending(false);
+                                      }
+                                    }}
+                                  >
+                                    {introSending ? 'Sending...' : 'Send Email'}
                                   </button>
-                                ))}
-                                <button className="u-req-picker-cancel" onClick={() => setIntroPickerRequestId(null)}>Cancel</button>
+                                  <button className="u-intro-cancel" onClick={() => { setIntroActionType(null); }}>Back</button>
+                                </div>
                               </div>
-                            )}
+                              );
+                            })()}
 
                             {isDeclining && (
                               <div className="u-req-decline">

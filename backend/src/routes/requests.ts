@@ -418,6 +418,88 @@ router.patch('/:id/decline', authMiddleware, async (req, res) => {
   }
 });
 
+// Mark request as done (connector marks intro as completed)
+router.patch('/:id/done', authMiddleware, async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+
+    const existing = await prisma.introRequest.findUnique({
+      where: { id: req.params.id },
+      include: {
+        requester: { select: { id: true, name: true } },
+        space: { select: { id: true, name: true, emoji: true } },
+      },
+    });
+
+    if (!existing) {
+      res.status(404).json({ error: 'Request not found' });
+      return;
+    }
+
+    if (existing.requesterId === userId) {
+      res.status(400).json({ error: 'Cannot mark your own request as done' });
+      return;
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const offer = await tx.introOffer.create({
+        data: {
+          requestId: req.params.id,
+          introducerId: userId,
+          message: 'Intro completed',
+          status: 'accepted',
+        },
+      });
+
+      const updated = await tx.introRequest.update({
+        where: { id: req.params.id },
+        data: { status: 'accepted' },
+      });
+
+      await tx.introOffer.updateMany({
+        where: {
+          requestId: req.params.id,
+          id: { not: offer.id },
+          status: 'pending',
+        },
+        data: { status: 'rejected' },
+      });
+
+      return updated;
+    });
+
+    // Notify requester
+    try {
+      const nq = (existing.normalizedQuery as Record<string, unknown>) || {};
+      const companyName = (nq.companyName as string) || 'a company';
+      const introducer = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+      const introducerName = introducer?.name || 'Someone';
+
+      const doneNotif = { type: 'intro_offered', title: `Intro done: ${companyName}`, body: `${introducerName} made an introduction for you to ${companyName}.` };
+      await prisma.notification.create({
+        data: {
+          userId: existing.requesterId,
+          ...doneNotif,
+          data: {
+            requestId: req.params.id,
+            companyName,
+            introducerId: userId,
+            introducerName,
+          },
+        },
+      });
+      sendNotificationEmail(existing.requesterId, doneNotif).catch(() => {});
+    } catch (notifErr) {
+      console.error('Failed to create intro_done notification:', notifErr);
+    }
+
+    res.json(result);
+  } catch (error: unknown) {
+    console.error('Mark done error:', error);
+    res.status(500).json({ error: 'Failed to mark request as done' });
+  }
+});
+
 // Delete request (owner only)
 router.delete('/:id', authMiddleware, async (req, res) => {
   try {

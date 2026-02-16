@@ -6784,6 +6784,15 @@ body {
   color: var(--accent-primary);
 }
 
+.u-req-action-btn--done {
+  border-color: rgba(52,211,153,0.3);
+  color: #34d399;
+}
+.u-req-action-btn--done:hover {
+  background: rgba(52,211,153,0.12);
+  border-color: rgba(52,211,153,0.5);
+}
+
 .u-req-action-btn--decline {
   color: #f87171;
   border-color: rgba(248,113,113,0.2);
@@ -6857,6 +6866,225 @@ body {
   text-align: center;
 }
 .u-req-picker-cancel:hover { color: var(--text-secondary); }
+
+/* Intro action flow */
+.u-intro-flow {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+
+.u-intro-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.u-intro-tag {
+  background: rgba(99,102,241,0.1);
+  border: 1px solid rgba(99,102,241,0.25);
+  color: #a5b4fc;
+  font-size: 0.7rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 99px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.u-intro-tag:hover {
+  background: rgba(99,102,241,0.2);
+  border-color: rgba(99,102,241,0.4);
+  color: #c7d2fe;
+}
+
+.u-intro-cancel {
+  background: none;
+  border: 1px solid rgba(255,255,255,0.08);
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 99px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.u-intro-cancel:hover {
+  color: var(--text-secondary);
+  border-color: rgba(255,255,255,0.15);
+}
+
+/* Intro contact picker */
+.u-intro-contact-pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.u-intro-contact-pick-label {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  width: 100%;
+  margin-bottom: 0.15rem;
+}
+
+.u-intro-contact-pick-item {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: var(--text-primary);
+  font-size: 0.7rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.u-intro-contact-pick-item:hover {
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.18);
+}
+
+.u-intro-contact-pick-title {
+  color: var(--text-muted);
+  font-size: 0.6rem;
+}
+
+/* Intro email composer */
+.u-intro-email {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.u-intro-email-recipients {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-bottom: 0.25rem;
+}
+
+.u-intro-email-recipient {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+}
+
+.u-intro-email-cc {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+}
+
+/* Toast notification */
+.u-toast {
+  position: fixed;
+  top: 1.2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.6rem 1.4rem;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  z-index: 9999;
+  animation: u-toast-in 0.25s ease-out, u-toast-out 0.3s ease-in 2.5s forwards;
+  pointer-events: none;
+}
+
+.u-toast--success {
+  background: rgba(52, 211, 153, 0.15);
+  border: 1px solid rgba(52, 211, 153, 0.3);
+  color: #34d399;
+}
+
+.u-toast--error {
+  background: rgba(248, 113, 113, 0.15);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  color: #f87171;
+}
+
+@keyframes u-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-12px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@keyframes u-toast-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.u-intro-email-label {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.u-intro-email-subject {
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.03);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.u-intro-email-subject:focus {
+  border-color: rgba(99,102,241,0.4);
+}
+
+.u-intro-email-body {
+  width: 100%;
+  padding: 0.5rem 0.55rem;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.03);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  font-family: inherit;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.u-intro-email-body:focus {
+  border-color: rgba(99,102,241,0.4);
+}
+
+.u-intro-email-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+}
+
+.u-intro-email-send {
+  flex: 1;
+  padding: 0.5rem 1rem;
+  background: #6366f1;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.u-intro-email-send:hover {
+  background: #4f46e5;
+}
+
+.u-intro-email-send:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 
 /* Decline form */
 .u-req-decline {

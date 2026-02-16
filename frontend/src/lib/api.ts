@@ -167,6 +167,10 @@ export const requestsApi = {
     request<{ success: boolean }>(`/api/requests/${id}`, {
       method: 'DELETE',
     }),
+  markDone: (id: string) =>
+    request<IntroRequestResponse>(`/api/requests/${id}/done`, {
+      method: 'PATCH',
+    }),
 };
 
 // Intro Offers

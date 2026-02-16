@@ -104,11 +104,12 @@ async function send(params: {
   subject: string;
   html: string;
   replyTo?: string;
+  cc?: string | string[];
 }): Promise<EmailResult> {
-  const { to, subject, html, replyTo } = params;
+  const { to, subject, html, replyTo, cc } = params;
 
   if (!resend) {
-    console.log(`[email][dev] To: ${Array.isArray(to) ? to.join(', ') : to} | Subject: ${subject}`);
+    console.log(`[email][dev] To: ${Array.isArray(to) ? to.join(', ') : to}${cc ? ` | CC: ${Array.isArray(cc) ? cc.join(', ') : cc}` : ''} | Subject: ${subject}`);
     return { success: true, id: 'dev-noop' };
   }
 
@@ -119,6 +120,7 @@ async function send(params: {
       subject,
       html,
       ...(replyTo ? { replyTo } : {}),
+      ...(cc ? { cc: Array.isArray(cc) ? cc : [cc] } : {}),
     });
 
     if (result.error) {
@@ -309,7 +311,7 @@ export async function sendIntroOfferEmail(params: {
   });
 }
 
-/** Double intro email — introducing two people to each other */
+/** Double intro email — introducing two people to each other (3-way thread) */
 export async function sendDoubleIntroEmail(params: {
   senderName: string;
   senderEmail: string;
@@ -335,21 +337,22 @@ export async function sendDoubleIntroEmail(params: {
       <p><span class="highlight">${requesterName}</span> &mdash; ${contactFirst} is at ${targetCompany}. I think you'll have a lot to talk about.</p>
     </div>
 
-    <p>I'll leave it to you both to take it from here. Feel free to reply-all or reach out to each other directly.</p>
+    <p>Feel free to reply all to continue the conversation right here in this thread.</p>
 
     <hr class="divider" />
-    <p class="muted">Intro made by ${senderName} via ${APP_NAME}. Both parties are CC'd on this email.</p>
+    <p class="muted">Sent from <a href="${FRONTEND_URL}" style="color: #6366f1; text-decoration: none; font-weight: 600;">${APP_NAME}</a> &mdash; warm intros through people you trust.</p>
   `, { preheader: `${senderFirst} just introduced ${requesterFirst} and ${contactFirst}.` });
 
   return send({
     to: [contactEmail, requesterEmail],
+    cc: senderEmail,
     subject: `${senderFirst} intro: ${requesterFirst} ↔ ${contactFirst} (${targetCompany})`,
     html,
     replyTo: senderEmail,
   });
 }
 
-/** Direct contact email — a message from one user to a contact */
+/** Direct contact email — a message from one user to a contact (2-way thread) */
 export async function sendContactEmail(params: {
   senderName: string;
   senderEmail: string;
@@ -359,23 +362,17 @@ export async function sendContactEmail(params: {
   body: string;
 }): Promise<EmailResult> {
   const { senderName, senderEmail, recipientEmail, recipientName, subject, body } = params;
-  const recipientFirst = recipientName.split(' ')[0];
-  const senderFirst = senderName.split(' ')[0];
 
   const html = baseLayout(`
-    <p>Hi ${recipientFirst},</p>
     <p>${body.replace(/\n/g, '<br/>')}</p>
 
-    <div style="margin-top: 24px;">
-      <a href="mailto:${senderEmail}?subject=Re: ${subject}" class="btn">Reply to ${senderFirst}</a>
-    </div>
-
     <hr class="divider" />
-    <p class="muted">Sent by ${senderName} via ${APP_NAME}. You can also reply directly to this email.</p>
+    <p class="muted">Sent from <a href="${FRONTEND_URL}" style="color: #6366f1; text-decoration: none; font-weight: 600;">${APP_NAME}</a> &mdash; warm intros through people you trust.</p>
   `, { preheader: `${senderName} sent you a message.` });
 
   return send({
     to: recipientEmail,
+    cc: senderEmail,
     subject,
     html,
     replyTo: senderEmail,
