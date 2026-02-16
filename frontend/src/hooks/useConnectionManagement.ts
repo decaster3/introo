@@ -2,9 +2,17 @@ import { useState, useEffect, useCallback } from 'react';
 import { API_BASE } from '../lib/api';
 import type { DirectConnection, ConnectionCompany } from '../types';
 
+export interface PendingInvite {
+  id: string;
+  email: string;
+  status: string;
+  createdAt: string;
+}
+
 export function useConnectionManagement(refreshNotifications: () => void) {
   const [connections, setConnections] = useState<DirectConnection[]>([]);
   const [connectionCompanies, setConnectionCompanies] = useState<ConnectionCompany[]>([]);
+  const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
   const [connectEmail, setConnectEmail] = useState('');
 
   const fetchConnectionsList = useCallback(async () => {
@@ -15,9 +23,18 @@ export function useConnectionManagement(refreshNotifications: () => void) {
     } catch (e) { console.error('Failed to fetch connections:', e); }
   }, []);
 
+  const fetchInvites = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/connections/invites`, { credentials: 'include' });
+      const data = await res.json();
+      if (Array.isArray(data)) setPendingInvites(data);
+    } catch (e) { console.error('Failed to fetch invites:', e); }
+  }, []);
+
   useEffect(() => {
     fetchConnectionsList();
-  }, [fetchConnectionsList]);
+    fetchInvites();
+  }, [fetchConnectionsList, fetchInvites]);
 
   // Fetch reach for accepted connections
   useEffect(() => {
@@ -65,9 +82,10 @@ export function useConnectionManagement(refreshNotifications: () => void) {
       }
       setConnectEmail('');
       fetchConnectionsList();
+      fetchInvites();
       refreshNotifications();
     } catch (e) { console.error('Failed to send connection:', e); }
-  }, [fetchConnectionsList, refreshNotifications]);
+  }, [fetchConnectionsList, fetchInvites, refreshNotifications]);
 
   const acceptConnection = useCallback(async (id: string) => {
     try {
@@ -92,10 +110,18 @@ export function useConnectionManagement(refreshNotifications: () => void) {
     } catch (e) { console.error('Failed to remove connection:', e); }
   }, [fetchConnectionsList]);
 
+  const cancelInvite = useCallback(async (id: string) => {
+    try {
+      await fetch(`${API_BASE}/api/connections/invites/${id}`, { method: 'DELETE', credentials: 'include' });
+      fetchInvites();
+    } catch (e) { console.error('Failed to cancel invite:', e); }
+  }, [fetchInvites]);
+
   return {
-    connections, connectionCompanies,
+    connections, connectionCompanies, pendingInvites,
     connectEmail, setConnectEmail,
     fetchConnectionsList,
     sendConnectionRequest, acceptConnection, rejectConnection, removeConnection,
+    cancelInvite,
   };
 }

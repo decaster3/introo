@@ -37,6 +37,7 @@ model User {
   receivedConnections DirectConnection[] @relation("ConnectionTo")
   notifications      Notification[]
   tags               Tag[]
+  pendingInvites     PendingInvite[]
 
   @@map("users")
 }
@@ -318,6 +319,21 @@ model DirectConnection {
   @@index([toUserId])
   @@index([status])
   @@map("direct_connections")
+}
+
+model PendingInvite {
+  id         String   @id @default(cuid())
+  fromUserId String
+  email      String
+  status     String   @default("pending") // pending, converted, cancelled
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  fromUser   User     @relation(fields: [fromUserId], references: [id], onDelete: Cascade)
+
+  @@unique([fromUserId, email])
+  @@index([email])
+  @@index([status])
+  @@map("pending_invites")
 }
 
 model Notification {

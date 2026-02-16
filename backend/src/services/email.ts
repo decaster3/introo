@@ -160,6 +160,41 @@ async function getUserEmail(userId: string): Promise<string | null> {
 
 // ─── Email templates ─────────────────────────────────────────────────────────
 
+/** Invite email — sent when someone invites a non-user to connect */
+export async function sendInviteEmail(params: {
+  senderName: string;
+  senderEmail: string;
+  recipientEmail: string;
+}): Promise<EmailResult> {
+  const { senderName, senderEmail, recipientEmail } = params;
+  const senderFirst = senderName.split(' ')[0];
+
+  const html = baseLayout(`
+    <h1>${senderFirst} wants to connect with you</h1>
+    <p><span class="highlight">${senderName}</span> (${senderEmail}) invited you to join their professional network on ${APP_NAME}.</p>
+
+    <div class="callout">
+      <p><strong>What is ${APP_NAME}?</strong></p>
+      <p style="margin-top: 8px;">${APP_NAME} turns your calendar into a searchable map of your professional network. Connect your Google Calendar and instantly see every person you've met with &mdash; enriched with company, role, and LinkedIn data.</p>
+    </div>
+
+    <p>When you join, you and ${senderFirst} will be able to see each other's networks and help each other with warm introductions.</p>
+
+    <div style="margin-top: 24px;">
+      <a href="${FRONTEND_URL}" class="btn">Join ${APP_NAME}</a>
+    </div>
+
+    <hr class="divider" />
+    <p class="muted">This invitation was sent by ${senderName} via ${APP_NAME}. If you don't know this person, you can safely ignore this email.</p>
+  `, { preheader: `${senderName} invited you to connect on ${APP_NAME} — see who you both know.` });
+
+  return send({
+    to: recipientEmail,
+    subject: `${senderFirst} invited you to ${APP_NAME}`,
+    html,
+  });
+}
+
 /** Welcome email — sent after first signup */
 export async function sendWelcomeEmail(user: { id: string; email: string; name: string }): Promise<EmailResult> {
   const firstName = user.name.split(' ')[0] || 'there';

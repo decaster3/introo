@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
-import { sendNotificationEmail } from '../services/email.js';
+import { sendNotificationEmail, sendInviteEmail } from '../services/email.js';
 import prisma from '../lib/prisma.js';
 
 const router = Router();
@@ -71,7 +71,38 @@ router.post('/', async (req, res) => {
       }
     }
     if (!targetUser) {
-      res.status(404).json({ error: 'User not found. They need to sign up first.' });
+      // User not on the platform — create a pending invite and send an invite email
+      const sender = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true } });
+
+      // Check if already invited
+      const existingInvite = await prisma.pendingInvite.findUnique({
+        where: { fromUserId_email: { fromUserId: userId, email: normalizedEmail } },
+      });
+      if (existingInvite && existingInvite.status === 'pending') {
+        res.status(409).json({ error: 'Invitation already sent to this email' });
+        return;
+      }
+
+      // Create or re-create the invite
+      const invite = await prisma.pendingInvite.upsert({
+        where: { fromUserId_email: { fromUserId: userId, email: normalizedEmail } },
+        update: { status: 'pending' },
+        create: { fromUserId: userId, email: normalizedEmail },
+      });
+
+      // Send invite email (non-blocking)
+      sendInviteEmail({
+        senderName: sender?.name || 'Someone',
+        senderEmail: sender?.email || '',
+        recipientEmail: normalizedEmail,
+      }).catch(err => console.error('Invite email error:', err));
+
+      res.json({
+        id: invite.id,
+        status: 'invited',
+        peer: { id: null, name: normalizedEmail.split('@')[0], email: normalizedEmail, avatar: null },
+        invited: true,
+      });
       return;
     }
 
@@ -379,6 +410,47 @@ router.get('/:id/reach', async (req, res) => {
   } catch (error: any) {
     console.error('Connection reach error:', error.message);
     res.status(500).json({ error: 'Failed to fetch connection reach' });
+  }
+});
+
+// ─── List pending invites (emails not yet on platform) ───────────────────────
+
+router.get('/invites', async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+
+    const invites = await prisma.pendingInvite.findMany({
+      where: { fromUserId: userId, status: 'pending' },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, email: true, status: true, createdAt: true },
+    });
+
+    res.json(invites);
+  } catch (error: any) {
+    console.error('List invites error:', error.message);
+    res.status(500).json({ error: 'Failed to list invites' });
+  }
+});
+
+// ─── Cancel a pending invite ─────────────────────────────────────────────────
+
+router.delete('/invites/:id', async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+
+    const invite = await prisma.pendingInvite.findFirst({
+      where: { id: req.params.id, fromUserId: userId },
+    });
+    if (!invite) {
+      res.status(404).json({ error: 'Invite not found' });
+      return;
+    }
+
+    await prisma.pendingInvite.delete({ where: { id: invite.id } });
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Cancel invite error:', error.message);
+    res.status(500).json({ error: 'Failed to cancel invite' });
   }
 });
 

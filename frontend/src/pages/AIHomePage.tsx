@@ -146,9 +146,10 @@ export function AIHomePage() {
 
   // Connection management (hook)
   const {
-    connections, connectionCompanies,
+    connections, connectionCompanies, pendingInvites,
     connectEmail, setConnectEmail,
     sendConnectionRequest, acceptConnection, rejectConnection, removeConnection,
+    cancelInvite,
   } = useConnectionManagement(refreshNotifications);
 
   // Calendar state
@@ -3764,8 +3765,8 @@ export function AIHomePage() {
                     {connections.filter(c => c.status === 'accepted').length === 0 && <div className="u-panel-spaces-empty">No connections yet</div>}
                   </div>
 
-                  {/* Pending requests */}
-                  {connections.filter(c => c.status === 'pending').length > 0 && (
+                  {/* Pending requests + Invited (not yet signed up) */}
+                  {(connections.filter(c => c.status === 'pending').length > 0 || pendingInvites.length > 0) && (
                     <div style={{ marginTop: '0.5rem' }}>
                       <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.4)', display: 'block', marginBottom: '0.35rem' }}>Pending</span>
                       {connections.filter(c => c.status === 'pending').map(c => (
@@ -3781,6 +3782,16 @@ export function AIHomePage() {
                               <button className="u-notif-reject-btn" style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }} onClick={() => rejectConnection(c.id)}>✕</button>
                             </div>
                           )}
+                        </div>
+                      ))}
+                      {pendingInvites.map(inv => (
+                        <div key={inv.id} className="u-panel-space-card" style={{ opacity: 0.5 }}>
+                          <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', flexShrink: 0, color: 'rgba(255,255,255,0.4)' }}>✉</div>
+                          <div className="u-panel-space-card-info">
+                            <span className="u-panel-space-card-name">{inv.email}</span>
+                            <span className="u-panel-space-card-stats">Invited — not yet signed up</span>
+                          </div>
+                          <button className="u-notif-reject-btn" style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem', flexShrink: 0 }} onClick={() => cancelInvite(inv.id)} title="Cancel invite">✕</button>
                         </div>
                       ))}
                     </div>

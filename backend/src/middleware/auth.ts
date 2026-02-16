@@ -140,6 +140,50 @@ export function configurePassport() {
             },
           });
 
+          // Convert pending invites into real connection requests
+          try {
+            const pendingInvites = await prisma.pendingInvite.findMany({
+              where: { email: email.toLowerCase(), status: 'pending' },
+              include: { fromUser: { select: { id: true, name: true } } },
+            });
+            for (const invite of pendingInvites) {
+              // Create a real connection request (inviter → new user)
+              const existing = await prisma.directConnection.findFirst({
+                where: {
+                  OR: [
+                    { fromUserId: invite.fromUserId, toUserId: user.id },
+                    { fromUserId: user.id, toUserId: invite.fromUserId },
+                  ],
+                },
+              });
+              if (!existing) {
+                const conn = await prisma.directConnection.create({
+                  data: { fromUserId: invite.fromUserId, toUserId: user.id },
+                });
+                // Notify the new user
+                await prisma.notification.create({
+                  data: {
+                    userId: user.id,
+                    type: 'connection_request',
+                    title: `${invite.fromUser.name || 'Someone'} wants to connect`,
+                    body: 'They invited you to join. Accept to share your networks with each other.',
+                    data: { connectionId: conn.id, fromUserId: invite.fromUserId, fromUserName: invite.fromUser.name },
+                  },
+                });
+              }
+              // Mark invite as converted
+              await prisma.pendingInvite.update({
+                where: { id: invite.id },
+                data: { status: 'converted' },
+              });
+            }
+            if (pendingInvites.length > 0) {
+              console.log(`[auth] Converted ${pendingInvites.length} pending invite(s) for ${email}`);
+            }
+          } catch (err) {
+            console.error('[auth] Failed to convert pending invites:', err);
+          }
+
           return done(null, user);
         } catch (error) {
           return done(error as Error);
