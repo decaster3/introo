@@ -3,6 +3,8 @@ import { Navigate } from 'react-router-dom';
 import { useAppState, useAppActions } from '../store';
 import { API_BASE, calendarApi, requestsApi, notificationsApi, offersApi, tagsApi, emailApi, type CalendarAccountInfo } from '../lib/api';
 import { calculateStrength, type SpaceCompany, type DisplayContact, type MergedCompany, type HuntFilters, type Hunt, type InlinePanel } from '../types';
+import { lazy, Suspense } from 'react';
+const NetworkGraph = lazy(() => import('../components/NetworkGraph'));
 import { PersonAvatar, CompanyLogo, OnboardingTour } from '../components';
 import { ProfilePanel, SettingsPanel, NotificationsPanel } from '../components/panels';
 import { useProfile } from '../hooks/useProfile';
@@ -78,8 +80,8 @@ export function AIHomePage() {
   const [spaceFilter, setSpaceFilter] = useState<string>('all');
   const [connectionFilter, setConnectionFilter] = useState<string>('all');
   const [sortBy] = useState<'relevance' | 'contacts' | 'name' | 'strength'>('relevance');
-  const [viewMode, setViewMode] = useState<'grid' | 'table'>(() => {
-    try { const v = localStorage.getItem('introo_view_mode'); return v === 'table' ? 'table' : 'grid'; } catch { return 'grid'; }
+  const [viewMode, setViewMode] = useState<'grid' | 'table' | 'graph'>(() => {
+    try { const v = localStorage.getItem('introo_view_mode'); return v === 'table' ? 'table' : v === 'graph' ? 'graph' : 'grid'; } catch { return 'grid'; }
   });
   const [gridPage, setGridPage] = useState(0);
   const GRID_PAGE_SIZE = 50;
@@ -87,7 +89,7 @@ export function AIHomePage() {
   const [expandedDomain, setExpandedDomain] = useState<string | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [inlinePanel, setInlinePanel] = useState<InlinePanel | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 768);
   const [introRequestText, setIntroRequestText] = useState('');
   const [introRequestSending, setIntroRequestSending] = useState(false);
   const [introRequestSent, setIntroRequestSent] = useState(false);
@@ -2285,22 +2287,24 @@ export function AIHomePage() {
                 {activeFilterCount > 0 && <span className="u-filter-toggle-badge">{activeFilterCount}</span>}
               </button>
             )}
-            <div className="u-fast-group">
-              {([
-                { key: 'all', label: 'All', count: stats.total },
-                { key: 'mine', label: 'Mine', count: stats.myCompanies },
-                { key: 'spaces', label: 'Network', count: stats.spaceCompanies },
-              ] as const).map(f => (
-                <button
-                  key={f.key}
-                  className={`u-ff-chip ${sourceFilter === f.key ? 'active' : ''} u-ff-chip--${f.key}`}
-                  onClick={() => setSourceFilter(f.key)}
-                >
-                  <span>{f.label}</span>
-                  <span className="u-ff-count">{f.count}</span>
-                </button>
-              ))}
-            </div>
+            {!sidebarOpen && (
+              <div className="u-fast-group">
+                {([
+                  { key: 'all', label: 'All', count: stats.total },
+                  { key: 'mine', label: 'Mine', count: stats.myCompanies },
+                  { key: 'spaces', label: 'Network', count: stats.spaceCompanies },
+                ] as const).map(f => (
+                  <button
+                    key={f.key}
+                    className={`u-ff-chip ${sourceFilter === f.key ? 'active' : ''} u-ff-chip--${f.key}`}
+                    onClick={() => setSourceFilter(f.key)}
+                  >
+                    <span>{f.label}</span>
+                    <span className="u-ff-count">{f.count}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* ── AI explanation banner ─────────────────────────── */}
@@ -2335,6 +2339,9 @@ export function AIHomePage() {
                 </button>
                 <button className={`u-view-btn ${viewMode === 'table' ? 'active' : ''}`} onClick={() => { setViewMode('table'); localStorage.setItem('introo_view_mode', 'table'); }} title="Table view">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                </button>
+                <button className={`u-view-btn ${viewMode === 'graph' ? 'active' : ''}`} onClick={() => { setViewMode('graph'); localStorage.setItem('introo_view_mode', 'graph'); }} title="Graph view">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="12" cy="19" r="2"/><circle cx="12" cy="12" r="2"/><line x1="7" y1="5" x2="10" y2="12"/><line x1="17" y1="5" x2="14" y2="12"/><line x1="12" y1="14" x2="12" y2="17"/></svg>
                 </button>
               </div>
             </div>
@@ -2417,7 +2424,15 @@ export function AIHomePage() {
           )}
 
           {/* ── Company Grid ──────────────────────────────────── */}
-          <div className={`u-grid ${viewMode === 'table' ? 'u-grid--table' : ''}`}>
+          {viewMode === 'graph' && !loading && !storeLoading && (
+            <Suspense fallback={<div className="u-network-graph" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><span style={{ color: 'rgba(255,255,255,0.4)' }}>Loading graph...</span></div>}>
+              <NetworkGraph
+                companies={filteredCompanies}
+                onCompanyClick={(company) => setInlinePanel({ type: 'company', company })}
+              />
+            </Suspense>
+          )}
+          <div className={`u-grid ${viewMode === 'table' ? 'u-grid--table' : ''} ${viewMode === 'graph' ? 'u-grid--hidden' : ''}`}>
             {loading || storeLoading ? (
               <div className="u-grid-loading-rich">
                 <div className="u-loading-orb">
@@ -2926,19 +2941,12 @@ export function AIHomePage() {
                       ✨ Request Intro
                     </button>
                   )}
-                  <button
+                  <a
                     className="u-action-btn"
-                    onClick={() => {
-                      emailApi.sendContact({
-                        recipientEmail: c.email,
-                        recipientName: c.name || c.email.split('@')[0],
-                        subject: `Hi ${c.name || 'there'}`,
-                        body: `Hi ${c.name || 'there'},\n\nI wanted to reach out and connect.\n\nBest,\n${currentUser?.name || ''}`,
-                      }).then(() => alert('Email sent!')).catch(() => alert('Failed to send email'));
-                    }}
+                    href={`mailto:${c.email}?subject=${encodeURIComponent(`Hi ${c.name || 'there'}`)}&body=${encodeURIComponent(`Hi ${c.name || 'there'},\n\nI wanted to reach out and connect.\n\nBest,\n${currentUser?.name || ''}`)}`}
                   >
                     ✉ Email
-                  </button>
+                  </a>
                 </div>
               </div>
               );
