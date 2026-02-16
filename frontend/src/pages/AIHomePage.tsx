@@ -1133,16 +1133,26 @@ export function AIHomePage() {
   }, [inlinePanel]);
 
   // #7 Hunt prompt: show after meaningful filters are applied (if no hunts yet)
-  // Triggers when: 2+ filters active, OR any "specific" filter like industry/size/keywords/funding/tags
+  // Only triggers when at least one "specific" sidebar filter is set (industry, size, keywords, funding, location, tags, etc.)
+  // Simple top-level toggles (source, strength, connection) alone are not enough.
   useEffect(() => {
     if (huntPromptDismissed || hunts.length > 0 || showHuntPrompt || selectedHunt) return;
     if (localStorage.getItem('introo_hunt_prompt_dismissed')) return;
     const sf = sidebarFilters;
-    const hasSpecificFilter = sf.aiKeywords.length > 0 || sf.employeeRanges.length > 0 ||
-      sf.categories.length > 0 || sf.fundingRounds.length > 0 || sf.technologies.length > 0 ||
-      sf.revenueRanges.length > 0 || sf.country || sf.city || tagFilter.length > 0 ||
-      sf.connectedYears.length > 0 || sf.connectedMonths.length > 0;
-    const shouldShow = hasSpecificFilter || activeFilterCount >= 2;
+    const specificFilterCount =
+      (sf.aiKeywords.length > 0 ? 1 : 0) +
+      (sf.employeeRanges.length > 0 ? 1 : 0) +
+      (sf.categories.length > 0 ? 1 : 0) +
+      (sf.fundingRounds.length > 0 ? 1 : 0) +
+      (sf.technologies.length > 0 ? 1 : 0) +
+      (sf.revenueRanges.length > 0 ? 1 : 0) +
+      (sf.country ? 1 : 0) +
+      (sf.city ? 1 : 0) +
+      (tagFilter.length > 0 ? 1 : 0) +
+      (sf.connectedYears.length > 0 || sf.connectedMonths.length > 0 ? 1 : 0) +
+      (sf.foundedFrom ? 1 : 0) +
+      (sf.foundedTo ? 1 : 0);
+    const shouldShow = specificFilterCount >= 2 || (specificFilterCount >= 1 && activeFilterCount >= 3);
     if (shouldShow) {
       const t = setTimeout(() => setShowHuntPrompt(true), 1500);
       return () => clearTimeout(t);
@@ -1651,7 +1661,7 @@ export function AIHomePage() {
 
             {/* ── Tags filter ── */}
             <SidebarSection id="tags" icon="🏷" title="Tags">
-              {allTags.length > 0 ? (
+              {allTags.length > 0 && (
                 <div className="sb-chips">
                   {allTags.map(t => {
                     const color = getTagColor(t);
@@ -1665,6 +1675,7 @@ export function AIHomePage() {
                         onClick={() => { setTagFilter(prev =>
                           prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]
                         ); setGridPage(0); }}
+                        onContextMenu={e => { e.preventDefault(); deleteTagDef(t); }}
                       >
                         <span className="sb-tag-dot" style={{ background: color.text }} />
                         {t} <span className="sb-chip-count">{count}</span>
@@ -1672,8 +1683,17 @@ export function AIHomePage() {
                     );
                   })}
                 </div>
-              ) : (
-                <p className="sb-empty-hint">Tag companies to organize and filter them. Hover any card and click the tag icon to start.</p>
+              )}
+              <form className="sb-tag-add-form" onSubmit={e => {
+                e.preventDefault();
+                const input = e.currentTarget.querySelector('input') as HTMLInputElement;
+                const val = input?.value.trim();
+                if (val) { createTag(val); input.value = ''; }
+              }}>
+                <input className="sb-input sb-tag-add-input" placeholder="+ Add tag..." maxLength={30} />
+              </form>
+              {allTags.length === 0 && (
+                <p className="sb-empty-hint">Type a name above to create your first tag.</p>
               )}
             </SidebarSection>
 
@@ -2313,7 +2333,7 @@ export function AIHomePage() {
           {/* ── Results bar ────────────────────────────────────── */}
           <div className="u-results-bar">
             <span className="u-results-count">
-              <strong>{filteredCompanies.length}</strong> companies
+              <strong>{filteredCompanies.length}</strong> companies · <strong>{filteredCompanies.reduce((sum, c) => sum + c.myContacts.length + c.spaceContacts.length, 0)}</strong> people
               {filteredCompanies.length !== mergedCompanies.length && (
                 <span className="u-results-of"> of {mergedCompanies.length}</span>
               )}

@@ -136,8 +136,35 @@ router.get('/:id', async (req, res) => {
       return;
     }
 
+    // Requests are private: each member only sees their own requests,
+    // requests they've offered on, or requests they were notified about
+    // (i.e. they have contacts at the target company). Owner sees all.
+    const isOwner = space.ownerId === userId;
+    if (!isOwner) {
+      // Find request IDs this user was notified about (they're a potential connector)
+      const myNotifications = await prisma.notification.findMany({
+        where: {
+          userId,
+          type: 'intro_request',
+          data: { path: ['spaceId'], equals: id },
+        },
+        select: { data: true },
+      });
+      const notifiedRequestIds = new Set(
+        myNotifications
+          .map(n => (n.data as Record<string, unknown>)?.requestId as string)
+          .filter(Boolean)
+      );
+
+      space.requests = space.requests.filter(r =>
+        r.requesterId === userId ||
+        r.offers.some(o => o.introducerId === userId) ||
+        notifiedRequestIds.has(r.id)
+      );
+    }
+
     // If user is owner, also include pending members count
-    if (space.ownerId === userId) {
+    if (isOwner) {
       const pendingCount = await prisma.spaceMember.count({
         where: { spaceId: id, status: 'pending' },
       });

@@ -185,7 +185,7 @@ export async function sendInviteEmail(params: {
   const senderFirst = escapeHtml(senderName.split(' ')[0]);
 
   const html = baseLayout(`
-    <h1>${senderFirst} wants to connect with you</h1>
+    <h1>${safeSenderName} wants to connect with you</h1>
     <p><span class="highlight">${safeSenderName}</span> (${safeSenderEmail}) invited you to join their professional network on ${APP_NAME}.</p>
 
     <div class="callout">
@@ -205,7 +205,7 @@ export async function sendInviteEmail(params: {
 
   return send({
     to: recipientEmail,
-    subject: `${senderFirst} invited you to ${APP_NAME}`,
+    subject: `${safeSenderName} invited you to ${APP_NAME}`,
     html,
   });
 }
@@ -226,7 +226,7 @@ export async function sendSpaceInviteEmail(params: {
   const safeSpaceEmoji = escapeHtml(spaceEmoji);
 
   const html = baseLayout(`
-    <h1>${senderFirst} invited you to ${safeSpaceEmoji} ${safeSpaceName}</h1>
+    <h1>${safeSenderName} invited you to ${safeSpaceEmoji} ${safeSpaceName}</h1>
     <p><span class="highlight">${safeSenderName}</span> (${safeSenderEmail}) wants you to join their space <span class="highlight">${safeSpaceEmoji} ${safeSpaceName}</span> on ${APP_NAME}.</p>
 
     <div class="callout">
@@ -246,7 +246,7 @@ export async function sendSpaceInviteEmail(params: {
 
   return send({
     to: recipientEmail,
-    subject: `${senderFirst} invited you to ${safeSpaceEmoji} ${safeSpaceName} on ${APP_NAME}`,
+    subject: `${safeSenderName} invited you to ${safeSpaceEmoji} ${safeSpaceName} on ${APP_NAME}`,
     html,
   });
 }
@@ -308,7 +308,7 @@ export async function sendIntroOfferEmail(params: {
     : `They have a connection at ${safeTargetCompany} and offered to make an introduction for you.`;
 
   const html = baseLayout(`
-    <h1>Good news, ${recipientFirst}!</h1>
+    <h1>${safeSenderName} can intro you to ${safeTargetCompany}</h1>
     <p><span class="highlight">${safeSenderName}</span> saw that you're looking for an intro to someone at <span class="highlight">${safeTargetCompany}</span>.</p>
     <p>${connectionLine}</p>
 
@@ -326,7 +326,7 @@ export async function sendIntroOfferEmail(params: {
 
   return send({
     to: recipientEmail,
-    subject: `${senderFirst} can intro you to someone at ${safeTargetCompany}`,
+    subject: `${safeSenderName} can intro you to someone at ${safeTargetCompany}`,
     html,
     replyTo: senderEmail,
   });
@@ -352,9 +352,9 @@ export async function sendDoubleIntroEmail(params: {
   const safeTargetCompany = escapeHtml(targetCompany);
 
   const html = baseLayout(`
-    <h1>Meet each other!</h1>
+    <h1>${safeSenderName} introduced you</h1>
     <p>Hi ${contactFirst} and ${requesterFirst},</p>
-    <p>I'd love to connect you two. Here's a bit of context:</p>
+    <p>${safeSenderName} would love to connect you two. Here's a bit of context:</p>
 
     <div class="callout">
       <p><span class="highlight">${safeContactName}</span> &mdash; ${requesterFirst} has been looking to connect with someone at ${safeTargetCompany}, and I thought you'd be the perfect person.</p>
@@ -371,7 +371,7 @@ export async function sendDoubleIntroEmail(params: {
   return send({
     to: [contactEmail, requesterEmail],
     cc: senderEmail,
-    subject: `${senderFirst} intro: ${requesterFirst} ↔ ${contactFirst} (${safeTargetCompany})`,
+    subject: `${safeSenderName} intro: ${requesterFirst} ↔ ${contactFirst} (${safeTargetCompany})`,
     html,
     replyTo: senderEmail,
   });
@@ -390,8 +390,8 @@ export async function sendContactEmail(params: {
 
   const safeBody = escapeHtml(body).replace(/\n/g, '<br/>');
   const safeSenderName = escapeHtml(senderName);
-
   const html = baseLayout(`
+    <p><strong>${safeSenderName}</strong> sent you a message:</p>
     <p>${safeBody}</p>
 
     <hr class="divider" />
