@@ -94,6 +94,7 @@ export function AIHomePage() {
   const [introSelectedThrough, setIntroSelectedThrough] = useState<string | null>(null);
   const [introExpandedOption, setIntroExpandedOption] = useState<string | null>(null);
   const [introTipOpen, setIntroTipOpen] = useState(false);
+  const [connMenuOpen, setConnMenuOpen] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
   const [notifications, setNotifications] = useState<Awaited<ReturnType<typeof notificationsApi.getAll>>>([]);
   const [myIntroRequests, setMyIntroRequests] = useState<Awaited<ReturnType<typeof requestsApi.getMine>>>([]);
@@ -170,7 +171,7 @@ export function AIHomePage() {
   // Sidebar filter section open/closed state
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     source: true,
-    strength: true,
+    strength: false,
     description: false,
     employees: false,
     location: false,
@@ -2337,13 +2338,13 @@ export function AIHomePage() {
               {filteredCompanies.length !== mergedCompanies.length && (
                 <span className="u-results-of"> of {mergedCompanies.length}</span>
               )}
-            </span>
-            <div className="u-results-right">
               {activeFilterCount > 0 && (
                 <button className="u-filters-clear" onClick={clearAllFilters}>
                   Clear {activeFilterCount} filter{activeFilterCount > 1 ? 's' : ''}
                 </button>
               )}
+            </span>
+            <div className="u-results-right">
               <div className="u-view-toggle">
                 <button className={`u-view-btn ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => { setViewMode('grid'); localStorage.setItem('introo_view_mode', 'grid'); }} title="Grid view">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
@@ -3975,8 +3976,23 @@ export function AIHomePage() {
                 <button className="u-panel-breadcrumb" onClick={() => setInlinePanel({ type: 'network-manage' })}>← Network</button>
                 <div className="u-panel-space-hero">
                   <PersonAvatar email={conn.peer.email} name={conn.peer.name} avatarUrl={conn.peer.avatar} size={48} />
-                  <div>
-                    <h2>{conn.peer.name}</h2>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="u-panel-name-row">
+                      <h2>{conn.peer.name}</h2>
+                      <div className="u-panel-top-menu-wrap">
+                        <button className="u-panel-top-menu-btn" onClick={() => setConnMenuOpen(!connMenuOpen)}>⋯</button>
+                        {connMenuOpen && (
+                          <>
+                            <div className="u-panel-top-menu-overlay" onClick={() => setConnMenuOpen(false)} />
+                            <div className="u-panel-top-menu-dropdown">
+                              <button className="u-panel-top-menu-item u-panel-top-menu-item--danger" onClick={() => { setConnMenuOpen(false); removeConnection(conn.id); setInlinePanel({ type: 'network-manage' }); }}>
+                                Disconnect
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
                     <span className="u-panel-space-meta">{conn.peer.email}</span>
                   </div>
                 </div>
@@ -4248,11 +4264,6 @@ export function AIHomePage() {
                   </div>
                 )}
 
-                <div className="u-panel-actions">
-                  <button className="u-action-btn u-action-btn--danger" onClick={() => { removeConnection(conn.id); setInlinePanel({ type: 'network-manage' }); }}>
-                    Disconnect
-                  </button>
-                </div>
               </div>
               );
             })()}
@@ -4384,36 +4395,20 @@ export function AIHomePage() {
                     <h4 className="u-panel-section-h">Through</h4>
                     <div className="u-panel-intro-spaces">
                       {introOptions.map(opt => (
-                        <div key={opt.id} className="u-panel-intro-option-wrap">
-                          <div
-                            className={`u-panel-intro-space-row u-panel-intro-space-row--selectable ${selectedId === opt.id ? 'u-panel-intro-space-row--selected' : ''}`}
-                            onClick={() => setIntroSelectedThrough(opt.id)}
-                          >
-                            <div className="u-panel-intro-option-info">
-                              <span className="u-panel-intro-space-name">
-                                {opt.type === 'space' ? `${opt.emoji} ${opt.label}` : `👤 ${opt.label}`}
-                              </span>
-                              {opt.titles.length > 0 && (
-                                <span
-                                  className="u-panel-intro-option-titles"
-                                  onClick={e => { e.stopPropagation(); setIntroExpandedOption(introExpandedOption === opt.id ? null : opt.id); }}
-                                >
-                                  {opt.titles.slice(0, 3).join(', ')}{opt.titles.length > 3 ? ` +${opt.titles.length - 3}` : ''}
-                                  {opt.titles.length > 3 && <span className="u-panel-intro-option-expand">{introExpandedOption === opt.id ? '▲' : '▼'}</span>}
-                                </span>
-                              )}
-                            </div>
-                            <span className="u-panel-intro-space-count">
-                              {opt.count} {opt.count === 1 ? 'contact' : 'contacts'}
-                            </span>
-                          </div>
-                          {introExpandedOption === opt.id && opt.titles.length > 0 && (
-                            <div className="u-panel-intro-option-all-titles">
-                              {opt.titles.map((t, i) => (
-                                <span key={i} className="u-panel-intro-title-chip">{t}</span>
-                              ))}
-                            </div>
+                        <div
+                          key={opt.id}
+                          className={`u-panel-intro-space-row u-panel-intro-space-row--selectable ${selectedId === opt.id ? 'u-panel-intro-space-row--selected' : ''}`}
+                          onClick={() => setIntroSelectedThrough(opt.id)}
+                        >
+                          <span className="u-panel-intro-space-name">
+                            {opt.type === 'space' ? `${opt.emoji} ${opt.label}` : `👤 ${opt.label}`}
+                          </span>
+                          {opt.titles.length > 0 && (
+                            <span className="u-panel-intro-option-subtitle">Knows: {opt.titles.filter(Boolean).join(', ')}</span>
                           )}
+                          <span className="u-panel-intro-space-count">
+                            {opt.count} {opt.count === 1 ? 'contact' : 'contacts'}
+                          </span>
                         </div>
                       ))}
                     </div>
