@@ -189,9 +189,12 @@ router.get('/google/callback', async (req, res, next) => {
     enrichUserProfile(user.id).catch(() => {});
 
     // Send welcome email for new users (created within the last 60 seconds)
-    const isNewUser = user.createdAt && (Date.now() - new Date(user.createdAt).getTime()) < 60_000;
-    if (isNewUser) {
-      sendWelcomeEmail({ id: user.id, email: user.email, name: user.name }).catch(() => {});
+    const createdMs = user.createdAt ? Date.now() - new Date(user.createdAt).getTime() : null;
+    console.log(`[auth] User ${user.email}: createdAt=${user.createdAt}, age=${createdMs}ms, isNew=${createdMs !== null && createdMs < 60_000}`);
+    if (createdMs !== null && createdMs < 60_000) {
+      sendWelcomeEmail({ id: user.id, email: user.email, name: user.name })
+        .then(r => console.log(`[auth] Welcome email result:`, r))
+        .catch(err => console.error(`[auth] Welcome email error:`, err));
     }
 
     // Redirect to frontend home page
