@@ -3278,25 +3278,22 @@ export function AIHomePage() {
                 {isOwner && (
                   <div className="u-panel-section">
                     <h4 className="u-panel-section-h">Invite member</h4>
-                    <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
-                      <input
-                        id={`space-invite-${space.id}`}
-                        className="sb-input"
-                        placeholder="Invite anyone by email"
-                        style={{ flex: 1 }}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter' && e.currentTarget.value.trim()) {
-                            const input = e.currentTarget;
-                            inviteMemberToSpace(space.id, input.value);
-                            input.value = '';
-                          }
-                        }}
-                      />
-                      <button className="sb-space-action-btn primary" style={{ whiteSpace: 'nowrap', padding: '0.45rem 0.75rem' }} onClick={() => {
-                        const input = document.getElementById(`space-invite-${space.id}`) as HTMLInputElement;
-                        if (input?.value.trim()) { inviteMemberToSpace(space.id, input.value); input.value = ''; }
-                      }}>+ Invite</button>
-                    </div>
+                    <input
+                      id={`space-invite-${space.id}`}
+                      className="sb-input"
+                      placeholder="Invite anyone by email"
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && e.currentTarget.value.trim()) {
+                          const input = e.currentTarget;
+                          inviteMemberToSpace(space.id, input.value);
+                          input.value = '';
+                        }
+                      }}
+                    />
+                    <button className="sb-space-action-btn primary" style={{ marginTop: '0.35rem', width: '100%' }} onClick={() => {
+                      const input = document.getElementById(`space-invite-${space.id}`) as HTMLInputElement;
+                      if (input?.value.trim()) { inviteMemberToSpace(space.id, input.value); input.value = ''; }
+                    }}>+ Invite</button>
                     <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.3)', marginTop: '0.3rem', display: 'block', lineHeight: 1.4 }}>Works with anyone — if they're not on Introo yet, we'll send them an invite.</span>
                     {/* Pending invitations (existing users + email invites for non-users) */}
                     {((pendingMembers[space.id] || []).length > 0 || (spaceEmailInvites[space.id] || []).length > 0) && (
@@ -3815,18 +3812,15 @@ export function AIHomePage() {
                   )}
 
                   <div className="sb-space-form" style={{ marginTop: '0.5rem' }}>
-                    <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
-                      <input
-                        className="sb-input"
-                        placeholder="Invite anyone by email"
-                        style={{ flex: 1 }}
-                        value={connectEmail}
-                        onChange={e => setConnectEmail(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter' && connectEmail.trim()) { sendConnectionRequest(connectEmail); } }}
-                      />
-                      <button className="sb-space-action-btn primary" style={{ whiteSpace: 'nowrap', padding: '0.45rem 0.75rem' }} onClick={() => sendConnectionRequest(connectEmail)} disabled={!connectEmail.trim()}>+ Connect</button>
-                    </div>
-                    <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.3)', marginTop: '0.3rem', display: 'block', lineHeight: 1.4 }}>Works with anyone — if they're not on Introo yet, we'll send them an invite.</span>
+                    <input
+                      className="sb-input"
+                      placeholder="Invite anyone by email"
+                      value={connectEmail}
+                      onChange={e => setConnectEmail(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' && connectEmail.trim()) { sendConnectionRequest(connectEmail); } }}
+                    />
+                    <button className="sb-space-action-btn primary" style={{ marginTop: '0.35rem', width: '100%' }} onClick={() => sendConnectionRequest(connectEmail)} disabled={!connectEmail.trim()}>+ Connect</button>
+                    <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.3)', marginTop: '0.35rem', display: 'block', lineHeight: 1.4 }}>Works with anyone — if they're not on Introo yet, we'll send them an invite.</span>
                   </div>
                 </div>
               </div>
