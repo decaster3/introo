@@ -74,20 +74,18 @@ router.post('/', async (req, res) => {
       // User not on the platform — create a pending invite and send an invite email
       const sender = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true } });
 
-      // Check if already invited
-      const existingInvite = await prisma.pendingInvite.findUnique({
-        where: { fromUserId_email: { fromUserId: userId, email: normalizedEmail } },
+      // Check if already invited (1:1 connection, no spaceId)
+      const existingInvite = await prisma.pendingInvite.findFirst({
+        where: { fromUserId: userId, email: normalizedEmail, spaceId: null, status: 'pending' },
       });
-      if (existingInvite && existingInvite.status === 'pending') {
+      if (existingInvite) {
         res.status(409).json({ error: 'Invitation already sent to this email' });
         return;
       }
 
-      // Create or re-create the invite
-      const invite = await prisma.pendingInvite.upsert({
-        where: { fromUserId_email: { fromUserId: userId, email: normalizedEmail } },
-        update: { status: 'pending' },
-        create: { fromUserId: userId, email: normalizedEmail },
+      // Create the invite
+      const invite = await prisma.pendingInvite.create({
+        data: { fromUserId: userId, email: normalizedEmail },
       });
 
       // Send invite email (non-blocking)
@@ -420,7 +418,7 @@ router.get('/invites', async (req, res) => {
     const userId = (req as AuthenticatedRequest).user!.id;
 
     const invites = await prisma.pendingInvite.findMany({
-      where: { fromUserId: userId, status: 'pending' },
+      where: { fromUserId: userId, status: 'pending', spaceId: null },
       orderBy: { createdAt: 'desc' },
       select: { id: true, email: true, status: true, createdAt: true },
     });

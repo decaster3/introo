@@ -195,6 +195,43 @@ export async function sendInviteEmail(params: {
   });
 }
 
+/** Space invite email — sent when inviting a non-user to a space */
+export async function sendSpaceInviteEmail(params: {
+  senderName: string;
+  senderEmail: string;
+  recipientEmail: string;
+  spaceName: string;
+  spaceEmoji: string;
+}): Promise<EmailResult> {
+  const { senderName, senderEmail, recipientEmail, spaceName, spaceEmoji } = params;
+  const senderFirst = senderName.split(' ')[0];
+
+  const html = baseLayout(`
+    <h1>${senderFirst} invited you to ${spaceEmoji} ${spaceName}</h1>
+    <p><span class="highlight">${senderName}</span> (${senderEmail}) wants you to join their space <span class="highlight">${spaceEmoji} ${spaceName}</span> on ${APP_NAME}.</p>
+
+    <div class="callout">
+      <p><strong>What are Spaces?</strong></p>
+      <p style="margin-top: 8px;">Spaces let you pool your professional networks with trusted people. Members can see each other's contacts, discover shared connections, and make warm introductions.</p>
+    </div>
+
+    <p>Join ${APP_NAME} to accept the invitation and start collaborating with ${senderFirst}.</p>
+
+    <div style="margin-top: 24px;">
+      <a href="${FRONTEND_URL}" class="btn">Join ${APP_NAME}</a>
+    </div>
+
+    <hr class="divider" />
+    <p class="muted">This invitation was sent by ${senderName} via ${APP_NAME}. If you don't know this person, you can safely ignore this email.</p>
+  `, { preheader: `${senderName} invited you to the space "${spaceName}" on ${APP_NAME}.` });
+
+  return send({
+    to: recipientEmail,
+    subject: `${senderFirst} invited you to ${spaceEmoji} ${spaceName} on ${APP_NAME}`,
+    html,
+  });
+}
+
 /** Welcome email — sent after first signup */
 export async function sendWelcomeEmail(user: { id: string; email: string; name: string }): Promise<EmailResult> {
   const firstName = user.name.split(' ')[0] || 'there';

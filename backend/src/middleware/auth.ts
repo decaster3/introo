@@ -140,36 +140,59 @@ export function configurePassport() {
             },
           });
 
-          // Convert pending invites into real connection requests
+          // Convert pending invites into real connections / space memberships
           try {
             const pendingInvites = await prisma.pendingInvite.findMany({
               where: { email: email.toLowerCase(), status: 'pending' },
-              include: { fromUser: { select: { id: true, name: true } } },
+              include: {
+                fromUser: { select: { id: true, name: true } },
+                space: { select: { id: true, name: true, emoji: true } },
+              },
             });
             for (const invite of pendingInvites) {
-              // Create a real connection request (inviter → new user)
-              const existing = await prisma.directConnection.findFirst({
-                where: {
-                  OR: [
-                    { fromUserId: invite.fromUserId, toUserId: user.id },
-                    { fromUserId: user.id, toUserId: invite.fromUserId },
-                  ],
-                },
-              });
-              if (!existing) {
-                const conn = await prisma.directConnection.create({
-                  data: { fromUserId: invite.fromUserId, toUserId: user.id },
+              if (invite.spaceId && invite.space) {
+                // Space invite → create pending SpaceMember + notify
+                const existingMember = await prisma.spaceMember.findUnique({
+                  where: { spaceId_userId: { spaceId: invite.spaceId, userId: user.id } },
                 });
-                // Notify the new user
-                await prisma.notification.create({
-                  data: {
-                    userId: user.id,
-                    type: 'connection_request',
-                    title: `${invite.fromUser.name || 'Someone'} wants to connect`,
-                    body: 'They invited you to join. Accept to share your networks with each other.',
-                    data: { connectionId: conn.id, fromUserId: invite.fromUserId, fromUserName: invite.fromUser.name },
+                if (!existingMember) {
+                  await prisma.spaceMember.create({
+                    data: { spaceId: invite.spaceId, userId: user.id, role: 'member', status: 'pending' },
+                  });
+                  await prisma.notification.create({
+                    data: {
+                      userId: user.id,
+                      type: 'space_invited',
+                      title: `Invitation to ${invite.space.name}`,
+                      body: `${invite.fromUser.name || 'Someone'} invited you to join ${invite.space.emoji || ''} ${invite.space.name}.`,
+                      data: { spaceId: invite.spaceId, spaceName: invite.space.name, spaceEmoji: invite.space.emoji, inviterId: invite.fromUserId },
+                    },
+                  });
+                }
+              } else {
+                // 1:1 connection invite → create DirectConnection + notify
+                const existing = await prisma.directConnection.findFirst({
+                  where: {
+                    OR: [
+                      { fromUserId: invite.fromUserId, toUserId: user.id },
+                      { fromUserId: user.id, toUserId: invite.fromUserId },
+                    ],
                   },
                 });
+                if (!existing) {
+                  const conn = await prisma.directConnection.create({
+                    data: { fromUserId: invite.fromUserId, toUserId: user.id },
+                  });
+                  await prisma.notification.create({
+                    data: {
+                      userId: user.id,
+                      type: 'connection_request',
+                      title: `${invite.fromUser.name || 'Someone'} wants to connect`,
+                      body: 'They invited you to join. Accept to share your networks with each other.',
+                      data: { connectionId: conn.id, fromUserId: invite.fromUserId, fromUserName: invite.fromUser.name },
+                    },
+                  });
+                }
               }
               // Mark invite as converted
               await prisma.pendingInvite.update({

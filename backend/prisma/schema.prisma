@@ -72,9 +72,10 @@ model Space {
   ownerId     String
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
-  requests    IntroRequest[]
-  members     SpaceMember[]
-  owner       User           @relation("SpaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  requests       IntroRequest[]
+  members        SpaceMember[]
+  pendingInvites PendingInvite[]
+  owner          User           @relation("SpaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
 
   @@map("pods")
 }
@@ -325,14 +326,17 @@ model PendingInvite {
   id         String   @id @default(cuid())
   fromUserId String
   email      String
+  spaceId    String?
   status     String   @default("pending") // pending, converted, cancelled
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   fromUser   User     @relation(fields: [fromUserId], references: [id], onDelete: Cascade)
+  space      Space?   @relation(fields: [spaceId], references: [id], onDelete: Cascade)
 
-  @@unique([fromUserId, email])
+  @@index([fromUserId, email])
   @@index([email])
   @@index([status])
+  @@index([spaceId])
   @@map("pending_invites")
 }
 

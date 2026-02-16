@@ -2,6 +2,12 @@ import { useState, useEffect, useCallback } from 'react';
 import { API_BASE } from '../lib/api';
 import type { Space, PendingSpace, PendingMember } from '../types';
 
+export interface SpaceEmailInvite {
+  id: string;
+  email: string;
+  createdAt: string;
+}
+
 export function useSpaceManagement(
   currentUserId: string | undefined,
   refreshNotifications: () => void,
@@ -9,6 +15,7 @@ export function useSpaceManagement(
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [pendingSpaces, setPendingSpaces] = useState<PendingSpace[]>([]);
   const [pendingMembers, setPendingMembers] = useState<Record<string, PendingMember[]>>({});
+  const [spaceEmailInvites, setSpaceEmailInvites] = useState<Record<string, SpaceEmailInvite[]>>({});
   const [loading, setLoading] = useState(true);
   const [showCreateSpace, setShowCreateSpace] = useState(false);
   const [showJoinSpace, setShowJoinSpace] = useState(false);
@@ -40,19 +47,34 @@ export function useSpaceManagement(
 
         const ownedSpaces = spacesList.filter((s: Space) => s.ownerId === currentUserId);
         if (ownedSpaces.length > 0) {
-          const pendingResults = await Promise.all(
-            ownedSpaces.map((s: Space) =>
-              fetch(`${API_BASE}/api/spaces/${s.id}/pending`, { credentials: 'include' })
-                .then(r => r.ok ? r.json() : [])
-                .then(members => ({ spaceId: s.id, members: members as PendingMember[] }))
-                .catch(() => ({ spaceId: s.id, members: [] as PendingMember[] }))
-            )
-          );
+          const [pendingResults, emailInviteResults] = await Promise.all([
+            Promise.all(
+              ownedSpaces.map((s: Space) =>
+                fetch(`${API_BASE}/api/spaces/${s.id}/pending`, { credentials: 'include' })
+                  .then(r => r.ok ? r.json() : [])
+                  .then(members => ({ spaceId: s.id, members: members as PendingMember[] }))
+                  .catch(() => ({ spaceId: s.id, members: [] as PendingMember[] }))
+              )
+            ),
+            Promise.all(
+              ownedSpaces.map((s: Space) =>
+                fetch(`${API_BASE}/api/spaces/${s.id}/email-invites`, { credentials: 'include' })
+                  .then(r => r.ok ? r.json() : [])
+                  .then(invites => ({ spaceId: s.id, invites: invites as SpaceEmailInvite[] }))
+                  .catch(() => ({ spaceId: s.id, invites: [] as SpaceEmailInvite[] }))
+              )
+            ),
+          ]);
           const pm: Record<string, PendingMember[]> = {};
           pendingResults.forEach(r => { if (r.members.length > 0) pm[r.spaceId] = r.members; });
           setPendingMembers(pm);
+
+          const ei: Record<string, SpaceEmailInvite[]> = {};
+          emailInviteResults.forEach(r => { if (r.invites.length > 0) ei[r.spaceId] = r.invites; });
+          setSpaceEmailInvites(ei);
         } else {
           setPendingMembers({});
+          setSpaceEmailInvites({});
         }
       }
       if (Array.isArray(pendingData)) setPendingSpaces(pendingData);
@@ -128,13 +150,19 @@ export function useSpaceManagement(
   }, [fetchSpacesList]);
 
   const inviteMemberToSpace = useCallback(async (spaceId: string, email: string) => {
+    if (!email.trim()) return;
     try {
-      await fetch(`${API_BASE}/api/spaces/${spaceId}/members`, {
+      const res = await fetch(`${API_BASE}/api/spaces/${spaceId}/members`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ email }),
       });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to invite member');
+        return;
+      }
       fetchSpacesList();
     } catch (e) { console.error('Failed to invite member:', e); }
   }, [fetchSpacesList]);
@@ -186,8 +214,17 @@ export function useSpaceManagement(
     } catch (e) { console.error('Failed to reject space invite:', e); }
   }, [fetchSpacesList, refreshNotifications]);
 
+  const cancelSpaceEmailInvite = useCallback(async (spaceId: string, inviteId: string) => {
+    try {
+      await fetch(`${API_BASE}/api/spaces/${spaceId}/email-invites/${inviteId}`, {
+        method: 'DELETE', credentials: 'include',
+      });
+      fetchSpacesList();
+    } catch (e) { console.error('Failed to cancel space email invite:', e); }
+  }, [fetchSpacesList]);
+
   return {
-    spaces, pendingSpaces, pendingMembers, loading,
+    spaces, pendingSpaces, pendingMembers, spaceEmailInvites, loading,
     showCreateSpace, setShowCreateSpace,
     showJoinSpace, setShowJoinSpace,
     newSpaceName, setNewSpaceName,
@@ -199,5 +236,6 @@ export function useSpaceManagement(
     leaveSpace, inviteMemberToSpace,
     approveSpaceMember, rejectSpaceMember,
     acceptSpaceInvite, removeSpaceMember, rejectSpaceInvite,
+    cancelSpaceEmailInvite,
   };
 }

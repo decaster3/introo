@@ -130,7 +130,7 @@ export function AIHomePage() {
 
   // Space management (hook)
   const {
-    spaces, pendingSpaces, pendingMembers, loading,
+    spaces, pendingSpaces, pendingMembers, spaceEmailInvites, loading,
     showCreateSpace, setShowCreateSpace,
     showJoinSpace, setShowJoinSpace,
     newSpaceName, setNewSpaceName,
@@ -142,6 +142,7 @@ export function AIHomePage() {
     leaveSpace, inviteMemberToSpace,
     approveSpaceMember, rejectSpaceMember,
     acceptSpaceInvite, removeSpaceMember, rejectSpaceInvite,
+    cancelSpaceEmailInvite,
   } = useSpaceManagement(currentUser?.id, refreshNotifications);
 
   // Connection management (hook)
@@ -3280,7 +3281,7 @@ export function AIHomePage() {
                     <div style={{ display: 'flex', gap: '0.35rem' }}>
                       <input
                         className="sb-input"
-                        placeholder="Email address"
+                        placeholder="Invite anyone by email"
                         style={{ flex: 1 }}
                         onKeyDown={e => {
                           if (e.key === 'Enter') {
@@ -3291,8 +3292,9 @@ export function AIHomePage() {
                         }}
                       />
                     </div>
-                    {/* Pending invitations */}
-                    {(pendingMembers[space.id] || []).length > 0 && (
+                    <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.3)', marginTop: '0.3rem', display: 'block', lineHeight: 1.4 }}>Works with anyone — if they're not on Introo yet, we'll send them an invite.</span>
+                    {/* Pending invitations (existing users + email invites for non-users) */}
+                    {((pendingMembers[space.id] || []).length > 0 || (spaceEmailInvites[space.id] || []).length > 0) && (
                       <div style={{ marginTop: '0.5rem' }}>
                         <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.35)', display: 'block', marginBottom: '0.3rem' }}>Pending invitations</span>
                         {(pendingMembers[space.id] || []).map(m => (
@@ -3303,6 +3305,16 @@ export function AIHomePage() {
                               <span className="u-panel-contact-title">{m.user.email}</span>
                             </div>
                             <span className="u-panel-badge" style={{ background: 'rgba(251,191,36,0.15)', color: '#fbbf24', fontSize: '0.6rem' }}>invited</span>
+                          </div>
+                        ))}
+                        {(spaceEmailInvites[space.id] || []).map(inv => (
+                          <div key={inv.id} className="u-panel-contact-row" style={{ opacity: 0.5 }}>
+                            <div style={{ width: 24, height: 24, borderRadius: '50%', background: 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.65rem', flexShrink: 0, color: 'rgba(255,255,255,0.4)' }}>✉</div>
+                            <div className="u-panel-contact-info">
+                              <span className="u-panel-contact-name">{inv.email}</span>
+                              <span className="u-panel-contact-title">Not yet signed up</span>
+                            </div>
+                            <button className="u-notif-reject-btn" style={{ fontSize: '0.6rem', padding: '0.15rem 0.4rem', flexShrink: 0 }} onClick={() => cancelSpaceEmailInvite(space.id, inv.id)} title="Cancel invite">✕</button>
                           </div>
                         ))}
                       </div>

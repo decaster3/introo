@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
-import { sendNotificationEmail } from '../services/email.js';
+import { sendNotificationEmail, sendSpaceInviteEmail } from '../services/email.js';
 import prisma from '../lib/prisma.js';
 
 const router = Router();
@@ -625,7 +625,32 @@ router.post('/:id/members', async (req, res) => {
     }
 
     if (!userToAdd) {
-      res.status(404).json({ error: 'User not found with that email' });
+      // User not on platform — create a pending invite and send email
+      const inviter = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true } });
+
+      // Check if already invited to this space
+      const existingInvite = await prisma.pendingInvite.findFirst({
+        where: { fromUserId: userId, email: normalizedEmail, spaceId: id, status: 'pending' },
+      });
+      if (existingInvite) {
+        res.status(409).json({ error: 'Invitation already sent to this email' });
+        return;
+      }
+
+      await prisma.pendingInvite.create({
+        data: { fromUserId: userId, email: normalizedEmail, spaceId: id },
+      });
+
+      // Send space invite email
+      sendSpaceInviteEmail({
+        senderName: inviter?.name || 'Someone',
+        senderEmail: inviter?.email || '',
+        recipientEmail: normalizedEmail,
+        spaceName: space.name,
+        spaceEmoji: space.emoji || '',
+      }).catch(err => console.error('Space invite email error:', err));
+
+      res.json({ success: true, message: 'Invitation email sent', invited: true, email: normalizedEmail });
       return;
     }
 
@@ -998,6 +1023,78 @@ router.get('/:id/reach', async (req, res) => {
   } catch (error: unknown) {
     console.error('Error fetching space reach:', error);
     res.status(500).json({ error: 'Failed to fetch space reach' });
+  }
+});
+
+// ─── List pending email invites for a space (non-users) ──────────────────────
+
+router.get('/:id/email-invites', async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+    const { id } = req.params;
+
+    // Check if user is owner/admin
+    const space = await prisma.space.findFirst({
+      where: {
+        id,
+        OR: [
+          { ownerId: userId },
+          { members: { some: { userId, role: { in: ['owner', 'admin'] } } } },
+        ],
+      },
+    });
+    if (!space) {
+      res.status(404).json({ error: 'Space not found or insufficient permissions' });
+      return;
+    }
+
+    const invites = await prisma.pendingInvite.findMany({
+      where: { spaceId: id, status: 'pending' },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, email: true, createdAt: true },
+    });
+
+    res.json(invites);
+  } catch (error: unknown) {
+    console.error('Error fetching email invites:', error);
+    res.status(500).json({ error: 'Failed to fetch email invites' });
+  }
+});
+
+// ─── Cancel a pending email invite for a space ───────────────────────────────
+
+router.delete('/:id/email-invites/:inviteId', async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+    const { id, inviteId } = req.params;
+
+    const space = await prisma.space.findFirst({
+      where: {
+        id,
+        OR: [
+          { ownerId: userId },
+          { members: { some: { userId, role: { in: ['owner', 'admin'] } } } },
+        ],
+      },
+    });
+    if (!space) {
+      res.status(404).json({ error: 'Space not found or insufficient permissions' });
+      return;
+    }
+
+    const invite = await prisma.pendingInvite.findFirst({
+      where: { id: inviteId, spaceId: id },
+    });
+    if (!invite) {
+      res.status(404).json({ error: 'Invite not found' });
+      return;
+    }
+
+    await prisma.pendingInvite.delete({ where: { id: inviteId } });
+    res.json({ success: true });
+  } catch (error: unknown) {
+    console.error('Error cancelling email invite:', error);
+    res.status(500).json({ error: 'Failed to cancel invite' });
   }
 });
 
