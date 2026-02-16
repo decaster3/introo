@@ -3,7 +3,7 @@ import passport from 'passport';
 import { google } from 'googleapis';
 import { generateToken, verifyToken, authMiddleware, encryptToken, invalidateUserCache, AuthenticatedRequest } from '../middleware/auth.js';
 import { cookieConfig } from '../middleware/security.js';
-// import { sendWelcomeEmail } from '../services/email.js';
+import { sendWelcomeEmail } from '../services/email.js';
 import prisma from '../lib/prisma.js';
 import { enrichUserProfile } from '../services/apollo.js';
 
@@ -188,11 +188,11 @@ router.get('/google/callback', async (req, res, next) => {
     // Enrich user profile from Apollo in the background (non-blocking)
     enrichUserProfile(user.id).catch(() => {});
 
-    // Welcome email — disabled until Resend is configured
-    // const isNewUser = user.createdAt && (Date.now() - new Date(user.createdAt).getTime()) < 60_000;
-    // if (isNewUser) {
-    //   sendWelcomeEmail({ id: user.id, email: user.email, name: user.name }).catch(() => {});
-    // }
+    // Send welcome email for new users (created within the last 60 seconds)
+    const isNewUser = user.createdAt && (Date.now() - new Date(user.createdAt).getTime()) < 60_000;
+    if (isNewUser) {
+      sendWelcomeEmail({ id: user.id, email: user.email, name: user.name }).catch(() => {});
+    }
 
     // Redirect to frontend home page
     res.redirect(`${frontendUrl}/home`);

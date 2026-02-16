@@ -20,8 +20,8 @@ import connectionsRoutes from './routes/connections.js';
 import notificationsRoutes from './routes/notifications.js';
 import tagsRoutes from './routes/tags.js';
 import aiRoutes from './routes/ai.js';
-// import emailRoutes from './routes/email.js';
-// import { sendWeeklyDigest } from './services/email.js';
+import emailRoutes from './routes/email.js';
+import { sendWeeklyDigest } from './services/email.js';
 import prisma from './lib/prisma.js';
 
 const app = express();
@@ -29,7 +29,7 @@ const PORT = process.env.PORT || 3001;
 
 // Environment variable validation
 const requiredEnvVars = ['DATABASE_URL'];
-const recommendedEnvVars = ['JWT_SECRET', 'ENCRYPTION_KEY', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'FRONTEND_URL', 'APOLLO_API_KEY', 'OPENAI_API_KEY'];
+const recommendedEnvVars = ['JWT_SECRET', 'ENCRYPTION_KEY', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'FRONTEND_URL', 'APOLLO_API_KEY', 'OPENAI_API_KEY', 'RESEND_API_KEY', 'RESEND_FROM_EMAIL'];
 
 for (const envVar of requiredEnvVars) {
   if (!process.env[envVar]) {
@@ -125,7 +125,7 @@ app.use('/api/connections', connectionsRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/tags', tagsRoutes);
 app.use('/api/ai', aiRoutes);
-// app.use('/api/email', emailRoutes);
+app.use('/api/email', emailRoutes);
 
 // Debug endpoint - development only
 if (!isProduction) {
@@ -264,16 +264,90 @@ async function backgroundCalendarSync() {
   }
 }
 
-// ─── Weekly digest email — disabled until Resend is configured ───────────────
-// Re-enable by uncommenting email imports at the top and the cron below.
+// ─── Weekly digest email (every 7 days) ──────────────────────────────────────
+
+const DIGEST_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+
+async function backgroundWeeklyDigest() {
+  console.log('[cron] Starting weekly digest emails...');
+  try {
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const users = await prisma.user.findMany({
+      where: { googleAccessToken: { not: null } },
+      select: { id: true, email: true },
+    });
+
+    for (const user of users) {
+      try {
+        const [newContacts, newMeetings, introRequests, introOffers, topCompanies] = await Promise.all([
+          prisma.contact.count({
+            where: { userId: user.id, createdAt: { gte: oneWeekAgo } },
+          }),
+          prisma.meeting.count({
+            where: { contact: { userId: user.id }, date: { gte: oneWeekAgo } },
+          }),
+          prisma.introRequest.count({
+            where: { requesterId: user.id, createdAt: { gte: oneWeekAgo } },
+          }),
+          prisma.introOffer.count({
+            where: { introducerId: user.id, createdAt: { gte: oneWeekAgo } },
+          }),
+          prisma.contact.groupBy({
+            by: ['companyId'],
+            where: { userId: user.id, createdAt: { gte: oneWeekAgo }, companyId: { not: null } },
+            _count: { id: true },
+            orderBy: { _count: { id: 'desc' } },
+            take: 5,
+          }),
+        ]);
+
+        if (newContacts === 0 && newMeetings === 0 && introRequests === 0 && introOffers === 0) {
+          continue;
+        }
+
+        const companyIds = topCompanies.map(tc => tc.companyId).filter(Boolean) as string[];
+        const companies = companyIds.length > 0
+          ? await prisma.company.findMany({
+              where: { id: { in: companyIds } },
+              select: { id: true, name: true },
+            })
+          : [];
+
+        const topCompanyList = topCompanies.map(tc => {
+          const company = companies.find(c => c.id === tc.companyId);
+          return { name: company?.name || 'Unknown', contactCount: tc._count.id };
+        });
+
+        await sendWeeklyDigest(user.id, {
+          newContacts,
+          newMeetings,
+          introRequests,
+          introOffers,
+          topCompanies: topCompanyList,
+        });
+
+        console.log(`[cron] Sent weekly digest to ${user.email}`);
+      } catch (err) {
+        console.error(`[cron] Failed to send digest to ${user.email}:`, (err as Error).message);
+      }
+    }
+
+    console.log('[cron] Weekly digest complete');
+  } catch (err) {
+    console.error('[cron] Weekly digest error:', err);
+  }
+}
 
 // Start server
 verifyDatabaseConnection().then(() => {
   server = app.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
 
-    // Start background sync interval
     setInterval(backgroundCalendarSync, SYNC_INTERVAL_MS);
     console.log(`[cron] Calendar background sync scheduled every ${SYNC_INTERVAL_MS / 3600000}h`);
+
+    setInterval(backgroundWeeklyDigest, DIGEST_INTERVAL_MS);
+    console.log(`[cron] Weekly digest email scheduled every 7 days`);
   });
 });
