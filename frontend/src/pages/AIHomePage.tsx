@@ -3815,15 +3815,18 @@ export function AIHomePage() {
                   )}
 
                   <div className="sb-space-form" style={{ marginTop: '0.5rem' }}>
-                    <input
-                      className="sb-input"
-                      placeholder="Invite anyone by email"
-                      value={connectEmail}
-                      onChange={e => setConnectEmail(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter' && connectEmail.trim()) { sendConnectionRequest(connectEmail); } }}
-                    />
-                    <button className="sb-space-action-btn primary" style={{ marginTop: '0.35rem', width: '100%' }} onClick={() => sendConnectionRequest(connectEmail)} disabled={!connectEmail.trim()}>+ Connect</button>
-                    <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.3)', marginTop: '0.35rem', display: 'block', lineHeight: 1.4 }}>Works with anyone — if they're not on Introo yet, we'll send them an invite.</span>
+                    <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+                      <input
+                        className="sb-input"
+                        placeholder="Invite anyone by email"
+                        style={{ flex: 1 }}
+                        value={connectEmail}
+                        onChange={e => setConnectEmail(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter' && connectEmail.trim()) { sendConnectionRequest(connectEmail); } }}
+                      />
+                      <button className="sb-space-action-btn primary" style={{ whiteSpace: 'nowrap', padding: '0.45rem 0.75rem' }} onClick={() => sendConnectionRequest(connectEmail)} disabled={!connectEmail.trim()}>+ Connect</button>
+                    </div>
+                    <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.3)', marginTop: '0.3rem', display: 'block', lineHeight: 1.4 }}>Works with anyone — if they're not on Introo yet, we'll send them an invite.</span>
                   </div>
                 </div>
               </div>
