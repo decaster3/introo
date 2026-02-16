@@ -27,12 +27,15 @@ interface NotificationsPanelProps {
   onRejectConnection: (id: string) => void;
   onAcceptSpaceInvite: (spaceId: string) => void;
   onRejectSpaceInvite: (spaceId: string) => void;
+  onDeleteNotification: (id: string) => void;
+  onClearAllNotifications: () => void;
 }
 
 export function NotificationsPanel({
   notifications, connections, mergedCompanies, pendingSpaces,
   onNavigate, onAcceptConnection, onRejectConnection,
   onAcceptSpaceInvite, onRejectSpaceInvite,
+  onDeleteNotification, onClearAllNotifications,
 }: NotificationsPanelProps) {
   if (notifications.length === 0) {
     return (
@@ -189,6 +192,11 @@ export function NotificationsPanel({
             </div>
           )}
         </div>
+        <button
+          className="u-notif-delete-btn"
+          title="Delete notification"
+          onClick={(e) => { e.stopPropagation(); onDeleteNotification(n.id); }}
+        >×</button>
         {isClickableFinal && <span className="u-panel-notif-arrow">→</span>}
       </div>
     );
@@ -196,7 +204,18 @@ export function NotificationsPanel({
 
   return (
     <div className="u-panel-notifs">
-      <h2>Notifications</h2>
+      <div className="u-panel-notifs-header">
+        <h2>Notifications</h2>
+        {notifications.length > 0 && (
+          <button
+            className="u-notif-clear-all-btn"
+            onClick={onClearAllNotifications}
+            title="Clear all notifications"
+          >
+            Clear all
+          </button>
+        )}
+      </div>
       <div className="u-panel-notif-list">
         {unread.length > 0 && (
           <>

@@ -11,10 +11,19 @@ export type {
   Contact,
 };
 
+export type LoadingPhase =
+  | 'init'           // Checking authentication
+  | 'auth'           // Authenticated, loading data
+  | 'syncing'        // First login: syncing calendar
+  | 'enriching'      // First login: enriching contacts
+  | 'ready'          // Done
+  | null;            // Not loading
+
 export interface AppState {
   // Auth state
   isAuthenticated: boolean;
   isLoading: boolean;
+  loadingPhase: LoadingPhase;
   currentUser: User | null;
   currentUserId: string;
   
@@ -26,6 +35,7 @@ export interface AppState {
 
 export type AppAction =
   | { type: 'SET_LOADING'; payload: boolean }
+  | { type: 'SET_LOADING_PHASE'; payload: LoadingPhase }
   | { type: 'SET_AUTH'; payload: { isAuthenticated: boolean; user: User | null } }
   | { type: 'LOGOUT' }
   | { type: 'CONNECT_CALENDAR' }

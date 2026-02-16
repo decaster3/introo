@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { Navigate } from 'react-router-dom';
 import { useAppState, useAppActions } from '../store';
-import { API_BASE, calendarApi, requestsApi, notificationsApi, offersApi, type CalendarAccountInfo } from '../lib/api';
+import { API_BASE, calendarApi, requestsApi, notificationsApi, offersApi, tagsApi, emailApi, type CalendarAccountInfo } from '../lib/api';
 import { calculateStrength, type SpaceCompany, type DisplayContact, type MergedCompany, type HuntFilters, type Hunt, type InlinePanel } from '../types';
 import { PersonAvatar, CompanyLogo, OnboardingTour } from '../components';
 import { ProfilePanel, SettingsPanel, NotificationsPanel } from '../components/panels';
@@ -8,7 +9,6 @@ import { useProfile } from '../hooks/useProfile';
 import { useEnrichment } from '../hooks/useEnrichment';
 import { useSpaceManagement } from '../hooks/useSpaceManagement';
 import { useConnectionManagement } from '../hooks/useConnectionManagement';
-import { openOfferIntroEmail, openDoubleIntroEmail } from '../lib/offerIntro';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -64,7 +64,7 @@ function matchesFundingFilter(raw: string | null | undefined, totalFunding: stri
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function AIHomePage() {
-  const { currentUser, contacts: storeContacts, isCalendarConnected, isLoading: storeLoading } = useAppState();
+  const { isAuthenticated, currentUser, contacts: storeContacts, isCalendarConnected, isLoading: storeLoading, loadingPhase } = useAppState();
   const { logout, syncCalendar, refreshData } = useAppActions();
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -73,14 +73,19 @@ export function AIHomePage() {
   const [searchFocused, setSearchFocused] = useState(false);
   const [selectedHunt, setSelectedHunt] = useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = useState<'all' | 'mine' | 'spaces' | 'both'>('all');
+  const [accountFilter, setAccountFilter] = useState<string>('all');
   const [strengthFilter, setStrengthFilter] = useState<'all' | 'strong' | 'medium' | 'weak'>('all');
   const [spaceFilter, setSpaceFilter] = useState<string>('all');
   const [connectionFilter, setConnectionFilter] = useState<string>('all');
   const [sortBy] = useState<'relevance' | 'contacts' | 'name' | 'strength'>('relevance');
+  const [viewMode, setViewMode] = useState<'grid' | 'table'>(() => {
+    try { const v = localStorage.getItem('introo_view_mode'); return v === 'table' ? 'table' : 'grid'; } catch { return 'grid'; }
+  });
   const [gridPage, setGridPage] = useState(0);
   const GRID_PAGE_SIZE = 50;
   const [excludeMyContacts, setExcludeMyContacts] = useState(true);
   const [expandedDomain, setExpandedDomain] = useState<string | null>(null);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
   const [inlinePanel, setInlinePanel] = useState<InlinePanel | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [introRequestText, setIntroRequestText] = useState('');
@@ -98,6 +103,16 @@ export function AIHomePage() {
   const [dismissedRequestIds, setDismissedRequestIds] = useState<Set<string>>(new Set());
   const [incomingRequests, setIncomingRequests] = useState<{ id: string; rawText: string; status: string; createdAt: string; normalizedQuery: Record<string, unknown>; requester: { id: string; name: string; email?: string; avatar: string | null } }[]>([]);
   const [introPickerRequestId, setIntroPickerRequestId] = useState<string | null>(null);
+
+  // ─── Onboarding activation state ────────────────────────────────────────────
+  const [showNetworkSplash, setShowNetworkSplash] = useState(false);
+  const [networkSplashData, setNetworkSplashData] = useState<{ contacts: number; companies: number; strong: number; topIndustry: string } | null>(null);
+  const [, setCompanyPanelViewCount] = useState(0);
+  const [showTagTip, setShowTagTip] = useState(false);
+  const [showHuntPrompt, setShowHuntPrompt] = useState(false);
+  const [huntPromptDismissed, setHuntPromptDismissed] = useState(() => !!localStorage.getItem('introo_hunt_prompt_dismissed'));
+  const [newSpaceCompanies, setNewSpaceCompanies] = useState<Set<string>>(new Set());
+  const prevSpaceCompanyDomainsRef = useRef<Set<string>>(new Set());
 
   // AI search state
   const [aiParsing, setAiParsing] = useState(false);
@@ -142,7 +157,7 @@ export function AIHomePage() {
   const [syncingAccountId, setSyncingAccountId] = useState<string | null>(null);
 
   // Enrichment (hook)
-  const { enriching, enrichProgress, enrichError, enrichStats, startEnrichment } = useEnrichment(refreshData, storeLoading);
+  const { enriching, enrichProgress, enrichError, enrichStats, startEnrichment, stopEnrichment } = useEnrichment(refreshData, storeLoading);
 
   // Sidebar filter section open/closed state
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
@@ -230,6 +245,133 @@ export function AIHomePage() {
   const [spaceCompanies, setSpaceCompanies] = useState<SpaceCompany[]>([]);
   const [hunts, setHunts] = useState<Hunt[]>([]);
 
+  // ─── Company tags (Airtable-style, persisted to localStorage) ──────────────
+  const TAG_COLORS = [
+    { bg: 'rgba(91,141,239,0.15)', text: '#7ba8f7', border: 'rgba(91,141,239,0.25)' },
+    { bg: 'rgba(168,85,247,0.15)', text: '#c084fc', border: 'rgba(168,85,247,0.25)' },
+    { bg: 'rgba(236,72,153,0.15)', text: '#f472b6', border: 'rgba(236,72,153,0.25)' },
+    { bg: 'rgba(245,158,11,0.15)', text: '#fbbf24', border: 'rgba(245,158,11,0.25)' },
+    { bg: 'rgba(16,185,129,0.15)', text: '#34d399', border: 'rgba(16,185,129,0.25)' },
+    { bg: 'rgba(239,68,68,0.15)',  text: '#f87171', border: 'rgba(239,68,68,0.25)' },
+    { bg: 'rgba(6,182,212,0.15)',  text: '#22d3ee', border: 'rgba(6,182,212,0.25)' },
+    { bg: 'rgba(132,204,22,0.15)', text: '#a3e635', border: 'rgba(132,204,22,0.25)' },
+  ];
+
+  // Tag definitions: { name, colorIdx }
+  const [tagDefs, setTagDefs] = useState<{ name: string; colorIdx: number }[]>(() => {
+    try { return JSON.parse(localStorage.getItem('introo_tag_defs') || '[]'); } catch { return []; }
+  });
+  // Which tags are assigned to which domains
+  const [companyTags, setCompanyTags] = useState<Record<string, string[]>>(() => {
+    try { return JSON.parse(localStorage.getItem('introo_company_tags') || '{}'); } catch { return {}; }
+  });
+  const [tagPickerDomain, setTagPickerDomain] = useState<string | null>(null);
+  const [tagPickerSearch, setTagPickerSearch] = useState('');
+  const tagPickerRef = useRef<HTMLDivElement>(null);
+  const [tagsLoadedFromServer, setTagsLoadedFromServer] = useState(false);
+
+  // Load tags from the server on mount, then migrate localStorage data if server is empty
+  useEffect(() => {
+    if (!currentUser || tagsLoadedFromServer) return;
+    tagsApi.getAll().then(data => {
+      const serverHasTags = Object.keys(data.tagDefs).length > 0;
+      const localHasTags = tagDefs.length > 0;
+
+      if (serverHasTags) {
+        // Server is source of truth: hydrate local state from server
+        const defs: { name: string; colorIdx: number }[] = Object.entries(data.tagDefs).map(([name, color], idx) => {
+          const matchIdx = TAG_COLORS.findIndex(c => c.text === color || c.bg.includes(color));
+          return { name, colorIdx: matchIdx >= 0 ? matchIdx : idx % TAG_COLORS.length };
+        });
+        setTagDefs(defs);
+        setCompanyTags(data.companyTags);
+        localStorage.setItem('introo_tag_defs', JSON.stringify(defs));
+        localStorage.setItem('introo_company_tags', JSON.stringify(data.companyTags));
+      } else if (localHasTags) {
+        // Migrate localStorage tags to server
+        const serverTagDefs: Record<string, string> = {};
+        tagDefs.forEach(t => { serverTagDefs[t.name] = TAG_COLORS[t.colorIdx % TAG_COLORS.length].text; });
+        tagsApi.sync(serverTagDefs, companyTags).catch(() => {});
+      }
+      setTagsLoadedFromServer(true);
+    }).catch(() => setTagsLoadedFromServer(true));
+  }, [currentUser]);
+
+  // Close picker on outside click
+  useEffect(() => {
+    if (!tagPickerDomain) return;
+    const handler = (e: MouseEvent) => {
+      if (tagPickerRef.current && !tagPickerRef.current.contains(e.target as Node)) {
+        setTagPickerDomain(null);
+        setTagPickerSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [tagPickerDomain]);
+
+  const persistTagDefs = useCallback((defs: { name: string; colorIdx: number }[]) => {
+    setTagDefs(defs);
+    localStorage.setItem('introo_tag_defs', JSON.stringify(defs));
+  }, []);
+
+  const persistCompanyTags = useCallback((tags: Record<string, string[]>) => {
+    setCompanyTags(tags);
+    localStorage.setItem('introo_company_tags', JSON.stringify(tags));
+  }, []);
+
+  const createTag = useCallback((name: string) => {
+    const n = name.trim();
+    if (!n || tagDefs.some(t => t.name.toLowerCase() === n.toLowerCase())) return;
+    const colorIdx = tagDefs.length % TAG_COLORS.length;
+    persistTagDefs([...tagDefs, { name: n, colorIdx }]);
+    // Persist to server
+    const color = TAG_COLORS[colorIdx % TAG_COLORS.length].text;
+    tagsApi.createTag(n, color).catch(() => {});
+    return n;
+  }, [tagDefs, persistTagDefs]);
+
+  const deleteTagDef = useCallback((name: string) => {
+    const usageCount = Object.values(companyTags).filter(tags => tags.includes(name)).length;
+    if (usageCount > 1) {
+      if (!window.confirm(`"${name}" is used on ${usageCount} companies. Delete it?`)) return;
+    }
+    persistTagDefs(tagDefs.filter(t => t.name !== name));
+    const next = { ...companyTags };
+    Object.keys(next).forEach(domain => {
+      next[domain] = next[domain].filter(t => t !== name);
+      if (next[domain].length === 0) delete next[domain];
+    });
+    persistCompanyTags(next);
+    setTagFilter(prev => prev.filter(t => t !== name));
+    setGridPage(0);
+    // Persist to server
+    tagsApi.deleteTag(name).catch(() => {});
+  }, [tagDefs, companyTags, persistTagDefs, persistCompanyTags]);
+
+  const toggleTagOnCompany = useCallback((domain: string, tagName: string) => {
+    setCompanyTags(prev => {
+      const existing = prev[domain] || [];
+      const next = existing.includes(tagName)
+        ? { ...prev, [domain]: existing.filter(t => t !== tagName) }
+        : { ...prev, [domain]: [...existing, tagName] };
+      if (next[domain]?.length === 0) delete next[domain];
+      localStorage.setItem('introo_company_tags', JSON.stringify(next));
+      return next;
+    });
+    // Persist to server
+    tagsApi.toggleTag(tagName, domain).catch(() => {});
+  }, []);
+
+  const getTagColor = useCallback((name: string) => {
+    const def = tagDefs.find(t => t.name === name);
+    return def ? TAG_COLORS[def.colorIdx % TAG_COLORS.length] : TAG_COLORS[0];
+  }, [tagDefs]);
+
+  const allTags = useMemo(() => tagDefs.map(t => t.name), [tagDefs]);
+
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
+
   // ─── Data transforms ────────────────────────────────────────────────────────
 
   const contacts: DisplayContact[] = useMemo(() => {
@@ -251,6 +393,7 @@ export function AIHomePage() {
       headline: c.headline,
       enrichedAt: c.enrichedAt,
       sourceAccountEmails: c.sourceAccountEmails,
+      meetings: c.meetings,
       companyData: c.company ? {
         id: c.company.id,
         employeeCount: c.company.employeeCount,
@@ -551,6 +694,20 @@ export function AIHomePage() {
       result = result.filter(c => c.source === 'both');
     }
 
+    // Filter by specific calendar account
+    if (accountFilter !== 'all') {
+      result = result.filter(c =>
+        c.myContacts.some(mc => mc.sourceAccountEmails?.includes(accountFilter))
+      );
+    }
+
+    // Filter by specific calendar account
+    if (accountFilter !== 'all') {
+      result = result.filter(c =>
+        c.myContacts.some(mc => mc.sourceAccountEmails?.includes(accountFilter))
+      );
+    }
+
     // Filter by connection strength (uses company-level computed strength)
     if (strengthFilter !== 'all') {
       result = result.filter(c => c.bestStrength === strengthFilter);
@@ -568,6 +725,14 @@ export function AIHomePage() {
           return yearOk && monthOk;
         })
       );
+    }
+
+    // Filter by tags
+    if (tagFilter.length > 0) {
+      result = result.filter(c => {
+        const tags = companyTags[c.domain] || [];
+        return tagFilter.every(t => tags.includes(t));
+      });
     }
 
     // Filter by specific space
@@ -712,10 +877,13 @@ export function AIHomePage() {
     }
 
     return result;
-  }, [mergedCompanies, selectedHunt, searchQuery, sourceFilter, strengthFilter, spaceFilter, connectionFilter, sortBy, sidebarFilters]);
+  }, [mergedCompanies, selectedHunt, searchQuery, sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, sortBy, sidebarFilters, tagFilter, companyTags]);
 
   // Reset page when filters change
   useEffect(() => { setGridPage(0); }, [filteredCompanies.length, excludeMyContacts]);
+
+  // Reset history expand when switching companies
+  useEffect(() => { setHistoryExpanded(false); }, [inlinePanel]);
 
   // Hunt match counts
   // Dynamic country list from enriched data
@@ -789,6 +957,7 @@ export function AIHomePage() {
   const activeFilterCount = useMemo(() => {
     let n = 0;
     if (sourceFilter !== 'all') n++;
+    if (accountFilter !== 'all') n++;
     if (strengthFilter !== 'all') n++;
     if (spaceFilter !== 'all') n++;
     if (connectionFilter !== 'all') n++;
@@ -806,8 +975,9 @@ export function AIHomePage() {
     if (sf.revenueRanges.length > 0) n++;
     if (sf.technologies.length > 0) n++;
     if (sf.connectedYears.length > 0 || sf.connectedMonths.length > 0) n++;
+    if (tagFilter.length > 0) n++;
     return n;
-  }, [sourceFilter, strengthFilter, spaceFilter, connectionFilter, selectedHunt, sidebarFilters]);
+  }, [sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, selectedHunt, sidebarFilters, tagFilter]);
 
   // Compute year/month counts from contacts for "Connected since" filter
   const timeFilterStats = useMemo(() => {
@@ -826,6 +996,7 @@ export function AIHomePage() {
 
   const clearAllFilters = useCallback(() => {
     setSourceFilter('all');
+    setAccountFilter('all');
     setStrengthFilter('all');
     setSpaceFilter('all');
     setConnectionFilter('all');
@@ -851,6 +1022,7 @@ export function AIHomePage() {
       connectedYears: [],
       connectedMonths: [],
     });
+    setTagFilter([]);
   }, []);
 
   // Stats
@@ -861,6 +1033,35 @@ export function AIHomePage() {
     total: mergedCompanies.length,
     strongTies: contacts.filter(c => c.connectionStrength === 'strong').length,
   }), [mergedCompanies, contacts]);
+
+  // Per-account company counts (for source sub-filter)
+  const accountCompanyCounts = useMemo(() => {
+    if (calendarAccounts.length <= 1) return {};
+    const counts: Record<string, number> = {};
+    calendarAccounts.forEach(a => { counts[a.email] = 0; });
+    mergedCompanies.forEach(c => {
+      c.myContacts.forEach(mc => {
+        if (mc.sourceAccountEmails) {
+          mc.sourceAccountEmails.forEach(email => {
+            if (counts[email] !== undefined) counts[email]++;
+          });
+        }
+      });
+    });
+    // Deduplicate: count companies not contacts
+    const companyCounts: Record<string, number> = {};
+    calendarAccounts.forEach(a => { companyCounts[a.email] = 0; });
+    mergedCompanies.forEach(c => {
+      const accountsOnCompany = new Set<string>();
+      c.myContacts.forEach(mc => {
+        mc.sourceAccountEmails?.forEach(email => accountsOnCompany.add(email));
+      });
+      accountsOnCompany.forEach(email => {
+        if (companyCounts[email] !== undefined) companyCounts[email]++;
+      });
+    });
+    return companyCounts;
+  }, [mergedCompanies, calendarAccounts]);
 
   // Signals (derived)
   // ─── Data fetching ──────────────────────────────────────────────────────────
@@ -887,6 +1088,83 @@ export function AIHomePage() {
     });
   }, [spaces]);
 
+  // ─── Onboarding activation effects ──────────────────────────────────────────
+
+  // #1 Network splash: show after first sync completes
+  const prevLoadingPhaseRef = useRef(loadingPhase);
+  useEffect(() => {
+    const prev = prevLoadingPhaseRef.current;
+    prevLoadingPhaseRef.current = loadingPhase;
+    if ((prev === 'syncing' || prev === 'enriching') && loadingPhase === 'ready' && !localStorage.getItem('introo_splash_seen')) {
+      // Compute splash stats
+      const strong = mergedCompanies.filter(c => c.hasStrongConnection).length;
+      const industryCounts: Record<string, number> = {};
+      mergedCompanies.forEach(c => {
+        if (c.industry) {
+          industryCounts[c.industry] = (industryCounts[c.industry] || 0) + 1;
+        }
+      });
+      const topIndustry = Object.entries(industryCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+      setNetworkSplashData({
+        contacts: contacts.length,
+        companies: mergedCompanies.length,
+        strong,
+        topIndustry,
+      });
+      setShowNetworkSplash(true);
+      localStorage.setItem('introo_splash_seen', 'true');
+    }
+  }, [loadingPhase]);
+
+
+  // #6 Tag tip: show after viewing 3+ company panels
+  useEffect(() => {
+    if (inlinePanel?.type === 'company') {
+      setCompanyPanelViewCount(prev => {
+        const next = prev + 1;
+        if (next === 3 && tagDefs.length === 0 && !localStorage.getItem('introo_tag_tip_seen')) {
+          setTimeout(() => setShowTagTip(true), 500);
+          localStorage.setItem('introo_tag_tip_seen', 'true');
+        }
+        return next;
+      });
+    }
+  }, [inlinePanel]);
+
+  // #7 Hunt prompt: show after meaningful filters are applied (if no hunts yet)
+  // Triggers when: 2+ filters active, OR any "specific" filter like industry/size/keywords/funding/tags
+  useEffect(() => {
+    if (huntPromptDismissed || hunts.length > 0 || showHuntPrompt || selectedHunt) return;
+    if (localStorage.getItem('introo_hunt_prompt_dismissed')) return;
+    const sf = sidebarFilters;
+    const hasSpecificFilter = sf.aiKeywords.length > 0 || sf.employeeRanges.length > 0 ||
+      sf.categories.length > 0 || sf.fundingRounds.length > 0 || sf.technologies.length > 0 ||
+      sf.revenueRanges.length > 0 || sf.country || sf.city || tagFilter.length > 0 ||
+      sf.connectedYears.length > 0 || sf.connectedMonths.length > 0;
+    const shouldShow = hasSpecificFilter || activeFilterCount >= 2;
+    if (shouldShow) {
+      const t = setTimeout(() => setShowHuntPrompt(true), 1500);
+      return () => clearTimeout(t);
+    }
+  }, [activeFilterCount, huntPromptDismissed, hunts.length, selectedHunt, showHuntPrompt, sidebarFilters, tagFilter]);
+
+  // #8 Detect new Space companies appearing
+  useEffect(() => {
+    const currentSpaceDomains = new Set(
+      mergedCompanies.filter(c => c.spaceCount > 0).map(c => c.domain)
+    );
+    const prev = prevSpaceCompanyDomainsRef.current;
+    if (prev.size > 0) {
+      const newOnes = new Set<string>();
+      currentSpaceDomains.forEach(d => { if (!prev.has(d)) newOnes.add(d); });
+      if (newOnes.size > 0) {
+        setNewSpaceCompanies(newOnes);
+        setTimeout(() => setNewSpaceCompanies(new Set()), 4000);
+      }
+    }
+    prevSpaceCompanyDomainsRef.current = currentSpaceDomains;
+  }, [mergedCompanies]);
+
   // ─── Keyboard ───────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -896,14 +1174,22 @@ export function AIHomePage() {
         searchRef.current?.focus();
       }
       if (e.key === 'Escape') {
-        setInlinePanel(null);
-        setSearchQuery('');
-        setSelectedHunt(null);
+        // Close innermost layer first: tag picker → panel → search → hunt
+        if (tagPickerDomain) {
+          setTagPickerDomain(null);
+          setTagPickerSearch('');
+        } else if (inlinePanel) {
+          setInlinePanel(null);
+        } else if (searchQuery) {
+          setSearchQuery('');
+        } else if (selectedHunt) {
+          setSelectedHunt(null);
+        }
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [tagPickerDomain, inlinePanel, searchQuery, selectedHunt]);
 
   // ─── Actions ────────────────────────────────────────────────────────────────
 
@@ -1064,13 +1350,12 @@ export function AIHomePage() {
   }, []);
 
   const handleOfferIntro = useCallback((contact: { email: string; name: string }, companyName: string) => {
-    openOfferIntroEmail({
-      requesterEmail: contact.email,
-      requesterName: contact.name,
+    emailApi.sendIntroOffer({
+      recipientEmail: contact.email,
+      recipientName: contact.name,
       targetCompany: companyName,
-      senderName: currentUser?.name,
-    });
-  }, [currentUser]);
+    }).catch(() => {});
+  }, []);
 
   // Fetch space detail requests when space panel opens
   useEffect(() => {
@@ -1197,12 +1482,50 @@ export function AIHomePage() {
 
   // ─── Render ─────────────────────────────────────────────────────────────────
 
+  // Redirect to login if not authenticated (after all hooks have run)
+  if (!storeLoading && !isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
   return (
     <div className="u-root">
       <div className="u-ambient" />
 
-      {/* Interactive onboarding tour — shown once for new users */}
-      {!storeLoading && !loading && contacts.length > 0 && (
+      {/* #1 Network stats splash screen after first sync */}
+      {showNetworkSplash && networkSplashData && (
+        <div className="ob-splash-overlay" onClick={() => setShowNetworkSplash(false)}>
+          <div className="ob-splash" onClick={e => e.stopPropagation()}>
+            <div className="ob-splash-orb" />
+            <h2 className="ob-splash-title">Your network is ready</h2>
+            <div className="ob-splash-stats">
+              <div className="ob-splash-stat">
+                <span className="ob-splash-stat-num">{networkSplashData.contacts}</span>
+                <span className="ob-splash-stat-label">contacts</span>
+              </div>
+              <div className="ob-splash-stat">
+                <span className="ob-splash-stat-num">{networkSplashData.companies}</span>
+                <span className="ob-splash-stat-label">companies</span>
+              </div>
+              {networkSplashData.strong > 0 && (
+                <div className="ob-splash-stat">
+                  <span className="ob-splash-stat-num">{networkSplashData.strong}</span>
+                  <span className="ob-splash-stat-label">strong ties</span>
+                </div>
+              )}
+            </div>
+            {networkSplashData.topIndustry && (
+              <p className="ob-splash-insight">Your strongest vertical: <strong>{networkSplashData.topIndustry}</strong></p>
+            )}
+            <button className="ob-splash-btn" onClick={() => setShowNetworkSplash(false)}>
+              Explore your network
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M5 12h14M12 5l7 7-7 7" /></svg>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Interactive onboarding tour — shown once for new users, after splash is dismissed */}
+      {!storeLoading && !loading && contacts.length > 0 && !showNetworkSplash && (
         <OnboardingTour />
       )}
 
@@ -1235,12 +1558,35 @@ export function AIHomePage() {
                   <button
                     key={f.key}
                     className={`sb-chip sb-chip--${f.key} ${sourceFilter === f.key ? 'active' : ''}`}
-                    onClick={() => { setSourceFilter(f.key); setSpaceFilter('all'); setConnectionFilter('all'); }}
+                    onClick={() => { setSourceFilter(f.key); setAccountFilter('all'); setSpaceFilter('all'); setConnectionFilter('all'); }}
                   >
                     {f.label} <span className="sb-chip-count">{f.count}</span>
                   </button>
                 ))}
               </div>
+
+              {/* Per-account filter pills (visible when multiple calendar accounts) */}
+              {calendarAccounts.length > 1 && (sourceFilter === 'all' || sourceFilter === 'mine') && (
+                <div className="sb-accounts-list">
+                  {calendarAccounts.map(a => {
+                    const count = accountCompanyCounts[a.email] || 0;
+                    if (count === 0) return null;
+                    const emailLabel = a.email.split('@')[0];
+                    return (
+                      <button
+                        key={a.email}
+                        className={`sb-account-pill ${accountFilter === a.email ? 'active' : ''}`}
+                        onClick={() => { setAccountFilter(accountFilter === a.email ? 'all' : a.email); setSourceFilter('mine'); setSpaceFilter('all'); setConnectionFilter('all'); }}
+                        title={a.email}
+                      >
+                        <span className="sb-account-icon">📧</span>
+                        <span className="sb-account-label">{emailLabel}</span>
+                        <span className="sb-account-count">{count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* Per-space filter pills */}
               {spaces.length > 0 && (
@@ -1249,7 +1595,7 @@ export function AIHomePage() {
                     <button
                       key={s.id}
                       className={`sb-space-pill ${spaceFilter === s.id ? 'active' : ''}`}
-                      onClick={() => { setSpaceFilter(spaceFilter === s.id ? 'all' : s.id); setSourceFilter('all'); setConnectionFilter('all'); }}
+                      onClick={() => { setSpaceFilter(spaceFilter === s.id ? 'all' : s.id); setSourceFilter('all'); setAccountFilter('all'); setConnectionFilter('all'); }}
                       onDoubleClick={() => setInlinePanel({ type: 'space', spaceId: s.id })}
                       title={`${s.name} — ${s.memberCount || 0} members. Double-click for details.`}
                     >
@@ -1268,7 +1614,7 @@ export function AIHomePage() {
                     <button
                       key={c.id}
                       className={`sb-space-pill ${connectionFilter === c.id ? 'active' : ''}`}
-                      onClick={() => { setConnectionFilter(connectionFilter === c.id ? 'all' : c.id); setSpaceFilter('all'); setSourceFilter('all'); }}
+                      onClick={() => { setConnectionFilter(connectionFilter === c.id ? 'all' : c.id); setSpaceFilter('all'); setSourceFilter('all'); setAccountFilter('all'); }}
                       onDoubleClick={() => setInlinePanel({ type: 'connection', connectionId: c.id })}
                       title={`${c.peer.name} — ${c.peer.email}. Double-click for details.`}
                     >
@@ -1294,6 +1640,34 @@ export function AIHomePage() {
               )}
 
 
+            </SidebarSection>
+
+            {/* ── Tags filter ── */}
+            <SidebarSection id="tags" icon="🏷" title="Tags">
+              {allTags.length > 0 ? (
+                <div className="sb-chips">
+                  {allTags.map(t => {
+                    const color = getTagColor(t);
+                    const count = Object.values(companyTags).filter(tags => tags.includes(t)).length;
+                    const isActive = tagFilter.includes(t);
+                    return (
+                      <button
+                        key={t}
+                        className={`sb-chip sb-chip--tag ${isActive ? 'active' : ''}`}
+                        style={isActive ? { borderColor: color.border, background: color.bg, color: color.text } : {}}
+                        onClick={() => { setTagFilter(prev =>
+                          prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]
+                        ); setGridPage(0); }}
+                      >
+                        <span className="sb-tag-dot" style={{ background: color.text }} />
+                        {t} <span className="sb-chip-count">{count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="sb-empty-hint">Tag companies to organize and filter them. Hover any card and click the tag icon to start.</p>
+              )}
             </SidebarSection>
 
             {/* ── Business description (AI keyword search) ── */}
@@ -1845,8 +2219,11 @@ export function AIHomePage() {
                 <span className="u-topbar-enriching" title="Auto-enriching contacts...">
                   <span className="u-enrich-spinner" />
                   {enrichProgress.contactsFree
-                    ? `${enrichProgress.contactsFree.enriched}/${enrichProgress.contactsFree.total}`
+                    ? `${enrichProgress.contactsFree.enriched + enrichProgress.contactsFree.skipped + enrichProgress.contactsFree.errors}/${enrichProgress.contactsFree.total}`
                     : 'Enriching...'}
+                  <button className="u-topbar-enrich-stop" onClick={stopEnrichment} title="Stop enrichment">
+                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="1" y="1" width="8" height="8" rx="1" fill="currentColor"/></svg>
+                  </button>
                 </span>
               )}
               <button
@@ -1932,11 +2309,21 @@ export function AIHomePage() {
                 <span className="u-results-of"> of {mergedCompanies.length}</span>
               )}
             </span>
-            {activeFilterCount > 0 && (
-              <button className="u-filters-clear" onClick={clearAllFilters}>
-                Clear {activeFilterCount} filter{activeFilterCount > 1 ? 's' : ''}
-              </button>
-            )}
+            <div className="u-results-right">
+              {activeFilterCount > 0 && (
+                <button className="u-filters-clear" onClick={clearAllFilters}>
+                  Clear {activeFilterCount} filter{activeFilterCount > 1 ? 's' : ''}
+                </button>
+              )}
+              <div className="u-view-toggle">
+                <button className={`u-view-btn ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => { setViewMode('grid'); localStorage.setItem('introo_view_mode', 'grid'); }} title="Grid view">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                </button>
+                <button className={`u-view-btn ${viewMode === 'table' ? 'active' : ''}`} onClick={() => { setViewMode('table'); localStorage.setItem('introo_view_mode', 'table'); }} title="Table view">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* ── Enrichment banner ── */}
@@ -1956,16 +2343,67 @@ export function AIHomePage() {
                       />
                     </div>
                     <span className="u-enrich-banner-count">
-                      {enrichProgress.contactsFree.enriched} of {enrichProgress.contactsFree.total}
+                      {enrichProgress.contactsFree.enriched + enrichProgress.contactsFree.skipped + enrichProgress.contactsFree.errors} of {enrichProgress.contactsFree.total}
                     </span>
                   </div>
                 )}
               </div>
+              <button className="u-enrich-banner-stop" onClick={stopEnrichment} title="Stop enrichment">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="2" y="2" width="10" height="10" rx="1.5" fill="currentColor"/></svg>
+                Stop
+              </button>
+            </div>
+          )}
+
+          {/* Enrichment needed banner — shows when no contacts have been processed yet */}
+          {!enriching && enrichStats && enrichStats.contacts.total > 0 && enrichStats.contacts.enriched === 0 && (enrichStats.contacts.pending ?? 0) > 0 && (
+            <div className="u-enrich-banner u-enrich-banner--needed">
+              <div className="u-enrich-banner-icon">✨</div>
+              <div className="u-enrich-banner-body">
+                <div className="u-enrich-banner-text">
+                  Your contacts need enrichment to show company data, logos, and titles.
+                </div>
+                <button className="u-enrich-banner-run" onClick={startEnrichment}>
+                  Run enrichment now
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* #7 Hunt prompt — nudge to save filters as a hunt */}
+          {showHuntPrompt && activeFilterCount > 0 && (
+            <div className="ob-hunt-prompt">
+              <span className="ob-hunt-prompt-icon">🎯</span>
+              <span className="ob-hunt-prompt-text">You've set filters. <strong>Save as a Hunt</strong> to track matching companies over time.</span>
+              <button className="ob-hunt-prompt-btn" onClick={() => {
+                const huntId = Date.now().toString();
+                const sf = sidebarFilters;
+                const savedFilters: HuntFilters = {};
+                if (sf.aiKeywords.length > 0) savedFilters.aiKeywords = [...sf.aiKeywords];
+                if (sf.employeeRanges.length > 0) savedFilters.employeeRanges = [...sf.employeeRanges];
+                if (sf.country) savedFilters.country = sf.country;
+                if (sf.city) savedFilters.city = sf.city;
+                if (sf.fundingRounds.length > 0) savedFilters.fundingRounds = [...sf.fundingRounds];
+                if (sf.revenueRanges.length > 0) savedFilters.revenueRanges = [...sf.revenueRanges];
+                if (sf.technologies.length > 0) savedFilters.technologies = [...sf.technologies];
+                if (sf.connectedYears.length > 0) savedFilters.connectedYears = [...sf.connectedYears];
+                if (sf.connectedMonths.length > 0) savedFilters.connectedMonths = [...sf.connectedMonths];
+                setHunts(prev => [...prev, { id: huntId, title: 'My first hunt', keywords: sf.aiKeywords.length > 0 ? sf.aiKeywords : ['custom'], filters: savedFilters, isActive: true }]);
+                setSelectedHunt(huntId);
+                setShowHuntPrompt(false);
+                setHuntPromptDismissed(true);
+                localStorage.setItem('introo_hunt_prompt_dismissed', 'true');
+              }}>Save as Hunt</button>
+              <button className="ob-hunt-prompt-dismiss" onClick={() => {
+                setShowHuntPrompt(false);
+                setHuntPromptDismissed(true);
+                localStorage.setItem('introo_hunt_prompt_dismissed', 'true');
+              }}>×</button>
             </div>
           )}
 
           {/* ── Company Grid ──────────────────────────────────── */}
-          <div className="u-grid">
+          <div className={`u-grid ${viewMode === 'table' ? 'u-grid--table' : ''}`}>
             {loading || storeLoading ? (
               <div className="u-grid-loading-rich">
                 <div className="u-loading-orb">
@@ -1973,21 +2411,39 @@ export function AIHomePage() {
                   <div className="u-loading-orb-ring u-loading-orb-ring--2" />
                   <div className="u-loading-orb-core" />
                 </div>
-                <div className="u-loading-steps">
-                  <div className={`u-loading-step ${calendarSyncing ? 'active' : 'done'}`}>
-                    <span className="u-loading-step-icon">{calendarSyncing ? '⏳' : '✓'}</span>
-                    <span>Syncing calendar events</span>
-                  </div>
-                  <div className={`u-loading-step ${calendarSyncing ? 'pending' : 'active'}`}>
-                    <span className="u-loading-step-icon">{calendarSyncing ? '○' : '⏳'}</span>
-                    <span>Importing contacts &amp; meetings</span>
-                  </div>
-                  <div className="u-loading-step pending">
-                    <span className="u-loading-step-icon">○</span>
-                    <span>Building your network map</span>
-                  </div>
-                </div>
-                <span className="u-loading-hint">This may take a moment on first sync...</span>
+                {loadingPhase === 'syncing' || loadingPhase === 'enriching' ? (
+                  <>
+                    <div className="u-loading-steps">
+                      <div className={`u-loading-step ${loadingPhase === 'syncing' ? 'active' : 'done'}`}>
+                        <span className="u-loading-step-icon">{loadingPhase === 'syncing' ? '⏳' : '✓'}</span>
+                        <span>Syncing calendar events</span>
+                      </div>
+                      <div className={`u-loading-step ${loadingPhase === 'enriching' ? 'active' : loadingPhase === 'syncing' ? 'pending' : 'done'}`}>
+                        <span className="u-loading-step-icon">{loadingPhase === 'enriching' ? '⏳' : loadingPhase === 'syncing' ? '○' : '✓'}</span>
+                        <span>Importing contacts &amp; companies</span>
+                      </div>
+                      <div className="u-loading-step pending">
+                        <span className="u-loading-step-icon">○</span>
+                        <span>Building your network map</span>
+                      </div>
+                    </div>
+                    <span className="u-loading-hint">First sync — this may take a moment...</span>
+                  </>
+                ) : (
+                  <>
+                    <div className="u-loading-steps">
+                      <div className={`u-loading-step ${loadingPhase === 'init' ? 'active' : 'done'}`}>
+                        <span className="u-loading-step-icon">{loadingPhase === 'init' ? '⏳' : '✓'}</span>
+                        <span>Authenticating</span>
+                      </div>
+                      <div className={`u-loading-step ${loadingPhase === 'auth' ? 'active' : loadingPhase === 'init' ? 'pending' : 'done'}`}>
+                        <span className="u-loading-step-icon">{loadingPhase === 'auth' ? '⏳' : loadingPhase === 'init' ? '○' : '✓'}</span>
+                        <span>Loading your contacts</span>
+                      </div>
+                    </div>
+                    <span className="u-loading-hint">Just a second...</span>
+                  </>
+                )}
               </div>
             ) : filteredCompanies.length === 0 ? (
               <div className="u-grid-empty">
@@ -2018,6 +2474,7 @@ export function AIHomePage() {
                     'u-tile',
                     expandedDomain === company.domain ? 'expanded' : '',
                     company.matchingHunts.length > 0 ? 'u-tile--hunt-match' : '',
+                    newSpaceCompanies.has(company.domain) ? 'u-tile--space-new' : '',
                   ].filter(Boolean).join(' ')}
                 >
                   {company.matchingHunts.length > 0 && (
@@ -2026,6 +2483,68 @@ export function AIHomePage() {
                         const h = hunts.find(x => x.id === hId);
                         return h ? <span key={hId} className="u-tile-hunt-tag">{h.title} ⚡</span> : null;
                       })}
+                    </div>
+                  )}
+                  {/* User tags */}
+                  {((companyTags[company.domain] && companyTags[company.domain].length > 0) || tagPickerDomain === company.domain) && (
+                    <div className="u-tile-tags" onClick={e => e.stopPropagation()}>
+                      {(companyTags[company.domain] || []).map(t => {
+                        const color = getTagColor(t);
+                        return (
+                          <span key={t} className="u-tile-tag" style={{ background: color.bg, color: color.text, borderColor: color.border }}>
+                            {t}
+                          </span>
+                        );
+                      })}
+                      <div className="u-tag-picker-wrap" ref={tagPickerDomain === company.domain ? tagPickerRef : undefined}>
+                        <button className="u-tile-tag-add" onClick={() => { setTagPickerDomain(tagPickerDomain === company.domain ? null : company.domain); setTagPickerSearch(''); }}>+</button>
+                        {tagPickerDomain === company.domain && (
+                          <div className="u-tag-picker">
+                            <input
+                              className="u-tag-picker-input"
+                              placeholder="Search or create..."
+                              autoFocus
+                              value={tagPickerSearch}
+                              onChange={e => setTagPickerSearch(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter' && tagPickerSearch.trim()) {
+                                  const existing = tagDefs.find(t => t.name.toLowerCase() === tagPickerSearch.trim().toLowerCase());
+                                  if (existing) {
+                                    toggleTagOnCompany(company.domain, existing.name);
+                                  } else {
+                                    const name = createTag(tagPickerSearch.trim());
+                                    if (name) toggleTagOnCompany(company.domain, name);
+                                  }
+                                  setTagPickerSearch('');
+                                }
+                                if (e.key === 'Escape') { setTagPickerDomain(null); setTagPickerSearch(''); }
+                              }}
+                            />
+                            <div className="u-tag-picker-list">
+                              {tagDefs.filter(t => !tagPickerSearch || t.name.toLowerCase().includes(tagPickerSearch.toLowerCase())).map(t => {
+                                const color = TAG_COLORS[t.colorIdx % TAG_COLORS.length];
+                                const isSelected = (companyTags[company.domain] || []).includes(t.name);
+                                return (
+                                  <button key={t.name} className={`u-tag-picker-option ${isSelected ? 'selected' : ''}`} onClick={() => toggleTagOnCompany(company.domain, t.name)}>
+                                    <span className="u-tag-picker-dot" style={{ background: color.text }} />
+                                    <span className="u-tag-picker-name">{t.name}</span>
+                                    {isSelected && <span className="u-tag-picker-check">✓</span>}
+                                  </button>
+                                );
+                              })}
+                              {tagPickerSearch.trim() && !tagDefs.some(t => t.name.toLowerCase() === tagPickerSearch.trim().toLowerCase()) && (
+                                <button className="u-tag-picker-create" onClick={() => {
+                                  const name = createTag(tagPickerSearch.trim());
+                                  if (name) toggleTagOnCompany(company.domain, name);
+                                  setTagPickerSearch('');
+                                }}>
+                                  + Create "<strong>{tagPickerSearch.trim()}</strong>"
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                   <div
@@ -2039,6 +2558,14 @@ export function AIHomePage() {
                       <span className="u-tile-name">{company.name}</span>
                     </div>
                     <div className="u-tile-actions" onClick={e => e.stopPropagation()}>
+                      {!(companyTags[company.domain]?.length) && tagPickerDomain !== company.domain && (
+                        <button className="u-tile-btn u-tile-btn--tag" onClick={() => { setTagPickerDomain(company.domain); setTagPickerSearch(''); }} title="Add tag">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/>
+                            <line x1="7" y1="7" x2="7.01" y2="7"/>
+                          </svg>
+                        </button>
+                      )}
                       {company.spaceCount > 0 && (
                         <button className="u-tile-btn u-tile-btn--intro" onClick={() => openIntroPanel(company)}>Intro</button>
                       )}
@@ -2049,6 +2576,12 @@ export function AIHomePage() {
                     {company.employeeCount ? <span className="u-tile-meta-badge u-tile-meta-badge--enrich">{company.employeeCount.toLocaleString()} emp</span> : null}
                     {company.country ? <span className="u-tile-meta-badge u-tile-meta-badge--enrich">{company.city ? `${company.city}, ` : ''}{company.country}</span> : null}
                     {company.lastFundingRound ? <span className="u-tile-meta-badge u-tile-meta-badge--funding">{formatFundingRound(company.lastFundingRound)}</span> : null}
+                    {enriching && !company.enrichedAt && !company.employeeCount && !company.country && (
+                      <>
+                        <span className="u-tile-meta-badge u-tile-shimmer" />
+                        <span className="u-tile-meta-badge u-tile-shimmer u-tile-shimmer--short" />
+                      </>
+                    )}
                   </div>
                   {company.spaceCount > 0 && (() => {
                     // Resolve person names from connectionIds
@@ -2149,7 +2682,87 @@ export function AIHomePage() {
                       <span className="u-grid-section-count">{displayCompanies.length}</span>
                     </div>
                   )}
-                  {displayCompanies.slice(pageStart, pageEnd).map(renderCard)}
+                  {viewMode === 'grid' && displayCompanies.slice(pageStart, pageEnd).map(renderCard)}
+
+                  {viewMode === 'table' && (
+                    <div className="u-table-wrap">
+                      <table className="u-table">
+                        <thead>
+                          <tr>
+                            <th className="u-th-company">Company</th>
+                            <th className="u-th-contacts">Contacts</th>
+                            <th className="u-th-strength">Strength</th>
+                            <th className="u-th-employees">Employees</th>
+                            <th className="u-th-location">Location</th>
+                            <th className="u-th-industry">Industry</th>
+                            <th className="u-th-funding">Funding</th>
+                            <th className="u-th-tags">Tags</th>
+                            <th className="u-th-actions"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {displayCompanies.slice(pageStart, pageEnd).map(company => {
+                            const tags = companyTags[company.domain] || [];
+                            const totalMeetings = company.myContacts.reduce((sum, c) => sum + (c.meetingsCount || 0), 0);
+                            return (
+                              <tr
+                                key={company.domain}
+                                className={`u-tr ${company.matchingHunts.length > 0 ? 'u-tr--hunt' : ''} ${newSpaceCompanies.has(company.domain) ? 'u-tr--space-new' : ''}`}
+                                onClick={() => setInlinePanel({ type: 'company', company })}
+                              >
+                                <td className="u-td-company">
+                                  <div className="u-td-company-inner">
+                                    <CompanyLogo domain={company.domain} name={company.name} size={22} />
+                                    <div className="u-td-company-info">
+                                      <span className="u-td-company-name">{company.name}</span>
+                                      <span className="u-td-company-domain">{company.domain}</span>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="u-td-contacts">
+                                  <span className="u-td-num">{company.totalCount}</span>
+                                  {totalMeetings > 0 && <span className="u-td-meetings">{totalMeetings} mtg</span>}
+                                </td>
+                                <td className="u-td-strength">
+                                  {company.bestStrength !== 'none' && (
+                                    <span className={`u-td-strength-pill u-td-strength--${company.bestStrength}`}>
+                                      {company.bestStrength}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="u-td-employees">
+                                  {company.employeeCount ? company.employeeCount.toLocaleString() : enriching && !company.enrichedAt ? <span className="u-td-shimmer" /> : '—'}
+                                </td>
+                                <td className="u-td-location">
+                                  {company.city || company.country
+                                    ? [company.city, company.country].filter(Boolean).join(', ')
+                                    : enriching && !company.enrichedAt ? <span className="u-td-shimmer" /> : '—'}
+                                </td>
+                                <td className="u-td-industry">
+                                  {company.industry || (enriching && !company.enrichedAt ? <span className="u-td-shimmer" /> : '—')}
+                                </td>
+                                <td className="u-td-funding">
+                                  {company.lastFundingRound ? formatFundingRound(company.lastFundingRound) : enriching && !company.enrichedAt ? <span className="u-td-shimmer" /> : '—'}
+                                </td>
+                                <td className="u-td-tags" onClick={e => e.stopPropagation()}>
+                                  {tags.map(t => {
+                                    const color = getTagColor(t);
+                                    return <span key={t} className="u-td-tag" style={{ background: color.bg, color: color.text }}>{t}</span>;
+                                  })}
+                                </td>
+                                <td className="u-td-actions" onClick={e => e.stopPropagation()}>
+                                  {company.spaceCount > 0 && (
+                                    <button className="u-td-intro-btn" onClick={() => openIntroPanel(company)}>Intro</button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
                   {totalPages > 1 && (
                     <div className="u-grid-pagination">
                       <button className="u-grid-page-btn" disabled={gridPage === 0} onClick={() => setGridPage(gridPage - 1)}>← Prev</button>
@@ -2301,7 +2914,14 @@ export function AIHomePage() {
                   )}
                   <button
                     className="u-action-btn"
-                    onClick={() => window.open(`mailto:${c.email}`, '_blank')}
+                    onClick={() => {
+                      emailApi.sendContact({
+                        recipientEmail: c.email,
+                        recipientName: c.name || c.email.split('@')[0],
+                        subject: `Hi ${c.name || 'there'}`,
+                        body: `Hi ${c.name || 'there'},\n\nI wanted to reach out and connect.\n\nBest,\n${currentUser?.name || ''}`,
+                      }).then(() => alert('Email sent!')).catch(() => alert('Failed to send email'));
+                    }}
                   >
                     ✉ Email
                   </button>
@@ -2333,25 +2953,45 @@ export function AIHomePage() {
                   </div>
                 </div>
 
-                {/* Quick stats */}
-                <div className="u-panel-company-stats">
-                  <div className="u-panel-stat">
-                    <span className="u-panel-stat-value">{co.totalCount}</span>
-                    <span className="u-panel-stat-label">Contacts</span>
+                {/* #6 Tag tip */}
+                {showTagTip && (
+                  <div className="ob-tag-tip">
+                    <span className="ob-tag-tip-icon">🏷</span>
+                    <span>Tag companies you care about to organize and filter them later.</span>
+                    <button className="ob-tag-tip-dismiss" onClick={() => setShowTagTip(false)}>Got it</button>
                   </div>
-                  {co.employeeCount && (
-                    <div className="u-panel-stat">
-                      <span className="u-panel-stat-value">{co.employeeCount.toLocaleString()}</span>
-                      <span className="u-panel-stat-label">Employees</span>
+                )}
+
+                {/* Quick stats */}
+                {(() => {
+                  const totalMeetings = co.myContacts.reduce((sum, c) => sum + (c.meetingsCount || 0), 0);
+                  return (
+                    <div className="u-panel-company-stats">
+                      <div className="u-panel-stat">
+                        <span className="u-panel-stat-value">{co.totalCount}</span>
+                        <span className="u-panel-stat-label">Contacts</span>
+                      </div>
+                      {totalMeetings > 0 && (
+                        <div className="u-panel-stat">
+                          <span className="u-panel-stat-value">{totalMeetings}</span>
+                          <span className="u-panel-stat-label">Meetings</span>
+                        </div>
+                      )}
+                      {co.employeeCount && (
+                        <div className="u-panel-stat">
+                          <span className="u-panel-stat-value">{co.employeeCount.toLocaleString()}</span>
+                          <span className="u-panel-stat-label">Employees</span>
+                        </div>
+                      )}
+                      {co.foundedYear && (
+                        <div className="u-panel-stat">
+                          <span className="u-panel-stat-value">{co.foundedYear}</span>
+                          <span className="u-panel-stat-label">Founded</span>
+                        </div>
+                      )}
                     </div>
-                  )}
-                  {co.foundedYear && (
-                    <div className="u-panel-stat">
-                      <span className="u-panel-stat-value">{co.foundedYear}</span>
-                      <span className="u-panel-stat-label">Founded</span>
-                    </div>
-                  )}
-                </div>
+                  );
+                })()}
 
                 {/* Links — always show */}
                 <div className="u-panel-links">
@@ -2365,6 +3005,71 @@ export function AIHomePage() {
                   )}
                 </div>
 
+                {/* Tags */}
+                <div className="u-panel-tags">
+                  <div className="u-panel-tags-list">
+                    {(companyTags[co.domain] || []).map(t => {
+                      const color = getTagColor(t);
+                      return (
+                        <span key={t} className="u-panel-tag" style={{ background: color.bg, color: color.text, borderColor: color.border }}>
+                          {t}
+                          <button className="u-panel-tag-x" style={{ color: color.text }} onClick={() => toggleTagOnCompany(co.domain, t)}>×</button>
+                        </span>
+                      );
+                    })}
+                    <div className="u-tag-picker-wrap" ref={tagPickerDomain === co.domain ? tagPickerRef : undefined}>
+                      <button className="u-panel-tag-add" onClick={() => { setTagPickerDomain(tagPickerDomain === co.domain ? null : co.domain); setTagPickerSearch(''); }}>+ Add tag</button>
+                      {tagPickerDomain === co.domain && (
+                        <div className="u-tag-picker u-tag-picker--panel">
+                          <input
+                            className="u-tag-picker-input"
+                            placeholder="Search or create..."
+                            autoFocus
+                            value={tagPickerSearch}
+                            onChange={e => setTagPickerSearch(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' && tagPickerSearch.trim()) {
+                                const existing = tagDefs.find(t => t.name.toLowerCase() === tagPickerSearch.trim().toLowerCase());
+                                if (existing) {
+                                  toggleTagOnCompany(co.domain, existing.name);
+                                } else {
+                                  const name = createTag(tagPickerSearch.trim());
+                                  if (name) toggleTagOnCompany(co.domain, name);
+                                }
+                                setTagPickerSearch('');
+                              }
+                              if (e.key === 'Escape') { setTagPickerDomain(null); setTagPickerSearch(''); }
+                            }}
+                          />
+                          <div className="u-tag-picker-list">
+                            {tagDefs.filter(t => !tagPickerSearch || t.name.toLowerCase().includes(tagPickerSearch.toLowerCase())).map(t => {
+                              const color = TAG_COLORS[t.colorIdx % TAG_COLORS.length];
+                              const isSelected = (companyTags[co.domain] || []).includes(t.name);
+                              return (
+                                <button key={t.name} className={`u-tag-picker-option ${isSelected ? 'selected' : ''}`} onClick={() => toggleTagOnCompany(co.domain, t.name)}>
+                                  <span className="u-tag-picker-dot" style={{ background: color.text }} />
+                                  <span className="u-tag-picker-name">{t.name}</span>
+                                  {isSelected && <span className="u-tag-picker-check">✓</span>}
+                                  <button className="u-tag-picker-del" onClick={e => { e.stopPropagation(); deleteTagDef(t.name); }} title="Delete tag">×</button>
+                                </button>
+                              );
+                            })}
+                            {tagPickerSearch.trim() && !tagDefs.some(t => t.name.toLowerCase() === tagPickerSearch.trim().toLowerCase()) && (
+                              <button className="u-tag-picker-create" onClick={() => {
+                                const name = createTag(tagPickerSearch.trim());
+                                if (name) toggleTagOnCompany(co.domain, name);
+                                setTagPickerSearch('');
+                              }}>
+                                + Create "<strong>{tagPickerSearch.trim()}</strong>"
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
                 {/* Description */}
                 {co.description && (
                   <div className="u-panel-section">
@@ -2372,6 +3077,52 @@ export function AIHomePage() {
                     <p className="u-panel-section-text">{co.description}</p>
                   </div>
                 )}
+
+                {/* Meeting history */}
+                {(() => {
+                  const allMeetings: { title: string; date: string; contactName: string }[] = [];
+                  co.myContacts.forEach(c => {
+                    if (c.meetings && c.meetings.length > 0) {
+                      c.meetings.forEach(m => allMeetings.push({ title: m.title, date: m.date, contactName: c.name }));
+                    }
+                  });
+                  const seen = new Set<string>();
+                  const unique = allMeetings.filter(m => {
+                    const key = `${m.title}|${m.date}`;
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                  });
+                  unique.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                  if (unique.length === 0) return null;
+                  const visible = historyExpanded ? unique : unique.slice(0, 5);
+                  const hasMore = unique.length > 5;
+                  return (
+                    <div className="u-panel-section">
+                      <h4 className="u-panel-section-h">History</h4>
+                      <div className="u-panel-history">
+                        {visible.map((m, i) => {
+                          const d = new Date(m.date);
+                          const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                          return (
+                            <div key={i} className="u-panel-history-item">
+                              <div className="u-panel-history-dot" />
+                              <div className="u-panel-history-content">
+                                <span className="u-panel-history-title">{m.title}</span>
+                                <span className="u-panel-history-meta">{dateStr}</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {hasMore && (
+                        <button className="u-panel-history-toggle" onClick={() => setHistoryExpanded(!historyExpanded)}>
+                          {historyExpanded ? 'Show less' : `Show all ${unique.length} meetings`}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Details grid — show whatever we have */}
                 {(co.industry || co.city || co.country || co.annualRevenue || co.totalFunding || co.lastFundingRound) && (
@@ -2512,7 +3263,7 @@ export function AIHomePage() {
                           <button
                             className="u-notif-reject-btn"
                             style={{ fontSize: '0.6rem', padding: '0.1rem 0.35rem', flexShrink: 0 }}
-                            onClick={() => removeSpaceMember(space.id, m.user.id)}
+                            onClick={() => { if (window.confirm(`Remove ${m.user.name} from this space?`)) removeSpaceMember(space.id, m.user.id); }}
                             title="Remove member"
                           >×</button>
                         )}
@@ -2669,26 +3420,23 @@ export function AIHomePage() {
                                   className="u-req-action-btn u-req-action-btn--intro"
                                   onClick={() => {
                                     if (myContactsAtCompany.length === 0) {
-                                      // No contacts — open a simple offer email
-                                      openOfferIntroEmail({
-                                        requesterEmail: r.requester.email || '',
-                                        requesterName: r.requester.name,
+                                      emailApi.sendIntroOffer({
+                                        recipientEmail: r.requester.email || '',
+                                        recipientName: r.requester.name,
                                         targetCompany: companyName,
-                                      });
+                                      }).catch(() => {});
                                       offersApi.create({ requestId: r.id, message: 'Intro offered via email' }).catch(() => {});
                                     } else if (myContactsAtCompany.length === 1) {
-                                      // One contact — open double intro immediately
                                       const contact = myContactsAtCompany[0];
-                                      openDoubleIntroEmail({
+                                      emailApi.sendDoubleIntro({
                                         requesterEmail: r.requester.email || '',
                                         requesterName: r.requester.name,
                                         contactEmail: contact.email,
                                         contactName: contact.name,
                                         targetCompany: companyName,
-                                      });
+                                      }).catch(() => {});
                                       offersApi.create({ requestId: r.id, message: `Intro to ${contact.name}` }).catch(() => {});
                                     } else {
-                                      // Multiple contacts — show picker
                                       setIntroPickerRequestId(r.id);
                                     }
                                   }}
@@ -2713,13 +3461,13 @@ export function AIHomePage() {
                                     key={c.id}
                                     className="u-req-picker-item"
                                     onClick={() => {
-                                      openDoubleIntroEmail({
+                                      emailApi.sendDoubleIntro({
                                         requesterEmail: r.requester.email || '',
                                         requesterName: r.requester.name,
                                         contactEmail: c.email,
                                         contactName: c.name,
                                         targetCompany: companyName,
-                                      });
+                                      }).catch(() => {});
                                       offersApi.create({ requestId: r.id, message: `Intro to ${c.name}` }).catch(() => {});
                                       setIntroPickerRequestId(null);
                                     }}
@@ -2861,7 +3609,34 @@ export function AIHomePage() {
                         </div>
                       );
                     })}
-                    {spaces.length === 0 && pendingSpaces.length === 0 && <div className="u-panel-spaces-empty">No spaces yet</div>}
+                    {spaces.length === 0 && pendingSpaces.length === 0 && (
+                      <div className="ob-space-templates">
+                        <p className="ob-space-templates-hint">Create your first circle to pool networks</p>
+                        {[
+                          { emoji: '👥', name: 'My team', desc: 'Share contacts with your team' },
+                          { emoji: '💰', name: 'Investor circle', desc: 'Pool deal flow with co-investors' },
+                          { emoji: '🌐', name: 'Industry peers', desc: 'Connect with peers in your field' },
+                        ].map(tmpl => (
+                          <button
+                            key={tmpl.name}
+                            className="ob-space-template-btn"
+                            onClick={() => {
+                              setNewSpaceName(tmpl.name);
+                              setNewSpaceEmoji(tmpl.emoji);
+                              setShowCreateSpace(true);
+                              setShowJoinSpace(false);
+                            }}
+                          >
+                            <span className="ob-space-template-emoji">{tmpl.emoji}</span>
+                            <div className="ob-space-template-info">
+                              <span className="ob-space-template-name">{tmpl.name}</span>
+                              <span className="ob-space-template-desc">{tmpl.desc}</span>
+                            </div>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* Pending spaces — invitations to accept or requests awaiting approval */}
@@ -3147,11 +3922,11 @@ export function AIHomePage() {
                                   className="u-req-action-btn u-req-action-btn--intro"
                                   onClick={() => {
                                     if (myContactsAtCompany.length === 0) {
-                                      openOfferIntroEmail({ requesterEmail: r.requester.email || '', requesterName: r.requester.name, targetCompany: companyName });
+                                      emailApi.sendIntroOffer({ recipientEmail: r.requester.email || '', recipientName: r.requester.name, targetCompany: companyName }).catch(() => {});
                                       offersApi.create({ requestId: r.id, message: 'Intro offered via email' }).catch(() => {});
                                     } else if (myContactsAtCompany.length === 1) {
                                       const contact = myContactsAtCompany[0];
-                                      openDoubleIntroEmail({ requesterEmail: r.requester.email || '', requesterName: r.requester.name, contactEmail: contact.email, contactName: contact.name, targetCompany: companyName });
+                                      emailApi.sendDoubleIntro({ requesterEmail: r.requester.email || '', requesterName: r.requester.name, contactEmail: contact.email, contactName: contact.name, targetCompany: companyName }).catch(() => {});
                                       offersApi.create({ requestId: r.id, message: `Intro to ${contact.name}` }).catch(() => {});
                                     } else {
                                       setIntroPickerRequestId(r.id);
@@ -3167,7 +3942,7 @@ export function AIHomePage() {
                                 <span className="u-req-picker-label">Pick a contact to introduce:</span>
                                 {myContactsAtCompany.map(c => (
                                   <button key={c.id} className="u-req-picker-item" onClick={() => {
-                                    openDoubleIntroEmail({ requesterEmail: r.requester.email || '', requesterName: r.requester.name, contactEmail: c.email, contactName: c.name, targetCompany: companyName });
+                                    emailApi.sendDoubleIntro({ requesterEmail: r.requester.email || '', requesterName: r.requester.name, contactEmail: c.email, contactName: c.name, targetCompany: companyName }).catch(() => {});
                                     offersApi.create({ requestId: r.id, message: `Intro to ${c.name}` }).catch(() => {});
                                     setIntroPickerRequestId(null);
                                   }}>
@@ -3222,6 +3997,18 @@ export function AIHomePage() {
                 onRejectConnection={rejectConnection}
                 onAcceptSpaceInvite={acceptSpaceInvite}
                 onRejectSpaceInvite={rejectSpaceInvite}
+                onDeleteNotification={(id) => {
+                  notificationsApi.deleteOne(id).then(() => {
+                    setNotifications(prev => prev.filter(n => n.id !== id));
+                    notificationsApi.getUnreadCount().then(r => setNotificationCount(r.count)).catch(() => {});
+                  }).catch(() => {});
+                }}
+                onClearAllNotifications={() => {
+                  notificationsApi.deleteAll().then(() => {
+                    setNotifications([]);
+                    setNotificationCount(0);
+                  }).catch(() => {});
+                }}
               />
             )}
 
@@ -3241,6 +4028,7 @@ export function AIHomePage() {
                 onAccountSync={handleAccountSync}
                 onAccountDelete={handleAccountDelete}
                 onStartEnrichment={startEnrichment}
+                onStopEnrichment={stopEnrichment}
                 onLogout={logout}
               />
             )}

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authMiddleware, optionalAuthMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { validate, schemas } from '../middleware/validation.js';
 import { getPaginationParams, createPaginatedResponse } from '../lib/pagination.js';
+import { sendNotificationEmail } from '../services/email.js';
 import prisma from '../lib/prisma.js';
 
 const router = Router();
@@ -232,12 +233,11 @@ router.post('/', authMiddleware, validate(schemas.createRequest), async (req, re
           }
 
           if (connectorIds.size > 0) {
+            const introNotif = { type: 'intro_request', title: `Intro request: ${companyName}`, body: `${requesterName} is looking for an intro to ${companyName}. "${rawText}"` };
             await prisma.notification.createMany({
               data: Array.from(connectorIds).map(connectorUserId => ({
                 userId: connectorUserId,
-                type: 'intro_request',
-                title: `Intro request: ${companyName}`,
-                body: `${requesterName} is looking for an intro to ${companyName}. "${rawText}"`,
+                ...introNotif,
                 data: {
                   requestId: request.id,
                   spaceId,
@@ -252,6 +252,9 @@ router.post('/', authMiddleware, validate(schemas.createRequest), async (req, re
                 },
               })),
             });
+            for (const connectorUserId of connectorIds) {
+              sendNotificationEmail(connectorUserId, introNotif).catch(() => {});
+            }
           }
         }
       } catch (notifError) {
@@ -264,12 +267,11 @@ router.post('/', authMiddleware, validate(schemas.createRequest), async (req, re
       try {
         const companyName = (normalizedQuery as Record<string, unknown>)?.companyName as string || 'a company';
         const requesterName = request.requester.name || 'Someone';
+        const peerNotif = { type: 'intro_request', title: `Intro request: ${companyName}`, body: `${requesterName} is looking for an intro to ${companyName}. "${rawText}"` };
         await prisma.notification.create({
           data: {
             userId: connectionPeerId,
-            type: 'intro_request',
-            title: `Intro request: ${companyName}`,
-            body: `${requesterName} is looking for an intro to ${companyName}. "${rawText}"`,
+            ...peerNotif,
             data: {
               requestId: request.id,
               companyName,
@@ -282,6 +284,7 @@ router.post('/', authMiddleware, validate(schemas.createRequest), async (req, re
             },
           },
         });
+        sendNotificationEmail(connectionPeerId, peerNotif).catch(() => {});
       } catch (notifError) {
         console.error('Failed to create 1-1 notification:', notifError);
       }
@@ -388,12 +391,11 @@ router.patch('/:id/decline', authMiddleware, async (req, res) => {
       notifBody += ` Reason: "${reason}"`;
     }
 
+    const declineNotif = { type: 'intro_declined', title: `Declined: ${companyName}`, body: notifBody };
     await prisma.notification.create({
       data: {
         userId: existing.requesterId,
-        type: 'intro_declined',
-        title: `Declined: ${companyName}`,
-        body: notifBody,
+        ...declineNotif,
         data: {
           requestId: existing.id,
           companyName,
@@ -404,10 +406,10 @@ router.patch('/:id/decline', authMiddleware, async (req, res) => {
           reason: reason || null,
           connectionPeerId: connPeerId,
           connectionPeerName: connPeerName,
-          // No connector identity — anonymous
         },
       },
     });
+    sendNotificationEmail(existing.requesterId, declineNotif).catch(() => {});
 
     res.json(updated);
   } catch (error: unknown) {

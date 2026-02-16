@@ -125,6 +125,7 @@ export interface EnrichmentProgress {
   skipped: number;
   errors: number;
   done: boolean;
+  error?: string | null;
 }
 
 export const enrichmentApi = {
@@ -134,11 +135,15 @@ export const enrichmentApi = {
     companies: EnrichmentProgress | null;
     contactsFree: EnrichmentProgress | null;
   }>('/api/enrichment/progress'),
-  // FREE enrichment — uses mixed_people/api_search, 0 credits
+  // Batch enrichment — paid Apollo endpoints (people/match + organizations/enrich)
   enrichContactsFree: (options?: { force?: boolean }) =>
     request<{ message: string; key: string }>('/api/enrichment/contacts-free', {
       method: 'POST',
       body: JSON.stringify({ force: options?.force ?? false }),
+    }),
+  stopEnrichment: () =>
+    request<{ message: string; stopped: boolean; progress?: any }>('/api/enrichment/stop', {
+      method: 'POST',
     }),
   lookupCompany: (domain: string) =>
     request<{ company: any; source: 'db' | 'apollo' | 'none' }>(`/api/enrichment/company/${encodeURIComponent(domain)}`),
@@ -193,6 +198,59 @@ export const notificationsApi = {
     request<Notification>(`/api/notifications/${id}/read`, { method: 'PATCH' }),
   markAllRead: () =>
     request<{ success: boolean }>('/api/notifications/mark-all-read', { method: 'POST' }),
+  deleteOne: (id: string) =>
+    request<{ success: boolean }>(`/api/notifications/${id}`, { method: 'DELETE' }),
+  deleteAll: () =>
+    request<{ success: boolean }>('/api/notifications', { method: 'DELETE' }),
+};
+
+// Tags
+export const tagsApi = {
+  getAll: () =>
+    request<{ tagDefs: Record<string, string>; companyTags: Record<string, string[]> }>('/api/tags'),
+  createTag: (name: string, color: string) =>
+    request<{ tag: { name: string; color: string } }>('/api/tags', {
+      method: 'POST',
+      body: JSON.stringify({ name, color }),
+    }),
+  deleteTag: (name: string) =>
+    request<{ success: boolean }>(`/api/tags/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  toggleTag: (tagName: string, companyDomain: string) =>
+    request<{ action: 'added' | 'removed' }>('/api/tags/toggle', {
+      method: 'POST',
+      body: JSON.stringify({ tagName, companyDomain }),
+    }),
+  sync: (tagDefs: Record<string, string>, companyTags: Record<string, string[]>) =>
+    request<{ success: boolean }>('/api/tags/sync', {
+      method: 'PUT',
+      body: JSON.stringify({ tagDefs, companyTags }),
+    }),
+};
+
+// Email
+export const emailApi = {
+  sendIntroOffer: (data: { recipientEmail: string; recipientName: string; targetCompany: string; contactName?: string }) =>
+    request<{ success: boolean; emailId?: string }>('/api/email/intro-offer', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  sendDoubleIntro: (data: { requesterEmail: string; requesterName: string; contactEmail: string; contactName: string; targetCompany: string }) =>
+    request<{ success: boolean; emailId?: string }>('/api/email/double-intro', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  sendContact: (data: { recipientEmail: string; recipientName?: string; subject: string; body: string }) =>
+    request<{ success: boolean; emailId?: string }>('/api/email/contact', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getPreferences: () =>
+    request<{ intros?: boolean; notifications?: boolean; digests?: boolean }>('/api/email/preferences'),
+  updatePreferences: (prefs: { intros?: boolean; notifications?: boolean; digests?: boolean }) =>
+    request<{ success: boolean; preferences: Record<string, boolean> }>('/api/email/preferences', {
+      method: 'PATCH',
+      body: JSON.stringify(prefs),
+    }),
 };
 
 export interface IntroRequestResponse {

@@ -1,0 +1,169 @@
+import { Router } from 'express';
+import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
+import {
+  sendIntroOfferEmail,
+  sendDoubleIntroEmail,
+  sendContactEmail,
+} from '../services/email.js';
+import prisma from '../lib/prisma.js';
+
+const router = Router();
+router.use(authMiddleware);
+
+// ─── Send intro offer email ─────────────────────────────────────────────────
+
+router.post('/intro-offer', async (req, res) => {
+  try {
+    const user = (req as AuthenticatedRequest).user!;
+    const { recipientEmail, recipientName, targetCompany, contactName } = req.body;
+
+    if (!recipientEmail || !recipientName || !targetCompany) {
+      res.status(400).json({ error: 'recipientEmail, recipientName, and targetCompany are required' });
+      return;
+    }
+
+    const result = await sendIntroOfferEmail({
+      senderName: user.name,
+      senderEmail: user.email,
+      recipientEmail,
+      recipientName,
+      targetCompany,
+      contactName,
+    });
+
+    if (!result.success) {
+      res.status(500).json({ error: result.error || 'Failed to send email' });
+      return;
+    }
+
+    res.json({ success: true, emailId: result.id });
+  } catch (error: any) {
+    console.error('Intro offer email error:', error.message);
+    res.status(500).json({ error: 'Failed to send intro offer email' });
+  }
+});
+
+// ─── Send double intro email ────────────────────────────────────────────────
+
+router.post('/double-intro', async (req, res) => {
+  try {
+    const user = (req as AuthenticatedRequest).user!;
+    const { requesterEmail, requesterName, contactEmail, contactName, targetCompany } = req.body;
+
+    if (!requesterEmail || !requesterName || !contactEmail || !contactName || !targetCompany) {
+      res.status(400).json({ error: 'requesterEmail, requesterName, contactEmail, contactName, and targetCompany are required' });
+      return;
+    }
+
+    const result = await sendDoubleIntroEmail({
+      senderName: user.name,
+      senderEmail: user.email,
+      requesterEmail,
+      requesterName,
+      contactEmail,
+      contactName,
+      targetCompany,
+    });
+
+    if (!result.success) {
+      res.status(500).json({ error: result.error || 'Failed to send email' });
+      return;
+    }
+
+    res.json({ success: true, emailId: result.id });
+  } catch (error: any) {
+    console.error('Double intro email error:', error.message);
+    res.status(500).json({ error: 'Failed to send double intro email' });
+  }
+});
+
+// ─── Send direct contact email ──────────────────────────────────────────────
+
+router.post('/contact', async (req, res) => {
+  try {
+    const user = (req as AuthenticatedRequest).user!;
+    const { recipientEmail, recipientName, subject, body } = req.body;
+
+    if (!recipientEmail || !subject || !body) {
+      res.status(400).json({ error: 'recipientEmail, subject, and body are required' });
+      return;
+    }
+
+    const result = await sendContactEmail({
+      senderName: user.name,
+      senderEmail: user.email,
+      recipientEmail,
+      recipientName: recipientName || recipientEmail.split('@')[0],
+      subject,
+      body,
+    });
+
+    if (!result.success) {
+      res.status(500).json({ error: result.error || 'Failed to send email' });
+      return;
+    }
+
+    res.json({ success: true, emailId: result.id });
+  } catch (error: any) {
+    console.error('Contact email error:', error.message);
+    res.status(500).json({ error: 'Failed to send email' });
+  }
+});
+
+// ─── Update email preferences ───────────────────────────────────────────────
+
+router.patch('/preferences', async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+    const { intros, notifications, digests } = req.body;
+
+    const current = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { emailPreferences: true },
+    });
+
+    const currentPrefs = (current?.emailPreferences as Record<string, boolean>) || {};
+    const updatedPrefs = {
+      ...currentPrefs,
+      ...(intros !== undefined ? { intros } : {}),
+      ...(notifications !== undefined ? { notifications } : {}),
+      ...(digests !== undefined ? { digests } : {}),
+    };
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { emailPreferences: updatedPrefs },
+    });
+
+    res.json({ success: true, preferences: updatedPrefs });
+  } catch (error: any) {
+    console.error('Email preferences error:', error.message);
+    res.status(500).json({ error: 'Failed to update email preferences' });
+  }
+});
+
+// ─── Get email preferences ──────────────────────────────────────────────────
+
+router.get('/preferences', async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { emailPreferences: true },
+    });
+
+    const prefs = (user?.emailPreferences as Record<string, boolean>) || {
+      intros: true,
+      notifications: true,
+      digests: true,
+    };
+
+    res.json(prefs);
+  } catch (error: any) {
+    console.error('Get email preferences error:', error.message);
+    res.status(500).json({ error: 'Failed to get email preferences' });
+  }
+});
+
+export default router;

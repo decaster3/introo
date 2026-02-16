@@ -5,6 +5,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'SET_LOADING':
       return { ...state, isLoading: action.payload };
 
+    case 'SET_LOADING_PHASE':
+      return { ...state, loadingPhase: action.payload };
+
     case 'SET_AUTH':
       return {
         ...state,

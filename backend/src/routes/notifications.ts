@@ -90,4 +90,39 @@ router.post('/mark-all-read', async (req, res) => {
   }
 });
 
+// Delete a single notification
+router.delete('/:id', async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+
+    const notification = await prisma.notification.findFirst({
+      where: { id: req.params.id, userId },
+    });
+
+    if (!notification) {
+      res.status(404).json({ error: 'Notification not found' });
+      return;
+    }
+
+    await prisma.notification.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (error: unknown) {
+    console.error('Error deleting notification:', error);
+    res.status(500).json({ error: 'Failed to delete notification' });
+  }
+});
+
+// Delete all notifications
+router.delete('/', async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+
+    await prisma.notification.deleteMany({ where: { userId } });
+    res.json({ success: true });
+  } catch (error: unknown) {
+    console.error('Error clearing notifications:', error);
+    res.status(500).json({ error: 'Failed to clear notifications' });
+  }
+});
+
 export default router;

@@ -17,12 +17,19 @@ const EFFECTIVE_JWT_SECRET = JWT_SECRET || 'dev-only-secret-do-not-use-in-prod';
 const JWT_EXPIRES_IN = '7d';
 
 // Token encryption for OAuth tokens at rest
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex');
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
+if (!ENCRYPTION_KEY) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('FATAL: ENCRYPTION_KEY environment variable is required in production. Generate one with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+  }
+  console.warn('WARNING: ENCRYPTION_KEY not set. Using insecure default for development only. OAuth tokens will be lost on restart.');
+}
+const EFFECTIVE_ENCRYPTION_KEY = ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex');
 const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
 
 export function encryptToken(token: string): string {
   const iv = crypto.randomBytes(16);
-  const key = Buffer.from(ENCRYPTION_KEY.slice(0, 64), 'hex');
+  const key = Buffer.from(EFFECTIVE_ENCRYPTION_KEY.slice(0, 64), 'hex');
   const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, key, iv);
   let encrypted = cipher.update(token, 'utf8', 'hex');
   encrypted += cipher.final('hex');
@@ -36,7 +43,7 @@ export function decryptToken(encryptedToken: string): string | null {
     if (!ivHex || !authTagHex || !encrypted) return null;
     const iv = Buffer.from(ivHex, 'hex');
     const authTag = Buffer.from(authTagHex, 'hex');
-    const key = Buffer.from(ENCRYPTION_KEY.slice(0, 64), 'hex');
+    const key = Buffer.from(EFFECTIVE_ENCRYPTION_KEY.slice(0, 64), 'hex');
     const decipher = crypto.createDecipheriv(ENCRYPTION_ALGORITHM, key, iv);
     decipher.setAuthTag(authTag);
     let decrypted = decipher.update(encrypted, 'hex', 'utf8');
@@ -86,7 +93,7 @@ export function configurePassport() {
           'https://www.googleapis.com/auth/calendar.readonly',
         ],
         accessType: 'offline',
-        prompt: 'consent', // Always show consent screen to get refresh token
+        prompt: 'select_account',
       } as any,
       async (accessToken, refreshToken, profile, done) => {
         try {
@@ -112,6 +119,22 @@ export function configurePassport() {
               email,
               name: profile.displayName,
               avatar: profile.photos?.[0]?.value,
+              googleAccessToken: encryptedAccessToken,
+              googleRefreshToken: encryptedRefreshToken,
+            },
+          });
+
+          // Also write tokens to CalendarAccount (single source of truth for sync)
+          await prisma.calendarAccount.upsert({
+            where: { userId_email: { userId: user.id, email } },
+            update: {
+              googleAccessToken: encryptedAccessToken,
+              googleRefreshToken: encryptedRefreshToken,
+              isActive: true,
+            },
+            create: {
+              userId: user.id,
+              email,
               googleAccessToken: encryptedAccessToken,
               googleRefreshToken: encryptedRefreshToken,
             },
@@ -151,6 +174,16 @@ export function verifyToken(token: string): JwtPayload | null {
   }
 }
 
+// In-memory user cache to avoid DB hit on every authenticated request
+const USER_CACHE = new Map<string, { user: AuthUser; expiry: number }>();
+const USER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+export function invalidateUserCache(userId: string) {
+  USER_CACHE.delete(userId);
+}
+
+const USER_SELECT = { id: true, email: true, name: true, avatar: true, title: true, company: true, companyDomain: true, linkedinUrl: true, headline: true, city: true, country: true } as const;
+
 export const authMiddleware: RequestHandler = async (req, res, next) => {
   const token = req.cookies?.token || req.headers.authorization?.replace('Bearer ', '');
 
@@ -166,15 +199,27 @@ export const authMiddleware: RequestHandler = async (req, res, next) => {
   }
 
   try {
+    // Check cache first
+    const cached = USER_CACHE.get(payload.userId);
+    if (cached && cached.expiry > Date.now()) {
+      (req as AuthenticatedRequest).user = cached.user;
+      next();
+      return;
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: payload.userId },
-      select: { id: true, email: true, name: true, avatar: true, title: true, company: true, companyDomain: true, linkedinUrl: true, headline: true, city: true, country: true },
+      select: USER_SELECT,
     });
 
     if (!user) {
+      USER_CACHE.delete(payload.userId);
       res.status(401).json({ error: 'User not found' });
       return;
     }
+
+    // Cache the user
+    USER_CACHE.set(payload.userId, { user, expiry: Date.now() + USER_CACHE_TTL });
 
     (req as AuthenticatedRequest).user = user;
     next();

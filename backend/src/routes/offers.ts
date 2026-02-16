@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { validate, schemas } from '../middleware/validation.js';
+import { sendNotificationEmail } from '../services/email.js';
 import prisma from '../lib/prisma.js';
 
 const router = Router();
@@ -101,12 +102,11 @@ router.post('/', authMiddleware, validate(schemas.createOffer), async (req, res)
         connPeerName = peer?.name || null;
       }
 
+      const offerNotif = { type: 'intro_offered', title: `Intro offered: ${companyName}`, body: `${introducerName} offered to introduce you to someone at ${companyName}.` };
       await prisma.notification.create({
         data: {
           userId: request.requesterId,
-          type: 'intro_offered',
-          title: `Intro offered: ${companyName}`,
-          body: `${introducerName} offered to introduce you to someone at ${companyName}.`,
+          ...offerNotif,
           data: {
             requestId,
             offerId: offer.id,
@@ -122,6 +122,7 @@ router.post('/', authMiddleware, validate(schemas.createOffer), async (req, res)
           },
         },
       });
+      sendNotificationEmail(request.requesterId, offerNotif).catch(() => {});
     } catch (notifError) {
       console.error('Failed to create intro_offered notification:', notifError);
     }

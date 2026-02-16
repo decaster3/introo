@@ -22,6 +22,7 @@ model User {
   googleAccessToken  String?
   googleRefreshToken String?
   calendarSyncedAt   DateTime?
+  emailPreferences   Json                @default("{\"intros\":true,\"notifications\":true,\"digests\":true}")
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   contacts           Contact[]
@@ -35,6 +36,7 @@ model User {
   sentConnections    DirectConnection[]  @relation("ConnectionFrom")
   receivedConnections DirectConnection[] @relation("ConnectionTo")
   notifications      Notification[]
+  tags               Tag[]
 
   @@map("users")
 }
@@ -120,8 +122,40 @@ model Company {
   updatedAt        DateTime       @updatedAt
   contacts         Contact[]
   relationships    Relationship[]
+  companyTags      CompanyTag[]
 
   @@map("companies")
+}
+
+model Tag {
+  id        String       @id @default(cuid())
+  userId    String
+  name      String
+  color     String       @default("#5b8def")
+  createdAt DateTime     @default(now())
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companies CompanyTag[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@map("tags")
+}
+
+model CompanyTag {
+  id        String   @id @default(cuid())
+  tagId     String
+  companyDomain String
+  companyId String?
+  userId    String
+  createdAt DateTime @default(now())
+  tag       Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([tagId, companyDomain])
+  @@index([userId])
+  @@index([companyDomain])
+  @@index([companyId])
+  @@map("company_tags")
 }
 
 model Contact {

@@ -178,6 +178,7 @@ export interface DisplayContact {
   headline?: string | null;
   enrichedAt?: string | null;
   sourceAccountEmails?: string[];
+  meetings?: Meeting[];
   companyData?: {
     id?: string;
     employeeCount?: number | null;

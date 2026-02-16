@@ -1,53 +1,69 @@
 import { useState, useEffect, useCallback } from 'react';
-import { enrichmentApi } from '../lib/api';
+import { enrichmentApi, type EnrichmentProgress } from '../lib/api';
+
+interface EnrichStats {
+  contacts: { total: number; enriched: number; identified?: number; notFound?: number; pending?: number };
+  companies: { total: number; enriched: number };
+  lastEnrichedAt?: string | null;
+}
+
+const POLL_INTERVAL_MS = 2000;
+const DETECTION_ATTEMPTS = 5;
 
 export function useEnrichment(refreshData: () => Promise<void>, storeLoading: boolean) {
   const [enriching, setEnriching] = useState(false);
   const [autoEnrichTriggered, setAutoEnrichTriggered] = useState(false);
   const [enrichProgress, setEnrichProgress] = useState<{
-    contacts: { total: number; enriched: number; skipped: number; errors: number; done: boolean } | null;
-    companies: { total: number; enriched: number; skipped: number; errors: number; done: boolean } | null;
-    contactsFree?: { total: number; enriched: number; skipped: number; errors: number; done: boolean; error?: string | null } | null;
+    contacts: EnrichmentProgress | null;
+    companies: EnrichmentProgress | null;
+    contactsFree?: EnrichmentProgress | null;
   }>({ contacts: null, companies: null, contactsFree: null });
   const [enrichError, setEnrichError] = useState<string | null>(null);
-  const [enrichStats, setEnrichStats] = useState<{
-    contacts: { total: number; enriched: number; notFound?: number };
-    companies: { total: number; enriched: number };
-    lastEnrichedAt?: string | null;
-  } | null>(null);
+  const [enrichStats, setEnrichStats] = useState<EnrichStats | null>(null);
+  const refreshStats = useCallback(() => {
+    enrichmentApi.getStatus().then(setEnrichStats).catch(() => {});
+  }, []);
 
   // Check if enrichment is running on the server
   const checkEnrichmentRunning = useCallback(() => {
-    enrichmentApi.getProgress()
+    return enrichmentApi.getProgress()
       .then(progress => {
         if (progress.contactsFree && !progress.contactsFree.done) {
           setEnriching(true);
           setEnrichProgress(progress);
-        } else if (progress.contactsFree && progress.contactsFree.done) {
-          enrichmentApi.getStatus().then(setEnrichStats).catch(() => {});
+          return true;
+        }
+        if (progress.contactsFree?.done) {
+          refreshStats();
           refreshData();
         }
+        return false;
       })
-      .catch(() => {});
-  }, [refreshData]);
+      .catch(() => false);
+  }, [refreshData, refreshStats]);
 
-  // Fetch enrichment stats on mount + check if enrichment is already running
+  // Fetch stats on mount + check if enrichment is already running
   useEffect(() => {
-    enrichmentApi.getStatus()
-      .then(setEnrichStats)
-      .catch(() => {});
+    refreshStats();
     checkEnrichmentRunning();
-  }, [checkEnrichmentRunning]);
+  }, [checkEnrichmentRunning, refreshStats]);
 
-  // Re-check after store finishes loading
+  // After store loads, poll briefly to detect enrichment that may have just started
   useEffect(() => {
-    if (!storeLoading && !enriching) {
-      const timer = setTimeout(checkEnrichmentRunning, 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [storeLoading, enriching, checkEnrichmentRunning]);
+    if (storeLoading || enriching) return;
+    let attempts = 0;
+    const interval = setInterval(async () => {
+      attempts++;
+      const isRunning = await checkEnrichmentRunning();
+      if (isRunning || attempts >= DETECTION_ATTEMPTS) {
+        clearInterval(interval);
+        if (!isRunning) refreshStats();
+      }
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [storeLoading, enriching, checkEnrichmentRunning, refreshStats]);
 
-  // Poll progress when enrichment is running
+  // Poll progress while enrichment is running
   useEffect(() => {
     if (!enriching) return;
     let pollCount = 0;
@@ -58,64 +74,75 @@ export function useEnrichment(refreshData: () => Promise<void>, storeLoading: bo
           setEnrichProgress(progress);
 
           if (!progress.contactsFree) {
-            if (pollCount > 5) {
+            if (pollCount > DETECTION_ATTEMPTS) {
               setEnriching(false);
               setEnrichError('Enrichment process was lost. Please try again.');
-              enrichmentApi.getStatus().then(setEnrichStats).catch(() => {});
+              refreshStats();
               refreshData();
             }
             return;
           }
 
-          if ((progress.contactsFree as any)?.error) {
-            setEnrichError((progress.contactsFree as any).error);
+          if (progress.contactsFree.error) {
+            setEnrichError(progress.contactsFree.error);
           }
 
-          const contactsDone = !progress.contacts || progress.contacts.done;
-          const companiesDone = !progress.companies || progress.companies.done;
-          const contactsFreeDone = progress.contactsFree.done;
-          if (contactsDone && companiesDone && contactsFreeDone) {
+          if (progress.contactsFree.done) {
             setEnriching(false);
-            enrichmentApi.getStatus().then(setEnrichStats).catch(() => {});
+            refreshStats();
             refreshData();
           }
         })
         .catch(() => {});
-    }, 2000);
+    }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [enriching, refreshData]);
+  }, [enriching, refreshData, refreshStats]);
 
-  // Start FREE enrichment
+  // Start enrichment — only processes never-attempted contacts
   const startEnrichment = useCallback(async () => {
     if (enriching) return;
     setEnriching(true);
     setEnrichError(null);
     setEnrichProgress({ contacts: null, companies: null, contactsFree: null });
     try {
-      await enrichmentApi.enrichContactsFree({ force: true });
+      await enrichmentApi.enrichContactsFree();
     } catch (err) {
-      console.error('Failed to start free enrichment:', err);
+      console.error('Failed to start enrichment:', err);
       setEnriching(false);
       setEnrichError('Failed to start enrichment. Please try again.');
     }
   }, [enriching]);
 
-  // Auto-enrich once per week
+  // Auto-enrich ONLY on genuine first signup (never enriched before, no localStorage stamp).
+  // Returning users and page reloads won't re-trigger because pods_last_enrich is set.
   useEffect(() => {
-    if (autoEnrichTriggered || enriching) return;
-    if (!enrichStats) return;
+    if (autoEnrichTriggered || enriching || storeLoading || !enrichStats) return;
     setAutoEnrichTriggered(true);
 
-    const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-    const lastRun = localStorage.getItem('pods_last_enrich');
-    const lastRunTime = lastRun ? parseInt(lastRun, 10) : 0;
-    const elapsed = Date.now() - lastRunTime;
+    const pendingCount = enrichStats.contacts.pending ?? 0;
+    const hasRunBefore = localStorage.getItem('pods_last_enrich');
 
-    if (elapsed >= WEEK_MS && enrichStats.contacts.enriched < enrichStats.contacts.total) {
+    // First-ever signup: no enrichment history at all
+    if (pendingCount > 0 && enrichStats.contacts.enriched === 0 && !hasRunBefore) {
       localStorage.setItem('pods_last_enrich', String(Date.now()));
+      console.log('[enrichment] First signup: auto-starting enrichment');
       startEnrichment();
     }
-  }, [enrichStats, autoEnrichTriggered, enriching, startEnrichment]);
+  }, [enrichStats, autoEnrichTriggered, enriching, storeLoading, startEnrichment]);
 
-  return { enriching, enrichProgress, enrichError, enrichStats, startEnrichment };
+  // Stop enrichment
+  const stopEnrichment = useCallback(async () => {
+    if (!enriching) return;
+    try {
+      await enrichmentApi.stopEnrichment();
+      setEnriching(false);
+      setEnrichError(null);
+      refreshStats();
+      refreshData();
+    } catch (err) {
+      console.error('Failed to stop enrichment:', err);
+    }
+  }, [enriching, refreshData, refreshStats]);
+
+  return { enriching, enrichProgress, enrichError, enrichStats, startEnrichment, stopEnrichment };
 }

@@ -63,7 +63,7 @@ export const securityHeaders: RequestHandler = (req: Request, res: Response, nex
 export const cookieConfig = {
   httpOnly: true,
   secure: isProduction, // Only require HTTPS in production
-  sameSite: isProduction ? 'none' as const : 'lax' as const, // Cross-domain in prod, same-site in dev
+  sameSite: 'lax' as const, // Same-domain deployment: 'lax' is secure and sufficient
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
   path: '/',
 };

@@ -11,7 +11,7 @@ interface SettingsPanelProps {
   syncingAccountId: string | null;
   enriching: boolean;
   enrichStats: {
-    contacts: { total: number; enriched: number; notFound?: number };
+    contacts: { total: number; enriched: number; identified?: number; notFound?: number; pending?: number };
     companies: { total: number; enriched: number };
     lastEnrichedAt?: string | null;
   } | null;
@@ -25,6 +25,7 @@ interface SettingsPanelProps {
   onAccountSync: (accountId: string) => void;
   onAccountDelete: (accountId: string) => void;
   onStartEnrichment: () => void;
+  onStopEnrichment: () => void;
   onLogout: () => void;
 }
 
@@ -33,7 +34,7 @@ export function SettingsPanel({
   calendarSyncing, syncingAccountId,
   enriching, enrichStats, enrichError, enrichProgress,
   onCalendarSync, onAccountSync, onAccountDelete,
-  onStartEnrichment, onLogout,
+  onStartEnrichment, onStopEnrichment, onLogout,
 }: SettingsPanelProps) {
   return (
     <div className="u-panel-settings">
@@ -42,28 +43,38 @@ export function SettingsPanel({
       {/* Main Account */}
       <div className="u-panel-section">
         <h4 className="u-panel-section-h">Main Account</h4>
-        {currentUser && (
-          <div className="u-settings-account">
-            <PersonAvatar email={currentUser.email} name={currentUser.name} avatarUrl={currentUser.avatar} size={40} />
-            <div className="u-settings-account-info">
-              <span className="u-settings-account-name">{currentUser.name}</span>
-              <span className="u-settings-account-email">{currentUser.email}</span>
-            </div>
-            {isCalendarConnected && (() => {
-              const primaryAcct = calendarAccounts.find(a => currentUser.email && a.email.toLowerCase() === currentUser.email.toLowerCase());
-              return (
-                <button
-                  className="u-action-btn"
-                  onClick={() => primaryAcct ? onAccountSync(primaryAcct.id) : onCalendarSync()}
-                  disabled={calendarSyncing || (primaryAcct ? syncingAccountId === primaryAcct.id : false)}
-                  style={{ marginLeft: 'auto', flexShrink: 0 }}
-                >
-                  {(primaryAcct && syncingAccountId === primaryAcct.id) || (!primaryAcct && calendarSyncing) ? 'Syncing...' : 'Sync'}
-                </button>
-              );
-            })()}
-          </div>
-        )}
+        {currentUser && (() => {
+          const primaryAcct = calendarAccounts.find(a => currentUser.email && a.email.toLowerCase() === currentUser.email.toLowerCase());
+          return (
+            <>
+              <div className="u-settings-account">
+                <PersonAvatar email={currentUser.email} name={currentUser.name} avatarUrl={currentUser.avatar} size={40} />
+                <div className="u-settings-account-info">
+                  <span className="u-settings-account-name">{currentUser.name}</span>
+                  <span className="u-settings-account-email">{currentUser.email}</span>
+                </div>
+                {isCalendarConnected && (
+                  <button
+                    className="u-action-btn"
+                    onClick={() => primaryAcct ? onAccountSync(primaryAcct.id) : onCalendarSync()}
+                    disabled={calendarSyncing || (primaryAcct ? syncingAccountId === primaryAcct.id : false)}
+                    style={{ marginLeft: 'auto', flexShrink: 0 }}
+                  >
+                    {(primaryAcct && syncingAccountId === primaryAcct.id) || (!primaryAcct && calendarSyncing) ? 'Syncing...' : 'Sync'}
+                  </button>
+                )}
+              </div>
+              {primaryAcct && (
+                <span className="u-settings-sync-meta">
+                  {primaryAcct.contactsCount} contacts
+                  {primaryAcct.lastSyncedAt && (
+                    <> &middot; last synced {new Date(primaryAcct.lastSyncedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</>
+                  )}
+                </span>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       <span className="u-settings-hint">People can find and connect with you using your main or any connected email.</span>
@@ -140,19 +151,30 @@ export function SettingsPanel({
               {enriching ? (
                 <><span className="u-enrich-spinner" /> Running...</>
               ) : enrichStats ? (
-                <>Updated {enrichStats.contacts.enriched}/{enrichStats.contacts.total}{enrichStats.contacts.notFound ? `, ${enrichStats.contacts.notFound} not identified` : ''}</>
+                <>{enrichStats.contacts.identified ?? 0} contacts &amp; {enrichStats.companies.enriched} companies enriched{(enrichStats.contacts.notFound ?? 0) > 0 ? <>, {enrichStats.contacts.notFound} not found</> : null}{(enrichStats.contacts.pending ?? 0) > 0 ? <> &middot; <strong>{enrichStats.contacts.pending} new</strong></> : null}</>
               ) : (
                 <>Loading...</>
               )}
             </span>
           </div>
-          <button
-            className={`u-action-btn ${enriching ? 'enriching' : ''}`}
-            onClick={onStartEnrichment}
-            disabled={enriching}
-          >
-            {enriching ? 'Enriching...' : 'Run now'}
-          </button>
+          {enriching ? (
+            <button
+              className="u-action-btn u-action-btn--stop"
+              onClick={onStopEnrichment}
+            >
+              Stop
+            </button>
+          ) : (
+            <button
+              className="u-action-btn"
+              onClick={onStartEnrichment}
+              disabled={!enrichStats || (enrichStats.contacts.pending ?? 0) === 0}
+            >
+              {enrichStats && (enrichStats.contacts.pending ?? 0) > 0
+                ? `Enrich ${enrichStats.contacts.pending} new`
+                : 'All enriched'}
+            </button>
+          )}
         </div>
         <span className="u-settings-meta">
           {enrichStats?.lastEnrichedAt ? (

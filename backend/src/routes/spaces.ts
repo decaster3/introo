@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
+import { sendNotificationEmail } from '../services/email.js';
 import prisma from '../lib/prisma.js';
 
 const router = Router();
@@ -334,29 +335,29 @@ router.post('/join/:inviteCode', async (req, res) => {
 
     if (status === 'pending') {
       // Notify space owner about pending join request
+      const joinReqNotif = { type: 'space_join_request', title: `Join request: ${space.name}`, body: `${joinerUser?.name || 'Someone'} wants to join ${space.emoji || ''} ${space.name}.` };
       await prisma.notification.create({
         data: {
           userId: space.ownerId,
-          type: 'space_join_request',
-          title: `Join request: ${space.name}`,
-          body: `${joinerUser?.name || 'Someone'} wants to join ${space.emoji || ''} ${space.name}.`,
+          ...joinReqNotif,
           data: { spaceId: space.id, spaceName: space.name, spaceEmoji: space.emoji, requesterId: userId },
         },
       }).catch(() => {});
+      sendNotificationEmail(space.ownerId, joinReqNotif).catch(() => {});
       res.json({ message: 'Your request to join has been submitted and is pending approval', pending: true });
       return;
     }
 
     // Notify space owner that someone joined
+    const joinedNotif = { type: 'space_member_joined', title: `New member: ${space.name}`, body: `${joinerUser?.name || 'Someone'} joined ${space.emoji || ''} ${space.name}.` };
     await prisma.notification.create({
       data: {
         userId: space.ownerId,
-        type: 'space_member_joined',
-        title: `New member: ${space.name}`,
-        body: `${joinerUser?.name || 'Someone'} joined ${space.emoji || ''} ${space.name}.`,
+        ...joinedNotif,
         data: { spaceId: space.id, spaceName: space.name, spaceEmoji: space.emoji, memberId: userId },
       },
     }).catch(() => {});
+    sendNotificationEmail(space.ownerId, joinedNotif).catch(() => {});
 
     const updatedSpace = await prisma.space.findUnique({
       where: { id: space.id },
@@ -493,15 +494,15 @@ router.post('/:id/members/:memberId/approve', async (req, res) => {
     });
 
     // Notify the approved member
+    const approveNotif = { type: 'space_approved', title: `Welcome to ${space.name}!`, body: `Your request to join ${space.emoji || ''} ${space.name} was approved.` };
     await prisma.notification.create({
       data: {
         userId: memberId,
-        type: 'space_approved',
-        title: `Welcome to ${space.name}!`,
-        body: `Your request to join ${space.emoji || ''} ${space.name} was approved.`,
+        ...approveNotif,
         data: { spaceId: id, spaceName: space.name, spaceEmoji: space.emoji },
       },
     }).catch(() => {});
+    sendNotificationEmail(memberId, approveNotif).catch(() => {});
 
     res.json({ success: true, message: 'Member approved' });
   } catch (error: unknown) {
@@ -649,15 +650,15 @@ router.post('/:id/members', async (req, res) => {
 
     // Notify the invited user
     const inviter = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+    const inviteNotif = { type: 'space_invited', title: `Invitation to ${space.name}`, body: `${inviter?.name || 'Someone'} invited you to join ${space.emoji || ''} ${space.name}.` };
     await prisma.notification.create({
       data: {
         userId: userToAdd.id,
-        type: 'space_invited',
-        title: `Invitation to ${space.name}`,
-        body: `${inviter?.name || 'Someone'} invited you to join ${space.emoji || ''} ${space.name}.`,
+        ...inviteNotif,
         data: { spaceId: id, spaceName: space.name, spaceEmoji: space.emoji, inviterId: userId },
       },
     }).catch(() => {});
+    sendNotificationEmail(userToAdd.id, inviteNotif).catch(() => {});
 
     res.json({ success: true, message: 'Invitation sent', pending: true });
   } catch (error: unknown) {
@@ -719,26 +720,26 @@ router.delete('/:id/members/:memberId', async (req, res) => {
     if (isRemovingSelf) {
       // User left voluntarily — notify space owner
       const leaverUser = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+      const leftNotif = { type: 'space_member_left', title: `Member left: ${space.name}`, body: `${leaverUser?.name || 'Someone'} left ${space.emoji || ''} ${space.name}.` };
       await prisma.notification.create({
         data: {
           userId: space.ownerId,
-          type: 'space_member_left',
-          title: `Member left: ${space.name}`,
-          body: `${leaverUser?.name || 'Someone'} left ${space.emoji || ''} ${space.name}.`,
+          ...leftNotif,
           data: { spaceId: id, spaceName: space.name, spaceEmoji: space.emoji, memberId: userId },
         },
       }).catch(() => {});
+      sendNotificationEmail(space.ownerId, leftNotif).catch(() => {});
     } else {
       // Removed by owner/admin — notify the removed member
+      const removedNotif = { type: 'space_removed', title: `Removed from ${space.name}`, body: `You were removed from ${space.emoji || ''} ${space.name}.` };
       await prisma.notification.create({
         data: {
           userId: memberId,
-          type: 'space_removed',
-          title: `Removed from ${space.name}`,
-          body: `You were removed from ${space.emoji || ''} ${space.name}.`,
+          ...removedNotif,
           data: { spaceId: id, spaceName: space.name, spaceEmoji: space.emoji },
         },
       }).catch(() => {});
+      sendNotificationEmail(memberId, removedNotif).catch(() => {});
     }
 
     res.json({ success: true });
@@ -774,15 +775,15 @@ router.post('/:id/leave', async (req, res) => {
 
     // Notify space owner
     const leaverUser = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+    const leaveNotif = { type: 'space_member_left', title: `Member left: ${space.name}`, body: `${leaverUser?.name || 'Someone'} left ${space.emoji || ''} ${space.name}.` };
     await prisma.notification.create({
       data: {
         userId: space.ownerId,
-        type: 'space_member_left',
-        title: `Member left: ${space.name}`,
-        body: `${leaverUser?.name || 'Someone'} left ${space.emoji || ''} ${space.name}.`,
+        ...leaveNotif,
         data: { spaceId: id, spaceName: space.name, spaceEmoji: space.emoji, memberId: userId },
       },
     }).catch(() => {});
+    sendNotificationEmail(space.ownerId, leaveNotif).catch(() => {});
 
     res.json({ success: true });
   } catch (error: unknown) {
@@ -816,15 +817,15 @@ router.post('/:id/accept-invite', async (req, res) => {
 
     // Notify space owner
     if (space) {
+      const acceptInvNotif = { type: 'space_member_joined', title: `New member: ${space.name}`, body: `${accepter?.name || 'Someone'} accepted the invitation to ${space.emoji || ''} ${space.name}.` };
       await prisma.notification.create({
         data: {
           userId: space.ownerId,
-          type: 'space_member_joined',
-          title: `New member: ${space.name}`,
-          body: `${accepter?.name || 'Someone'} accepted the invitation to ${space.emoji || ''} ${space.name}.`,
+          ...acceptInvNotif,
           data: { spaceId: id, spaceName: space.name, spaceEmoji: space.emoji, memberId: userId },
         },
       }).catch(() => {});
+      sendNotificationEmail(space.ownerId, acceptInvNotif).catch(() => {});
     }
 
     res.json({ success: true, message: 'Invitation accepted' });

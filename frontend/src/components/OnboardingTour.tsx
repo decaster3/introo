@@ -32,10 +32,10 @@ const TOUR_STEPS: TourStep[] = [
   },
   {
     target: '.u-grid',
-    title: 'Warm introductions',
-    description: 'Click any company card to see who knows someone there -- from your own meetings or through your Spaces. Request a warm intro directly, or offer one to someone in your network.',
+    title: 'Your contacts & companies',
+    description: 'Click any company card to see every person you\'ve met there, meeting history, and enriched company data. Tag companies, track relationships, and use this as your personal CRM.',
     position: 'top',
-    icon: '✉️',
+    icon: '📋',
   },
   {
     target: '.u-settings-btn',
@@ -43,6 +43,13 @@ const TOUR_STEPS: TourStep[] = [
     description: 'Connect multiple Google Calendar accounts to capture your full network. We also auto-enrich every contact with company data, LinkedIn profiles, and funding information.',
     position: 'bottom',
     icon: '⚙️',
+  },
+  {
+    target: '.u-network-btn',
+    title: 'Better together',
+    description: 'Introo multiplies with every connection. Create a Space and invite a colleague to pool your networks — you\'ll both see warm paths to companies neither could reach alone.',
+    position: 'bottom',
+    icon: '🚀',
   },
 ];
 

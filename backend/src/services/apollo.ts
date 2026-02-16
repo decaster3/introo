@@ -4,6 +4,11 @@ import prisma from '../lib/prisma.js';
 
 const APOLLO_BASE = 'https://api.apollo.io/api/v1';
 const ENRICHMENT_CACHE_DAYS = 7;
+const IS_DEV = process.env.NODE_ENV !== 'production';
+const DEV_LIMIT_COMPANIES = 5;
+const DEV_LIMIT_PEOPLE = 5;
+const API_THROTTLE_MS = 200;
+const FORCE_RETRY_COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 function getApiKey(): string {
   const key = process.env.APOLLO_API_KEY;
@@ -17,11 +22,26 @@ function sleep(ms: number): Promise<void> {
 
 function isStale(enrichedAt: Date | null): boolean {
   if (!enrichedAt) return true;
-  const age = Date.now() - enrichedAt.getTime();
-  return age > ENRICHMENT_CACHE_DAYS * 24 * 60 * 60 * 1000;
+  return Date.now() - enrichedAt.getTime() > ENRICHMENT_CACHE_DAYS * 24 * 60 * 60 * 1000;
 }
 
-// ─── Apollo API helpers ─────────────────────────────────────────────────────
+// ─── Generic email detection ─────────────────────────────────────────────────
+
+const GENERIC_PREFIXES = new Set([
+  'info', 'team', 'hello', 'contact', 'support', 'admin', 'office',
+  'sales', 'marketing', 'hr', 'jobs', 'careers', 'press', 'media',
+  'help', 'billing', 'noreply', 'no-reply', 'notifications', 'alerts',
+  'feedback', 'general', 'service', 'enquiry', 'inquiry',
+]);
+
+function isGenericEmail(email: string): boolean {
+  const local = email.split('@')[0]?.toLowerCase() || '';
+  if (GENERIC_PREFIXES.has(local)) return true;
+  const firstPart = local.split(/[._\-+]/)[0];
+  return !!(firstPart && GENERIC_PREFIXES.has(firstPart));
+}
+
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 interface ApolloOrganization {
   id?: string;
@@ -46,7 +66,6 @@ interface ApolloOrganization {
   publicly_traded_symbol?: string;
   publicly_traded_exchange?: string;
   keywords?: string[];
-  sic_codes?: string[];
 }
 
 interface ApolloMatchedPerson {
@@ -63,6 +82,7 @@ interface ApolloMatchedPerson {
   state?: string;
   country?: string;
   organization_id?: string;
+  organization?: ApolloOrganization;
   employment_history?: {
     organization_name?: string;
     title?: string;
@@ -70,136 +90,6 @@ interface ApolloMatchedPerson {
     start_date?: string;
   }[];
 }
-
-interface ApolloSearchPerson {
-  id?: string;
-  first_name?: string;
-  last_name?: string;
-  last_name_obfuscated?: string;
-  name?: string;
-  title?: string;
-  headline?: string;
-  linkedin_url?: string;
-  photo_url?: string;
-  city?: string;
-  state?: string;
-  country?: string;
-  has_email?: boolean;
-}
-
-/**
- * Try to extract a name from an email address.
- * e.g. "john.smith@company.com" -> "john smith"
- * e.g. "y.shevchenko@company.com" -> "y shevchenko"
- * Keeps single-character parts (initials like "y", "a", "j").
- */
-function nameFromEmail(email: string): string {
-  const local = email.split('@')[0] || '';
-  const parts = local.split(/[._\-+]/).filter(p => p.length >= 1 && !/^\d+$/.test(p));
-  if (parts.length === 0) return '';
-  return parts.join(' ').toLowerCase();
-}
-
-/**
- * Check if a name string is obfuscated by Apollo's free tier.
- * Apollo masks last names like "Sh***K", "Jo***N", etc.
- */
-function isObfuscatedName(name: string): boolean {
-  return /\*{2,}/.test(name);
-}
-
-/**
- * Check if an Apollo person response has real enrichment data
- * (not just a placeholder ID with all fields null).
- */
-function hasRealData(person: ApolloMatchedPerson | null): boolean {
-  if (!person || !person.id) return false;
-  return !!(person.title || person.linkedin_url || person.photo_url || person.headline);
-}
-
-// ─── Organization Enrichment (via /organizations/enrich) ────────────────────
-
-/**
- * Enrich a company by domain using Apollo's organizations/enrich endpoint.
- * Returns full company data: industry, employee count, location, funding, etc.
- */
-export async function enrichOrganization(domain: string): Promise<ApolloOrganization | null> {
-  const apiKey = getApiKey();
-  try {
-    const res = await fetch(`${APOLLO_BASE}/organizations/enrich?domain=${encodeURIComponent(domain)}`, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
-    });
-    if (!res.ok) return null;
-    const data: any = await res.json();
-    return data.organization || null;
-  } catch {
-    return null;
-  }
-}
-
-// ─── People Match (via /people/match) ───────────────────────────────────────
-
-/**
- * Match a person by name + organization using Apollo's people/match endpoint.
- * Returns full profile: name, linkedin, photo, headline, employment history.
- */
-async function matchPerson(params: {
-  first_name?: string;
-  last_name?: string;
-  name?: string;
-  email?: string;
-  organization_name?: string;
-  domain?: string;
-}): Promise<ApolloMatchedPerson | null> {
-  const apiKey = getApiKey();
-  try {
-    const res = await fetch(`${APOLLO_BASE}/people/match`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
-      body: JSON.stringify(params),
-    });
-    if (!res.ok) {
-      console.log(`[apollo] people/match ${res.status} for`, params);
-      return null;
-    }
-    const data: any = await res.json();
-    const person = data.person || null;
-    // Debug: log raw response keys and key fields for first few calls
-    if (person) {
-      console.log(`[apollo] people/match raw response keys:`, Object.keys(person).join(', '));
-      console.log(`[apollo] people/match sample:`, JSON.stringify({
-        id: person.id, name: person.name, first_name: person.first_name, last_name: person.last_name,
-        title: person.title, headline: person.headline,
-        linkedin_url: person.linkedin_url, photo_url: person.photo_url,
-      }));
-    }
-    return person;
-  } catch (err) {
-    console.error(`[apollo] people/match error:`, err);
-    return null;
-  }
-}
-
-// ─── Free People Search (for name matching) ─────────────────────────────────
-
-interface ApolloSearchResponse {
-  people?: ApolloSearchPerson[];
-}
-
-async function searchPeopleByDomain(domain: string, perPage = 100): Promise<ApolloSearchPerson[]> {
-  const apiKey = getApiKey();
-  const res = await fetch(`${APOLLO_BASE}/mixed_people/api_search`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', 'x-api-key': apiKey },
-    body: JSON.stringify({ q_organization_domains_list: [domain], per_page: perPage }),
-  });
-  if (!res.ok) return [];
-  const data = (await res.json()) as ApolloSearchResponse;
-  return data.people || [];
-}
-
-// ─── Batch enrichment ───────────────────────────────────────────────────────
 
 export interface BatchResult {
   total: number;
@@ -209,33 +99,168 @@ export interface BatchResult {
   errorMessage?: string;
 }
 
+type CachedContact = {
+  email: string;
+  apolloId: string | null;
+  name: string | null;
+  title: string | null;
+  headline: string | null;
+  linkedinUrl: string | null;
+  photoUrl: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+};
+
+// ─── Apollo API wrappers ─────────────────────────────────────────────────────
+
 /**
- * Enrich contacts and companies using Apollo's rich endpoints:
- * 1. organizations/enrich — full company data (industry, employees, location, funding)
- * 2. people/match — full contact data (name, photo, linkedin, headline)
- * 3. mixed_people/api_search — free fallback for name matching
+ * Enrich a company by domain. Returns full org data.
+ * COSTS: 1 credit per call.
+ */
+export async function enrichOrganization(domain: string): Promise<ApolloOrganization | null> {
+  const apiKey = getApiKey();
+  try {
+    const res = await fetch(`${APOLLO_BASE}/organizations/enrich?domain=${encodeURIComponent(domain)}`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+    });
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      if (res.status === 422 && errBody.includes('insufficient credits')) {
+        throw new Error('APOLLO_NO_CREDITS');
+      }
+      console.log(`[apollo] organizations/enrich ${res.status} for "${domain}"`);
+      return null;
+    }
+    const data: any = await res.json();
+    return data.organization || null;
+  } catch (err: any) {
+    if (err.message === 'APOLLO_NO_CREDITS') throw err;
+    console.error(`[apollo] organizations/enrich error for "${domain}":`, err.message);
+    return null;
+  }
+}
+
+/**
+ * Match a person by email. Returns full profile.
+ * COSTS: 1 credit per call.
+ */
+async function matchPersonByEmail(email: string): Promise<ApolloMatchedPerson | null> {
+  const apiKey = getApiKey();
+  try {
+    const res = await fetch(`${APOLLO_BASE}/people/match`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ email }),
+    });
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      if (res.status === 422 && errBody.includes('insufficient credits')) {
+        throw new Error('APOLLO_NO_CREDITS');
+      }
+      console.log(`[apollo] people/match ${res.status} for "${email}"`);
+      return null;
+    }
+    const data: any = await res.json();
+    return data.person || null;
+  } catch (err: any) {
+    if (err.message === 'APOLLO_NO_CREDITS') throw err;
+    console.error(`[apollo] people/match error for "${email}":`, err.message);
+    return null;
+  }
+}
+
+function hasRealData(person: ApolloMatchedPerson | null): boolean {
+  if (!person || !person.id) return false;
+  return !!(person.title || person.linkedin_url || person.photo_url || person.headline);
+}
+
+// ─── Helpers: apply cached / Apollo data to a contact ────────────────────────
+
+function buildContactUpdate(cached: CachedContact): Record<string, any> {
+  const data: Record<string, any> = { apolloId: cached.apolloId, enrichedAt: new Date() };
+  if (cached.name) data.name = cached.name;
+  if (cached.title) data.title = cached.title;
+  if (cached.headline) data.headline = cached.headline;
+  if (cached.linkedinUrl) data.linkedinUrl = cached.linkedinUrl;
+  if (cached.photoUrl) data.photoUrl = cached.photoUrl;
+  if (cached.city) data.city = cached.city;
+  if (cached.state) data.state = cached.state;
+  if (cached.country) data.country = cached.country;
+  return data;
+}
+
+function buildPersonUpdate(person: ApolloMatchedPerson): Record<string, any> {
+  const data: Record<string, any> = { apolloId: person.id, enrichedAt: new Date() };
+  if (person.name) data.name = person.name;
+  if (person.title) data.title = person.title;
+  if (person.headline) data.headline = person.headline;
+  if (person.linkedin_url) data.linkedinUrl = person.linkedin_url;
+  if (person.photo_url) data.photoUrl = person.photo_url;
+  if (person.city) data.city = person.city;
+  if (person.state) data.state = person.state;
+  if (person.country) data.country = person.country;
+  return data;
+}
+
+async function stampEnrichedAt(contactId: string): Promise<void> {
+  try {
+    await prisma.contact.update({ where: { id: contactId }, data: { enrichedAt: new Date() } });
+  } catch { /* ignore — contact may have been deleted */ }
+}
+
+// ─── Batch enrichment ────────────────────────────────────────────────────────
+
+interface EnrichOptions {
+  force?: boolean;
+  signal?: { cancelled: boolean };
+}
+
+/**
+ * Enrich contacts and companies using Apollo's paid endpoints:
+ * - organizations/enrich: 1 credit per unique domain
+ * - people/match: 1 credit per contact
+ *
+ * Default mode: only processes never-attempted contacts (enrichedAt is null).
+ * Force mode: retries failed contacts after 24h cooldown + re-enriches stale data.
+ * DEV mode: limits to 5 companies + 5 people.
  */
 export async function enrichContactsFree(
   userId: string,
   onProgress?: (result: BatchResult) => void,
-  options?: { force?: boolean },
+  options?: EnrichOptions,
 ): Promise<BatchResult> {
+  const isCancelled = () => !!options?.signal?.cancelled;
+
+  // ── 1. Load all contacts ───────────────────────────────────────────────
   const contacts = await prisma.contact.findMany({
     where: { userId },
     select: {
       id: true, email: true, name: true, enrichedAt: true, apolloId: true,
-      companyId: true, company: { select: { id: true, domain: true, name: true, enrichedAt: true } },
+      companyId: true, company: { select: { id: true, domain: true, name: true, enrichedAt: true, apolloId: true, industry: true } },
     },
     orderBy: { lastSeenAt: 'desc' },
   });
 
   const result: BatchResult = { total: contacts.length, enriched: 0, skipped: 0, errors: 0 };
 
+  // ── 2. Filter to contacts that need enrichment ─────────────────────────
   const toEnrich = options?.force
-    ? contacts // force = re-enrich ALL contacts regardless of staleness
-    : contacts.filter(c => isStale(c.enrichedAt));
+    ? contacts.filter(c => {
+        if (c.apolloId && !isStale(c.enrichedAt)) return false;
+        if (!c.apolloId && c.enrichedAt) {
+          return Date.now() - c.enrichedAt.getTime() > FORCE_RETRY_COOLDOWN_MS;
+        }
+        return true;
+      })
+    : contacts.filter(c => !c.enrichedAt);
+
   result.skipped = contacts.length - toEnrich.length;
 
+  if (IS_DEV) {
+    console.log(`[enrich] ⚠️  DEV MODE: limiting to ${DEV_LIMIT_COMPANIES} companies + ${DEV_LIMIT_PEOPLE} people`);
+  }
   console.log(`[enrich] userId=${userId} force=${!!options?.force} total=${contacts.length} toEnrich=${toEnrich.length} skipped=${result.skipped}`);
 
   if (toEnrich.length === 0) {
@@ -244,7 +269,7 @@ export async function enrichContactsFree(
     return result;
   }
 
-  // Group contacts by company domain
+  // ── 3. Group by domain ─────────────────────────────────────────────────
   const byDomain = new Map<string, typeof toEnrich>();
   const noDomain: typeof toEnrich = [];
   for (const c of toEnrich) {
@@ -257,222 +282,256 @@ export async function enrichContactsFree(
       noDomain.push(c);
     }
   }
-
   console.log(`[enrich] Grouped: ${byDomain.size} domains, ${noDomain.length} without domain`);
 
-  // Track which company IDs we've already enriched (avoid duplicate API calls)
-  const enrichedCompanyIds = new Set<string>();
+  // ── 4. Batch cache lookup ──────────────────────────────────────────────
+  // Look up ALL previously attempted contacts (not just those with apolloId).
+  // Contacts with apolloId → cache hit (copy data, 0 credits).
+  // Contacts with enrichedAt but no apolloId → known no-match (skip, 0 credits).
+  const allEmails = toEnrich.map(c => c.email);
+  const cachedContacts = await prisma.contact.findMany({
+    where: { email: { in: allEmails }, enrichedAt: { not: null } },
+    select: {
+      email: true, apolloId: true, name: true, title: true, headline: true,
+      linkedinUrl: true, photoUrl: true, city: true, state: true, country: true,
+    },
+  });
 
+  const cacheMap = new Map<string, CachedContact>();       // contacts WITH Apollo data
+  const knownNoMatch = new Set<string>();                   // emails that were tried and found nothing
+  for (const c of cachedContacts) {
+    if (c.apolloId) {
+      const existing = cacheMap.get(c.email);
+      if (!existing || (c.linkedinUrl && !existing.linkedinUrl) || (c.photoUrl && !existing.photoUrl)) {
+        cacheMap.set(c.email, c);
+      }
+    } else {
+      // Previously attempted, no Apollo data found — skip without spending credits
+      if (!cacheMap.has(c.email)) {
+        knownNoMatch.add(c.email);
+      }
+    }
+  }
+  console.log(`[enrich] Internal cache: ${cacheMap.size} with data, ${knownNoMatch.size} known no-match`);
+
+  // ── 5. Enrichment state ────────────────────────────────────────────────
+  const enrichedCompanyIds = new Set<string>();
+  let companiesEnrichedCount = 0;
+  let peopleEnrichedCount = 0;
+  let cacheHits = 0;
+  let genericSkipped = 0;
+  let outOfCredits = false;
+
+  /**
+   * Enrich a single contact. Returns true if an Apollo API call was made.
+   * Shared by both domain and noDomain loops.
+   */
+  async function enrichContact(
+    contact: typeof toEnrich[0],
+  ): Promise<void> {
+    // Generic email — skip
+    if (isGenericEmail(contact.email)) {
+      console.log(`[enrich] ⏭️ Generic email: "${contact.email}" (0 credits)`);
+      await stampEnrichedAt(contact.id);
+      result.skipped++;
+      genericSkipped++;
+      return;
+    }
+
+    // Cache hit — contact has Apollo data from another user
+    const cached = cacheMap.get(contact.email);
+    if (cached) {
+      if (cached.apolloId === contact.apolloId) {
+        await stampEnrichedAt(contact.id);
+      } else {
+        console.log(`[enrich] ♻️ Cache hit: "${contact.name || contact.email}" → title="${cached.title}" (0 credits)`);
+        await prisma.contact.update({ where: { id: contact.id }, data: buildContactUpdate(cached) });
+      }
+      result.enriched++;
+      cacheHits++;
+      return;
+    }
+
+    // Known no-match — previously tried, Apollo had no data. Skip without spending credits.
+    if (knownNoMatch.has(contact.email)) {
+      console.log(`[enrich] ⏭️ Known no-match: "${contact.name || contact.email}" (0 credits)`);
+      await stampEnrichedAt(contact.id);
+      result.skipped++;
+      cacheHits++;
+      return;
+    }
+
+    // Apollo API call (1 credit)
+    const person = await matchPersonByEmail(contact.email);
+    if (person && hasRealData(person)) {
+      console.log(`[enrich] ✓ Person "${contact.name || contact.email}" → title="${person.title}", linkedin=${person.linkedin_url ? 'yes' : 'no'} (1 credit)`);
+      await prisma.contact.update({ where: { id: contact.id }, data: buildPersonUpdate(person) });
+      result.enriched++;
+    } else {
+      console.log(`[enrich] ✗ No data: "${contact.name || contact.email}" (1 credit spent)`);
+      await stampEnrichedAt(contact.id);
+      result.skipped++;
+    }
+    peopleEnrichedCount++;
+    await sleep(API_THROTTLE_MS);
+  }
+
+  // ── 6. Process contacts with domains ───────────────────────────────────
   const domains = Array.from(byDomain.keys());
   for (let i = 0; i < domains.length; i++) {
+    if (isCancelled()) {
+      console.log(`[enrich] ⛔ Cancelled by user — skipping remaining domains`);
+      for (let j = i; j < domains.length; j++) {
+        result.skipped += byDomain.get(domains[j])!.length;
+      }
+      break;
+    }
+
     const domain = domains[i];
     const domainContacts = byDomain.get(domain)!;
 
-    try {
-      // ── Step 1: Enrich the company via organizations/enrich ────────────
-      const companyId = domainContacts[0]?.companyId;
-      const companyAlreadyEnriched = companyId ? enrichedCompanyIds.has(companyId) : true;
-      
-      if (companyId && !companyAlreadyEnriched) {
-        const org = await enrichOrganization(domain);
-        if (org) {
-          const companyUpdate: Record<string, any> = { enrichedAt: new Date() };
-          if (org.name) companyUpdate.name = org.name;
-          if (org.estimated_num_employees) companyUpdate.employeeCount = org.estimated_num_employees;
-          if (org.industry) companyUpdate.industry = org.industry;
-          if (org.founded_year) companyUpdate.foundedYear = org.founded_year;
-          if (org.linkedin_url) companyUpdate.linkedinUrl = org.linkedin_url;
-          if (org.website_url) companyUpdate.websiteUrl = org.website_url;
-          if (org.logo_url) companyUpdate.logo = org.logo_url;
-          if (org.city) companyUpdate.city = org.city;
-          if (org.state) companyUpdate.state = org.state;
-          if (org.country) companyUpdate.country = org.country;
-          if (org.short_description) companyUpdate.description = org.short_description;
-          if (org.id) companyUpdate.apolloId = org.id;
-          if (org.annual_revenue) companyUpdate.annualRevenue = String(org.annual_revenue);
-          if (org.total_funding) companyUpdate.totalFunding = String(org.total_funding);
-          if (org.latest_funding_stage) companyUpdate.lastFundingRound = org.latest_funding_stage;
-          if (org.latest_funding_round_date) companyUpdate.lastFundingDate = new Date(org.latest_funding_round_date);
-          if (org.keywords) companyUpdate.technologies = org.keywords;
+    // Out of credits — stamp remaining and skip
+    if (outOfCredits) {
+      for (const c of domainContacts) { await stampEnrichedAt(c.id); }
+      // Also stamp the company so it's not re-tried
+      if (domainContacts[0]?.companyId && !enrichedCompanyIds.has(domainContacts[0].companyId)) {
+        try { await prisma.company.update({ where: { id: domainContacts[0].companyId }, data: { enrichedAt: new Date() } }); } catch {}
+        enrichedCompanyIds.add(domainContacts[0].companyId);
+      }
+      result.skipped += domainContacts.length;
+      onProgress?.(result);
+      continue;
+    }
 
-          await prisma.company.update({ where: { id: companyId }, data: companyUpdate });
-          enrichedCompanyIds.add(companyId);
-          console.log(`[enrich] ✓ Company "${domain}": ${org.estimated_num_employees || '?'} employees, industry="${org.industry || '?'}"`);
+    try {
+      // ── Step 1: Enrich company (1 credit per unique domain) ──────────
+      const companyId = domainContacts[0]?.companyId;
+      const company = domainContacts[0]?.company;
+      const companyAlreadyHasData = !!(company?.apolloId || company?.industry);
+      const companyNeedsEnrich = companyId
+        && !enrichedCompanyIds.has(companyId)
+        && !companyAlreadyHasData
+        && isStale(company?.enrichedAt ?? null);
+
+      if (companyNeedsEnrich) {
+        if (IS_DEV && companiesEnrichedCount >= DEV_LIMIT_COMPANIES) {
+          enrichedCompanyIds.add(companyId!);
+          // Stamp enrichedAt to prevent re-trying this company on subsequent runs
+          try { await prisma.company.update({ where: { id: companyId! }, data: { enrichedAt: new Date() } }); } catch {}
+          console.log(`[enrich] ⏭️ DEV LIMIT: skipping company "${domain}" (stamped)`);
         } else {
-          console.log(`[enrich] ✗ Company "${domain}": not found in Apollo`);
+          try {
+            const org = await enrichOrganization(domain);
+            if (org) {
+              const update: Record<string, any> = { enrichedAt: new Date() };
+              if (org.name) update.name = org.name;
+              if (org.estimated_num_employees) update.employeeCount = org.estimated_num_employees;
+              if (org.industry) update.industry = org.industry;
+              if (org.founded_year) update.foundedYear = org.founded_year;
+              if (org.linkedin_url) update.linkedinUrl = org.linkedin_url;
+              if (org.website_url) update.websiteUrl = org.website_url;
+              if (org.logo_url) update.logo = org.logo_url;
+              if (org.city) update.city = org.city;
+              if (org.state) update.state = org.state;
+              if (org.country) update.country = org.country;
+              if (org.short_description) update.description = org.short_description;
+              if (org.id) update.apolloId = org.id;
+              if (org.annual_revenue) update.annualRevenue = String(org.annual_revenue);
+              if (org.total_funding) update.totalFunding = String(org.total_funding);
+              if (org.latest_funding_stage) update.lastFundingRound = org.latest_funding_stage;
+              if (org.latest_funding_round_date) update.lastFundingDate = new Date(org.latest_funding_round_date);
+              if (org.keywords) update.technologies = org.keywords;
+              await prisma.company.update({ where: { id: companyId }, data: update });
+              companiesEnrichedCount++;
+              console.log(`[enrich] ✓ Company "${domain}": ${org.estimated_num_employees || '?'} employees, industry="${org.industry || '?'}" (1 credit)`);
+            } else {
+              await prisma.company.update({ where: { id: companyId! }, data: { enrichedAt: new Date() } });
+              console.log(`[enrich] ✗ Company "${domain}": not found in Apollo`);
+            }
+            enrichedCompanyIds.add(companyId!);
+            await sleep(API_THROTTLE_MS);
+          } catch (err: any) {
+            if (err.message === 'APOLLO_NO_CREDITS') {
+              outOfCredits = true;
+              result.errorMessage = 'Apollo credits exhausted';
+              console.error(`[enrich] ⛔ Credits exhausted at company "${domain}"`);
+            }
+          }
         }
-        await sleep(200);
       }
 
-      // ── Step 2: Enrich each contact ────────────────────────────────
-      // people/match returns full profile data.
-      // Strategy: try email first (most precise), then name + domain.
-      // A match is only considered "real" if it has actual data beyond
-      // just an ID (title, linkedin, or photo).
-      const searchPeople = await searchPeopleByDomain(domain, 100);
-
+      // ── Step 2: Enrich each contact ──────────────────────────────────
       for (const contact of domainContacts) {
-        const contactName = (contact.name || '').trim();
-        // If the stored name is obfuscated from a previous bad enrichment, ignore it
-        const cleanContactName = isObfuscatedName(contactName) ? '' : contactName;
-        const emailName = nameFromEmail(contact.email);
-        const searchName = cleanContactName || emailName;
+        if (isCancelled()) { result.skipped++; continue; }
+        if (outOfCredits) { await stampEnrichedAt(contact.id); result.skipped++; continue; }
+        if (IS_DEV && peopleEnrichedCount >= DEV_LIMIT_PEOPLE) { await stampEnrichedAt(contact.id); result.skipped++; continue; }
 
-        // ── Try people/match ────────────────────────────────────────
-        let person: ApolloMatchedPerson | null = null;
-
-        // 1) Try by email first — most precise match
-        person = await matchPerson({ email: contact.email });
-        if (!hasRealData(person)) {
-          person = null;
-        }
-
-        // 2) Try by name + domain if email didn't return real data
-        if (!person && searchName && searchName.length >= 2) {
-          await sleep(200);
-          const nameParts = searchName.split(/\s+/);
-          const firstName = nameParts[0] || '';
-          const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
-
-          if (firstName && lastName) {
-            person = await matchPerson({ first_name: firstName, last_name: lastName, domain });
-            if (!hasRealData(person)) person = null;
-          }
-          if (!person && firstName) {
-            await sleep(200);
-            person = await matchPerson({ first_name: firstName, domain });
-            if (!hasRealData(person)) person = null;
-          }
-          if (!person && firstName && !lastName) {
-            await sleep(200);
-            person = await matchPerson({ last_name: firstName, domain });
-            if (!hasRealData(person)) person = null;
-          }
-        }
-
-        if (person && person.id) {
-          const apolloNameObfuscated = person.name ? isObfuscatedName(person.name) : false;
-          console.log(`[enrich] ✓ Match "${cleanContactName || contact.email}" → name="${person.name}"${apolloNameObfuscated ? ' (obfuscated, keeping original)' : ''}, title="${person.title}", linkedin=${person.linkedin_url ? 'yes' : 'no'}, photo=${person.photo_url ? 'yes' : 'no'}`);
-          try {
-            const updateData: Record<string, any> = {
-              apolloId: person.id,
-              enrichedAt: new Date(),
-            };
-            if (person.name && !apolloNameObfuscated) {
-              updateData.name = person.name;
-            } else if (person.name && apolloNameObfuscated && !cleanContactName) {
-              updateData.name = person.name;
-            }
-            if (person.title) updateData.title = person.title;
-            if (person.headline) updateData.headline = person.headline;
-            if (person.linkedin_url) updateData.linkedinUrl = person.linkedin_url;
-            if (person.photo_url) updateData.photoUrl = person.photo_url;
-            if (person.city) updateData.city = person.city;
-            if (person.state) updateData.state = person.state;
-            if (person.country) updateData.country = person.country;
-
-            await prisma.contact.update({ where: { id: contact.id }, data: updateData });
-            result.enriched++;
-          } catch (dbErr: any) {
-            console.error(`[enrich] DB error ${contact.id}:`, dbErr.message);
+        try {
+          await enrichContact(contact);
+        } catch (err: any) {
+          if (err.message === 'APOLLO_NO_CREDITS') {
+            outOfCredits = true;
+            result.errorMessage = 'Apollo credits exhausted';
+            console.error(`[enrich] ⛔ Credits exhausted at person "${contact.email}"`);
+            await stampEnrichedAt(contact.id);
+            result.skipped++;
+          } else {
             result.errors++;
           }
-        } else {
-          // ── Fallback: free search (limited data) ─────────────────
-          if (searchName && searchName.length >= 2) {
-            const nameParts = searchName.split(/\s+/);
-            const pFirst = (nameParts[0] || '').toLowerCase();
-            const pLast = nameParts.length > 1 ? nameParts.slice(1).join(' ').toLowerCase() : '';
-            const freeMatch = searchPeople.find(p => {
-              const f = (p.first_name || '').toLowerCase();
-              const l = (p.last_name || '').toLowerCase();
-              if (pFirst && pLast) return f === pFirst && l === pLast;
-              if (pFirst && f === pFirst) return true;
-              if (pFirst && l === pFirst) return true;
-              return false;
-            });
-            if (freeMatch && freeMatch.title) {
-              console.log(`[enrich] ~ Fallback match "${cleanContactName || contact.email}" → title="${freeMatch.title}" (free search)`);
-              try {
-                const updateData: Record<string, any> = { enrichedAt: new Date() };
-                if (freeMatch.title) updateData.title = freeMatch.title;
-                if (freeMatch.id) updateData.apolloId = freeMatch.id;
-                if (freeMatch.linkedin_url) updateData.linkedinUrl = freeMatch.linkedin_url;
-                if (freeMatch.photo_url) updateData.photoUrl = freeMatch.photo_url;
-                await prisma.contact.update({ where: { id: contact.id }, data: updateData });
-                result.enriched++;
-              } catch { result.errors++; }
-            } else {
-              console.log(`[enrich] ✗ No match: "${cleanContactName || contact.email}" @ ${domain}`);
-              try {
-                await prisma.contact.update({ where: { id: contact.id }, data: { enrichedAt: new Date() } });
-              } catch { /* ignore */ }
-              result.skipped++;
-            }
-          } else {
-            console.log(`[enrich] ✗ No searchable name: "${contact.email}" @ ${domain}`);
-            try {
-              await prisma.contact.update({ where: { id: contact.id }, data: { enrichedAt: new Date() } });
-            } catch { /* ignore */ }
-            result.skipped++;
-          }
         }
-
-        await sleep(200); // Rate limit
       }
     } catch (apiErr: any) {
-      console.error(`[enrich] ✗ API error for domain ${domain}:`, apiErr.message);
-      result.errors += domainContacts.length;
+      if (apiErr.message !== 'APOLLO_NO_CREDITS') {
+        console.error(`[enrich] ✗ API error for domain ${domain}:`, apiErr.message);
+        result.errors++;
+      }
     }
 
     onProgress?.(result);
+    if (i + 1 < domains.length) await sleep(API_THROTTLE_MS);
+  }
 
-    if (i + 1 < domains.length) {
-      await sleep(200);
+  // ── 7. Process contacts without a domain ───────────────────────────────
+  for (let ni = 0; ni < noDomain.length; ni++) {
+    const contact = noDomain[ni];
+    if (isCancelled()) {
+      console.log(`[enrich] ⛔ Cancelled by user — skipping remaining no-domain contacts`);
+      result.skipped += noDomain.length - ni;
+      break;
     }
-  }
+    if (outOfCredits || (IS_DEV && peopleEnrichedCount >= DEV_LIMIT_PEOPLE)) {
+      await stampEnrichedAt(contact.id);
+      result.skipped++;
+      onProgress?.(result);
+      continue;
+    }
 
-  // Contacts without a domain — try people/match by email
-  for (const contact of noDomain) {
     try {
-      const person = await matchPerson({ email: contact.email });
-      if (person && person.id) {
-        const existingName = (contact.name || '').trim();
-        const apolloNameObfuscated = person.name ? isObfuscatedName(person.name) : false;
-        const updateData: Record<string, any> = { apolloId: person.id, enrichedAt: new Date() };
-        // Only update name if Apollo returned a clean name, or contact has no name
-        if (person.name && !apolloNameObfuscated) {
-          updateData.name = person.name;
-        } else if (person.name && apolloNameObfuscated && !existingName) {
-          updateData.name = person.name;
-        }
-        if (person.title) updateData.title = person.title;
-        if (person.headline) updateData.headline = person.headline;
-        if (person.linkedin_url) updateData.linkedinUrl = person.linkedin_url;
-        if (person.photo_url) updateData.photoUrl = person.photo_url;
-        if (person.city) updateData.city = person.city;
-        if (person.state) updateData.state = person.state;
-        if (person.country) updateData.country = person.country;
-        await prisma.contact.update({ where: { id: contact.id }, data: updateData });
-        result.enriched++;
-      } else {
-        result.skipped++;
-        await prisma.contact.update({ where: { id: contact.id }, data: { enrichedAt: new Date() } });
+      await enrichContact(contact);
+    } catch (err: any) {
+      if (err.message === 'APOLLO_NO_CREDITS') {
+        outOfCredits = true;
+        result.errorMessage = 'Apollo credits exhausted';
       }
-    } catch { result.skipped++; }
-    await sleep(200);
+      await stampEnrichedAt(contact.id);
+      result.skipped++;
+    }
+    onProgress?.(result);
   }
 
+  // ── 8. Summary ─────────────────────────────────────────────────────────
   onProgress?.(result);
+  const creditsUsed = companiesEnrichedCount + peopleEnrichedCount;
+  console.log(`[enrich] DONE: enriched=${result.enriched}, skipped=${result.skipped}, errors=${result.errors}, total=${result.total}`);
+  console.log(`[enrich] Credits: ~${creditsUsed} (${companiesEnrichedCount} companies + ${peopleEnrichedCount} people), cache hits: ${cacheHits}, generic skipped: ${genericSkipped}${IS_DEV ? ' [DEV]' : ''}`);
+  if (outOfCredits) {
+    console.error(`[enrich] ⛔ Enrichment stopped early — Apollo credits exhausted`);
+  }
   return result;
 }
 
-// ─── User Profile Enrichment ─────────────────────────────────────────────────
+// ─── User Profile Enrichment (1 credit) ──────────────────────────────────────
 
-/**
- * Enrich a user's own profile from Apollo using their email.
- * Only fills in fields that are currently empty.
- */
 export async function enrichUserProfile(userId: string): Promise<void> {
   try {
     const user = await prisma.user.findUnique({
@@ -481,41 +540,30 @@ export async function enrichUserProfile(userId: string): Promise<void> {
     });
     if (!user) return;
 
-    // If all fields are already filled, skip
     if (user.title && user.linkedinUrl && user.headline && user.city && user.country) {
       console.log(`[enrich-profile] User ${user.email} already has full profile, skipping`);
       return;
     }
 
-    const person = await matchPerson({ email: user.email });
-    if (!person || !person.id) {
+    const person = await matchPersonByEmail(user.email);
+    if (!person || !hasRealData(person)) {
       console.log(`[enrich-profile] No Apollo match for ${user.email}`);
       return;
     }
 
-    if (!hasRealData(person)) {
-      console.log(`[enrich-profile] Apollo returned empty data for ${user.email}`);
-      return;
-    }
-
     const updateData: Record<string, any> = {};
-    // Only fill empty fields — don't overwrite user-edited data
     if (!user.title && person.title) updateData.title = person.title;
     if (!user.linkedinUrl && person.linkedin_url) updateData.linkedinUrl = person.linkedin_url;
     if (!user.headline && person.headline) updateData.headline = person.headline;
     if (!user.city && person.city) updateData.city = person.city;
     if (!user.country && person.country) updateData.country = person.country;
 
-    // Try to extract company from employment history + derive domain
     if ((!user.company || !user.companyDomain) && person.employment_history?.length) {
       const current = person.employment_history.find(e => e.current);
       if (current?.organization_name) {
         if (!user.company) updateData.company = current.organization_name;
-
-        // Derive company domain from user's email domain (work email = company domain)
         if (!user.companyDomain) {
           const emailDomain = user.email.split('@')[1]?.toLowerCase();
-          // Skip generic email providers
           const genericDomains = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com', 'mail.ru', 'yandex.ru', 'protonmail.com'];
           if (emailDomain && !genericDomains.includes(emailDomain)) {
             updateData.companyDomain = emailDomain;
@@ -526,25 +574,37 @@ export async function enrichUserProfile(userId: string): Promise<void> {
 
     if (Object.keys(updateData).length > 0) {
       await prisma.user.update({ where: { id: userId }, data: updateData });
-      console.log(`[enrich-profile] Updated ${user.email}:`, Object.keys(updateData).join(', '));
-    } else {
-      console.log(`[enrich-profile] No new data for ${user.email}`);
+      console.log(`[enrich-profile] Updated ${user.email}: ${Object.keys(updateData).join(', ')} (1 credit)`);
     }
   } catch (err: any) {
+    if (err.message === 'APOLLO_NO_CREDITS') {
+      console.error(`[enrich-profile] Credits exhausted, skipping`);
+      return;
+    }
     console.error(`[enrich-profile] Error:`, err.message);
+  }
+}
+
+// ─── Single company lookup (paid, 1 credit) ─────────────────────────────────
+
+export async function enrichOrganizationFree(domain: string): Promise<ApolloOrganization | null> {
+  try {
+    return await enrichOrganization(domain);
+  } catch {
+    return null;
   }
 }
 
 // ─── Stats ───────────────────────────────────────────────────────────────────
 
 export async function getEnrichmentStats(userId: string) {
-  const [totalContacts, enrichedWithData, totalCompanies, enrichedCompanies, lastEnrichedContact] = await Promise.all([
+  const [totalContacts, contactsWithApollo, contactsProcessed, neverAttempted, totalCompanies, enrichedCompanies, lastEnrichedContact] = await Promise.all([
     prisma.contact.count({ where: { userId } }),
-    // Contacts that matched in Apollo (have apolloId)
     prisma.contact.count({ where: { userId, apolloId: { not: null } } }),
+    prisma.contact.count({ where: { userId, enrichedAt: { not: null } } }),
+    prisma.contact.count({ where: { userId, enrichedAt: null } }),
     prisma.company.count({ where: { contacts: { some: { userId } } } }),
     prisma.company.count({ where: { contacts: { some: { userId } }, enrichedAt: { not: null } } }),
-    // Last enrichment timestamp
     prisma.contact.findFirst({
       where: { userId, enrichedAt: { not: null } },
       orderBy: { enrichedAt: 'desc' },
@@ -553,7 +613,13 @@ export async function getEnrichmentStats(userId: string) {
   ]);
 
   return {
-    contacts: { total: totalContacts, enriched: enrichedWithData, notFound: totalContacts - enrichedWithData },
+    contacts: {
+      total: totalContacts,
+      enriched: contactsProcessed,
+      identified: contactsWithApollo,
+      notFound: contactsProcessed - contactsWithApollo,
+      pending: neverAttempted,
+    },
     companies: { total: totalCompanies, enriched: enrichedCompanies },
     lastEnrichedAt: lastEnrichedContact?.enrichedAt || null,
   };

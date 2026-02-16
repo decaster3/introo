@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import passport from 'passport';
 import { google } from 'googleapis';
-import { generateToken, verifyToken, authMiddleware, encryptToken, AuthenticatedRequest } from '../middleware/auth.js';
+import { generateToken, verifyToken, authMiddleware, encryptToken, invalidateUserCache, AuthenticatedRequest } from '../middleware/auth.js';
 import { cookieConfig } from '../middleware/security.js';
+import { sendWelcomeEmail } from '../services/email.js';
 import prisma from '../lib/prisma.js';
 import { enrichUserProfile } from '../services/apollo.js';
 
@@ -28,7 +29,7 @@ router.get('/google', (req, res, next) => {
   
   passport.authenticate('google', {
     accessType: 'offline',
-    prompt: 'consent',
+    prompt: 'select_account',
   } as any)(req, res, next);
 });
 
@@ -187,6 +188,12 @@ router.get('/google/callback', async (req, res, next) => {
     // Enrich user profile from Apollo in the background (non-blocking)
     enrichUserProfile(user.id).catch(() => {});
 
+    // Send welcome email for new users (created within the last 60 seconds)
+    const isNewUser = user.createdAt && (Date.now() - new Date(user.createdAt).getTime()) < 60_000;
+    if (isNewUser) {
+      sendWelcomeEmail({ id: user.id, email: user.email, name: user.name }).catch(() => {});
+    }
+
     // Redirect to frontend home page
     res.redirect(`${frontendUrl}/home`);
   })(req, res, next);
@@ -244,6 +251,7 @@ router.patch('/me', authMiddleware, async (req, res) => {
       select: { id: true, email: true, name: true, avatar: true, title: true, company: true, companyDomain: true, linkedinUrl: true, headline: true, city: true, country: true },
     });
 
+    invalidateUserCache(userId);
     res.json({ user });
   } catch (error: any) {
     console.error('Profile update error:', error.message);
@@ -264,7 +272,7 @@ router.get('/logout', (req, res) => {
 });
 
 // Check auth status (useful for frontend)
-router.get('/status', (req, res) => {
+router.get('/status', async (req, res) => {
   const token = req.cookies?.token;
   if (!token) {
     res.json({ authenticated: false });
@@ -273,7 +281,29 @@ router.get('/status', (req, res) => {
   
   // Verify the token is valid, not just that it exists
   const payload = verifyToken(token);
-  res.json({ authenticated: !!payload });
+  if (!payload) {
+    res.json({ authenticated: false });
+    return;
+  }
+
+  // Verify the user still exists in the database
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      select: { id: true },
+    });
+    if (!user) {
+      // User was deleted — clear the stale cookie
+      res.clearCookie('token', { path: '/' });
+      res.json({ authenticated: false });
+      return;
+    }
+  } catch {
+    res.json({ authenticated: false });
+    return;
+  }
+
+  res.json({ authenticated: true });
 });
 
 export default router;

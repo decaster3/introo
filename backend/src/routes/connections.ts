@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
+import { sendNotificationEmail } from '../services/email.js';
 import prisma from '../lib/prisma.js';
 
 const router = Router();
@@ -119,15 +120,15 @@ router.post('/', async (req, res) => {
       });
 
       // Notify the target user about the new request
+      const reNotif = { type: 'connection_request', title: `${reSender?.name || 'Someone'} wants to connect`, body: 'Accept to share your networks with each other.' };
       await prisma.notification.create({
         data: {
           userId: targetUser.id,
-          type: 'connection_request',
-          title: `${reSender?.name || 'Someone'} wants to connect`,
-          body: 'Accept to share your networks with each other.',
+          ...reNotif,
           data: { connectionId: existing.id, fromUserId: userId, fromUserName: reSender?.name },
         },
       });
+      sendNotificationEmail(targetUser.id, reNotif).catch(() => {});
 
       res.json({ id: existing.id, status: 'pending', peer: { id: targetUser.id, name: targetUser.name, email: targetUser.email, avatar: targetUser.avatar } });
       return;
@@ -143,15 +144,15 @@ router.post('/', async (req, res) => {
     });
 
     // Notify the target user
+    const connNotif = { type: 'connection_request', title: `${sender?.name || 'Someone'} wants to connect`, body: 'Accept to share your networks with each other.' };
     await prisma.notification.create({
       data: {
         userId: targetUser.id,
-        type: 'connection_request',
-        title: `${sender?.name || 'Someone'} wants to connect`,
-        body: 'Accept to share your networks with each other.',
+        ...connNotif,
         data: { connectionId: connection.id, fromUserId: userId, fromUserName: sender?.name },
       },
     });
+    sendNotificationEmail(targetUser.id, connNotif).catch(() => {});
 
     res.json({
       id: connection.id,
@@ -189,15 +190,15 @@ router.post('/:id/accept', async (req, res) => {
     });
 
     // Notify the original sender that their request was accepted
+    const acceptNotif = { type: 'connection_accepted', title: `${accepter?.name || 'Someone'} accepted your connection`, body: 'You are now connected.' };
     await prisma.notification.create({
       data: {
         userId: connection.fromUserId,
-        type: 'connection_accepted',
-        title: `${accepter?.name || 'Someone'} accepted your connection`,
-        body: 'You are now connected.',
+        ...acceptNotif,
         data: { connectionId: connection.id, peerId: userId, peerName: accepter?.name },
       },
     });
+    sendNotificationEmail(connection.fromUserId, acceptNotif).catch(() => {});
 
     res.json({ id: updated.id, status: 'accepted', peer: updated.fromUser });
   } catch (error: any) {

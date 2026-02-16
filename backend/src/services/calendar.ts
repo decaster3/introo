@@ -68,30 +68,46 @@ export async function syncCalendarForUser(userId: string): Promise<{
   companiesFound: number;
   relationshipsCreated: number;
 }> {
-  // Get user with tokens
+  // Get user basic info
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { id: true, email: true, googleAccessToken: true, googleRefreshToken: true },
   });
 
-  if (!user?.googleAccessToken) {
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  // Try to read tokens from CalendarAccount first (single source of truth)
+  const existingAccount = await prisma.calendarAccount.findUnique({
+    where: { userId_email: { userId, email: user.email } },
+    select: { id: true, googleAccessToken: true, googleRefreshToken: true },
+  });
+
+  const encryptedAccessToken = existingAccount?.googleAccessToken || user.googleAccessToken;
+  const encryptedRefreshToken = existingAccount?.googleRefreshToken || user.googleRefreshToken;
+
+  if (!encryptedAccessToken) {
     throw new Error('User has no Google access token');
   }
 
-  // Decrypt tokens before use
-  const accessToken = decryptToken(user.googleAccessToken);
-  const refreshToken = user.googleRefreshToken ? decryptToken(user.googleRefreshToken) : null;
+  const accessToken = decryptToken(encryptedAccessToken);
+  const refreshToken = encryptedRefreshToken ? decryptToken(encryptedRefreshToken) : null;
 
   if (!accessToken) {
-    // Token decryption failed - likely due to encryption key change after backend restart
-    // Clear the invalid tokens and force re-authentication
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        googleAccessToken: null,
-        googleRefreshToken: null,
-      },
-    });
+    // Token decryption failed — clear both sources and force re-auth
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: userId },
+        data: { googleAccessToken: null, googleRefreshToken: null },
+      }),
+      ...(existingAccount
+        ? [prisma.calendarAccount.update({
+            where: { id: existingAccount.id },
+            data: { googleAccessToken: '', googleRefreshToken: null },
+          })]
+        : []),
+    ]);
     const error = new Error('Calendar access expired. Please sign out and sign in again.');
     (error as any).code = 401;
     throw error;
@@ -108,20 +124,25 @@ export async function syncCalendarForUser(userId: string): Promise<{
     refresh_token: refreshToken,
   });
 
-  // Handle token refresh - encrypt new tokens before storing
+  // Handle token refresh — write to CalendarAccount as the canonical source
   oauth2Client.on('tokens', async (tokens) => {
     if (tokens.access_token) {
       const encryptedAccess = encryptToken(tokens.access_token);
-      const encryptedRefresh = tokens.refresh_token 
-        ? encryptToken(tokens.refresh_token) 
-        : user.googleRefreshToken;
-      
+      const encryptedRefresh = tokens.refresh_token
+        ? encryptToken(tokens.refresh_token)
+        : encryptedRefreshToken;
+
+      // Update CalendarAccount (primary source)
+      if (existingAccount) {
+        await prisma.calendarAccount.update({
+          where: { id: existingAccount.id },
+          data: { googleAccessToken: encryptedAccess, googleRefreshToken: encryptedRefresh },
+        });
+      }
+      // Also update User for backward compat (will be removed in future)
       await prisma.user.update({
         where: { id: userId },
-        data: {
-          googleAccessToken: encryptedAccess,
-          googleRefreshToken: encryptedRefresh,
-        },
+        data: { googleAccessToken: encryptedAccess, googleRefreshToken: encryptedRefresh },
       });
     }
   });
@@ -205,90 +226,111 @@ export async function syncCalendarForUser(userId: string): Promise<{
   const contacts = Array.from(contactsMap.values());
   const domainsSet = new Set(contacts.map(c => c.domain));
 
-  // Auto-create a CalendarAccount for the primary email so source tracking is uniform
+  // Ensure a CalendarAccount exists for the primary email (source tracking + single token source)
   const primaryAccount = await prisma.calendarAccount.upsert({
     where: { userId_email: { userId, email: user.email } },
     update: {
-      googleAccessToken: user.googleAccessToken,
-      googleRefreshToken: user.googleRefreshToken ?? undefined,
+      googleAccessToken: encryptedAccessToken,
+      googleRefreshToken: encryptedRefreshToken ?? undefined,
     },
     create: {
       userId,
       email: user.email,
-      googleAccessToken: user.googleAccessToken,
-      googleRefreshToken: user.googleRefreshToken ?? undefined,
+      googleAccessToken: encryptedAccessToken,
+      googleRefreshToken: encryptedRefreshToken ?? undefined,
     },
   });
 
-  // Upsert companies
-  const companyMap = new Map<string, string>(); // domain -> companyId
-  for (const domain of domainsSet) {
-    const company = await prisma.company.upsert({
-      where: { domain },
-      update: {},
-      create: {
-        domain,
-        name: normalizeCompanyName(domain),
-      },
-    });
-    companyMap.set(domain, company.id);
+  // Batch upsert companies
+  const companyMap = new Map<string, string>();
+  const domainBatches = Array.from(domainsSet);
+  const BATCH_SIZE = 50;
+
+  for (let i = 0; i < domainBatches.length; i += BATCH_SIZE) {
+    const batch = domainBatches.slice(i, i + BATCH_SIZE);
+    await prisma.$transaction(
+      batch.map(domain =>
+        prisma.company.upsert({
+          where: { domain },
+          update: {},
+          create: { domain, name: normalizeCompanyName(domain) },
+        })
+      )
+    );
   }
 
-  // Upsert contacts and their meetings
-  for (const contact of contacts) {
-    const companyId = companyMap.get(contact.domain);
+  // Fetch all company IDs in one query
+  const allCompanies = await prisma.company.findMany({
+    where: { domain: { in: domainBatches } },
+    select: { id: true, domain: true },
+  });
+  allCompanies.forEach(c => companyMap.set(c.domain, c.id));
 
-    const dbContact = await prisma.contact.upsert({
-      where: {
-        userId_email: { userId, email: contact.email },
-      },
-      update: {
-        name: contact.name,
-        meetingsCount: contact.meetingsCount,
-        lastSeenAt: contact.lastSeenAt,
-        lastEventTitle: contact.lastEventTitle,
-        companyId,
-        isApproved: true, // Auto-approve on sync
-      },
-      create: {
-        userId,
-        email: contact.email,
-        name: contact.name,
-        companyId,
-        meetingsCount: contact.meetingsCount,
-        lastSeenAt: contact.lastSeenAt,
-        lastEventTitle: contact.lastEventTitle,
-        isApproved: true, // Auto-approve calendar contacts
-      },
-    });
+  // Batch upsert contacts in transactions
+  for (let i = 0; i < contacts.length; i += BATCH_SIZE) {
+    const batch = contacts.slice(i, i + BATCH_SIZE);
 
-    // Track primary account as a source via many-to-many
-    await prisma.contact.update({
-      where: { id: dbContact.id },
-      data: {
-        sourceAccounts: { connect: { id: primaryAccount.id } },
-      },
-    });
+    const dbContacts = await prisma.$transaction(
+      batch.map(contact => {
+        const companyId = companyMap.get(contact.domain);
+        return prisma.contact.upsert({
+          where: { userId_email: { userId, email: contact.email } },
+          update: {
+            name: contact.name,
+            meetingsCount: contact.meetingsCount,
+            lastSeenAt: contact.lastSeenAt,
+            lastEventTitle: contact.lastEventTitle,
+            companyId,
+            isApproved: true,
+          },
+          create: {
+            userId,
+            email: contact.email,
+            name: contact.name,
+            companyId,
+            meetingsCount: contact.meetingsCount,
+            lastSeenAt: contact.lastSeenAt,
+            lastEventTitle: contact.lastEventTitle,
+            isApproved: true,
+          },
+        });
+      })
+    );
 
-    // Delete existing meetings and insert new ones (full refresh)
+    // Connect source accounts in batch
+    await prisma.$transaction(
+      dbContacts.map(c =>
+        prisma.contact.update({
+          where: { id: c.id },
+          data: { sourceAccounts: { connect: { id: primaryAccount.id } } },
+        })
+      )
+    );
+
+    // Delete old meetings in batch
     await prisma.meeting.deleteMany({
-      where: { contactId: dbContact.id },
+      where: { contactId: { in: dbContacts.map(c => c.id) } },
     });
 
-    // Insert meetings (limit to last 10 for performance)
-    const recentMeetings = contact.meetings
-      .sort((a, b) => b.date.getTime() - a.date.getTime())
-      .slice(0, 10);
-
-    for (const meeting of recentMeetings) {
-      await prisma.meeting.create({
-        data: {
+    // Bulk insert meetings with createMany
+    const meetingRows: { contactId: string; title: string; date: Date; duration?: number }[] = [];
+    batch.forEach((contact, idx) => {
+      const dbContact = dbContacts[idx];
+      const recentMeetings = contact.meetings
+        .sort((a, b) => b.date.getTime() - a.date.getTime())
+        .slice(0, 10);
+      recentMeetings.forEach(m => {
+        meetingRows.push({
           contactId: dbContact.id,
-          title: meeting.title,
-          date: meeting.date,
-          duration: meeting.duration,
-        },
+          title: m.title,
+          date: m.date,
+          duration: m.duration,
+        });
       });
+    });
+
+    if (meetingRows.length > 0) {
+      await prisma.meeting.createMany({ data: meetingRows });
     }
   }
 
@@ -485,78 +527,99 @@ export async function syncCalendarAccount(userId: string, accountId: string): Pr
   const contacts = Array.from(contactsMap.values());
   const domainsSet = new Set(contacts.map(c => c.domain));
 
-  // Upsert companies
+  // Batch upsert companies
   const companyMap = new Map<string, string>();
-  for (const domain of domainsSet) {
-    const company = await prisma.company.upsert({
-      where: { domain },
-      update: {},
-      create: {
-        domain,
-        name: normalizeCompanyName(domain),
-      },
-    });
-    companyMap.set(domain, company.id);
+  const domainBatches = Array.from(domainsSet);
+  const BATCH_SIZE = 50;
+
+  for (let i = 0; i < domainBatches.length; i += BATCH_SIZE) {
+    const batch = domainBatches.slice(i, i + BATCH_SIZE);
+    await prisma.$transaction(
+      batch.map(domain =>
+        prisma.company.upsert({
+          where: { domain },
+          update: {},
+          create: { domain, name: normalizeCompanyName(domain) },
+        })
+      )
+    );
   }
 
-  // Upsert contacts with source tracking
-  for (const contact of contacts) {
-    const companyId = companyMap.get(contact.domain);
+  const allCompanies = await prisma.company.findMany({
+    where: { domain: { in: domainBatches } },
+    select: { id: true, domain: true },
+  });
+  allCompanies.forEach(c => companyMap.set(c.domain, c.id));
 
-    const dbContact = await prisma.contact.upsert({
-      where: {
-        userId_email: { userId, email: contact.email },
-      },
-      update: {
-        name: contact.name,
-        meetingsCount: contact.meetingsCount,
-        lastSeenAt: contact.lastSeenAt,
-        lastEventTitle: contact.lastEventTitle,
-        companyId,
-        isApproved: true,
-        source: 'google_calendar',
-        sourceAccountId: accountId,
-      },
-      create: {
-        userId,
-        email: contact.email,
-        name: contact.name,
-        companyId,
-        meetingsCount: contact.meetingsCount,
-        lastSeenAt: contact.lastSeenAt,
-        lastEventTitle: contact.lastEventTitle,
-        isApproved: true,
-        source: 'google_calendar',
-        sourceAccountId: accountId,
-      },
-    });
+  // Batch upsert contacts with source tracking
+  for (let i = 0; i < contacts.length; i += BATCH_SIZE) {
+    const batch = contacts.slice(i, i + BATCH_SIZE);
 
-    // Track this account as a source via many-to-many
-    await prisma.contact.update({
-      where: { id: dbContact.id },
-      data: {
-        sourceAccounts: { connect: { id: accountId } },
-      },
-    });
+    const dbContacts = await prisma.$transaction(
+      batch.map(contact => {
+        const companyId = companyMap.get(contact.domain);
+        return prisma.contact.upsert({
+          where: { userId_email: { userId, email: contact.email } },
+          update: {
+            name: contact.name,
+            meetingsCount: contact.meetingsCount,
+            lastSeenAt: contact.lastSeenAt,
+            lastEventTitle: contact.lastEventTitle,
+            companyId,
+            isApproved: true,
+            source: 'google_calendar',
+            sourceAccountId: accountId,
+          },
+          create: {
+            userId,
+            email: contact.email,
+            name: contact.name,
+            companyId,
+            meetingsCount: contact.meetingsCount,
+            lastSeenAt: contact.lastSeenAt,
+            lastEventTitle: contact.lastEventTitle,
+            isApproved: true,
+            source: 'google_calendar',
+            sourceAccountId: accountId,
+          },
+        });
+      })
+    );
 
-    // Refresh meetings
+    // Connect source accounts in batch
+    await prisma.$transaction(
+      dbContacts.map(c =>
+        prisma.contact.update({
+          where: { id: c.id },
+          data: { sourceAccounts: { connect: { id: accountId } } },
+        })
+      )
+    );
+
+    // Delete old meetings in batch
     await prisma.meeting.deleteMany({
-      where: { contactId: dbContact.id },
+      where: { contactId: { in: dbContacts.map(c => c.id) } },
     });
 
-    const recentMeetings = contact.meetings
-      .sort((a, b) => b.date.getTime() - a.date.getTime())
-      .slice(0, 10);
-
-    for (const meeting of recentMeetings) {
-      await prisma.meeting.create({
-        data: {
+    // Bulk insert meetings with createMany
+    const meetingRows: { contactId: string; title: string; date: Date; duration?: number }[] = [];
+    batch.forEach((contact, idx) => {
+      const dbContact = dbContacts[idx];
+      const recentMeetings = contact.meetings
+        .sort((a, b) => b.date.getTime() - a.date.getTime())
+        .slice(0, 10);
+      recentMeetings.forEach(m => {
+        meetingRows.push({
           contactId: dbContact.id,
-          title: meeting.title,
-          date: meeting.date,
-          duration: meeting.duration,
-        },
+          title: m.title,
+          date: m.date,
+          duration: m.duration,
+        });
       });
+    });
+
+    if (meetingRows.length > 0) {
+      await prisma.meeting.createMany({ data: meetingRows });
     }
   }
 
