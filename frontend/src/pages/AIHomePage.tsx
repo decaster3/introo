@@ -1346,7 +1346,6 @@ export function AIHomePage() {
 
   const openIntroPanel = useCallback((company: MergedCompany, overrideSourceFilter?: string, overrideSpaceFilter?: string) => {
     setIntroSelectedThrough(null);
-    setIntroExpandedOption(null);
     setInlinePanel({
       type: 'intro-request',
       company,
