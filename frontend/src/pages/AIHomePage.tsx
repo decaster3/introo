@@ -3800,7 +3800,7 @@ export function AIHomePage() {
                   <div className="sb-space-form" style={{ marginTop: '0.5rem' }}>
                     <input
                       className="sb-input"
-                      placeholder="Email address to connect"
+                      placeholder="Invite anyone by email"
                       value={connectEmail}
                       onChange={e => setConnectEmail(e.target.value)}
                       onKeyDown={e => { if (e.key === 'Enter' && connectEmail.trim()) { sendConnectionRequest(connectEmail); } }}
