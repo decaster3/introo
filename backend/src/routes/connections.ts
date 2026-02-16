@@ -3,6 +3,15 @@ import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { sendNotificationEmail, sendInviteEmail } from '../services/email.js';
 import prisma from '../lib/prisma.js';
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function maskEmail(email: string): string {
+  const [local, domain] = email.split('@');
+  if (!domain) return '***';
+  const maskedLocal = local.length <= 2 ? '*'.repeat(local.length) : local[0] + '*'.repeat(local.length - 2) + local[local.length - 1];
+  return `${maskedLocal}@${domain}`;
+}
+
 const router = Router();
 router.use(authMiddleware);
 
@@ -54,6 +63,11 @@ router.post('/', async (req, res) => {
 
     if (!email?.trim()) {
       res.status(400).json({ error: 'Email is required' });
+      return;
+    }
+
+    if (!EMAIL_REGEX.test(email.trim())) {
+      res.status(400).json({ error: 'Invalid email format' });
       return;
     }
 
@@ -364,7 +378,7 @@ router.get('/:id/reach', async (req, res) => {
       const contactInfo = {
         id: contact.id,
         name: contact.name || contact.email.split('@')[0],
-        email: contact.email,
+        email: maskEmail(contact.email),
         title: contact.title,
         userId: peerId,
         userName: peerName,

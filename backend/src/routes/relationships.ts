@@ -1,12 +1,12 @@
 import { Router } from 'express';
-import { authMiddleware, optionalAuthMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
+import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { getPaginationParams, createPaginatedResponse } from '../lib/pagination.js';
 import prisma from '../lib/prisma.js';
 
 const router = Router();
 
 // Get all relationships (community-wide for matching)
-router.get('/', optionalAuthMiddleware, async (req, res) => {
+router.get('/', authMiddleware, async (req, res) => {
   try {
     const relationships = await prisma.relationship.findMany({
       include: {
@@ -46,7 +46,7 @@ router.get('/mine', authMiddleware, async (req, res) => {
 });
 
 // Get companies (for the reach view) - with pagination
-router.get('/companies', async (req, res) => {
+router.get('/companies', authMiddleware, async (req, res) => {
   try {
     const pagination = getPaginationParams(req, 50);
     const { search, industry } = req.query;

@@ -4,6 +4,9 @@ import prisma from '../lib/prisma.js';
 
 const router = Router();
 
+// All routes require authentication
+router.use(authMiddleware);
+
 // Get all users (community members)
 router.get('/', async (req, res) => {
   try {
@@ -22,7 +25,7 @@ router.get('/', async (req, res) => {
 });
 
 // Get current user's stats - must be before /:id to avoid conflict
-router.get('/me/stats', authMiddleware, async (req, res) => {
+router.get('/me/stats', async (req, res) => {
   try {
     const userId = (req as AuthenticatedRequest).user!.id;
 

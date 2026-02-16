@@ -85,6 +85,15 @@ router.get('/google/callback', async (req, res, next) => {
         return;
       }
 
+      // Verify the logged-in user matches the userId in the state parameter
+      // to prevent an attacker from linking their Google account to another user
+      const sessionToken = req.cookies?.token;
+      const sessionPayload = sessionToken ? verifyToken(sessionToken) : null;
+      if (!sessionPayload || sessionPayload.userId !== userId) {
+        res.redirect(`${frontendUrl}/home?panel=settings&error=session_mismatch`);
+        return;
+      }
+
       // Verify the userId is real
       const user = await prisma.user.findUnique({ where: { id: userId } });
       if (!user) {
@@ -217,6 +226,28 @@ router.patch('/me', authMiddleware, async (req, res) => {
   try {
     const userId = (req as AuthenticatedRequest).user!.id;
     const { name, title, companyDomain, linkedinUrl, headline, city, country } = req.body;
+
+    // Validate field types and lengths
+    const stringFields = { name, title, linkedinUrl, headline, city, country, companyDomain };
+    for (const [key, val] of Object.entries(stringFields)) {
+      if (val !== undefined && typeof val !== 'string') {
+        res.status(400).json({ error: `${key} must be a string` });
+        return;
+      }
+      if (typeof val === 'string' && val.length > 500) {
+        res.status(400).json({ error: `${key} is too long (max 500 characters)` });
+        return;
+      }
+    }
+
+    // Validate linkedinUrl is a safe URL if provided
+    if (linkedinUrl !== undefined && linkedinUrl.trim()) {
+      const url = linkedinUrl.trim().toLowerCase();
+      if (!url.startsWith('https://') && !url.startsWith('http://')) {
+        res.status(400).json({ error: 'linkedinUrl must be a valid URL starting with http:// or https://' });
+        return;
+      }
+    }
 
     const updateData: Record<string, any> = {};
     if (name !== undefined) updateData.name = name.trim() || undefined;

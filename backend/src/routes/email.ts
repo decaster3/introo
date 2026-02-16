@@ -10,6 +10,11 @@ import prisma from '../lib/prisma.js';
 const router = Router();
 router.use(authMiddleware);
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function isValidEmail(email: unknown): email is string {
+  return typeof email === 'string' && EMAIL_REGEX.test(email);
+}
+
 // ─── Send intro offer email ─────────────────────────────────────────────────
 
 router.post('/intro-offer', async (req, res) => {
@@ -19,6 +24,11 @@ router.post('/intro-offer', async (req, res) => {
 
     if (!recipientEmail || !recipientName || !targetCompany) {
       res.status(400).json({ error: 'recipientEmail, recipientName, and targetCompany are required' });
+      return;
+    }
+
+    if (!isValidEmail(recipientEmail)) {
+      res.status(400).json({ error: 'Invalid recipientEmail format' });
       return;
     }
 
@@ -52,6 +62,11 @@ router.post('/double-intro', async (req, res) => {
 
     if (!requesterEmail || !requesterName || !contactEmail || !contactName || !targetCompany) {
       res.status(400).json({ error: 'requesterEmail, requesterName, contactEmail, contactName, and targetCompany are required' });
+      return;
+    }
+
+    if (!isValidEmail(requesterEmail) || !isValidEmail(contactEmail)) {
+      res.status(400).json({ error: 'Invalid email format' });
       return;
     }
 
@@ -89,6 +104,25 @@ router.post('/contact', async (req, res) => {
       return;
     }
 
+    if (!isValidEmail(recipientEmail)) {
+      res.status(400).json({ error: 'Invalid recipientEmail format' });
+      return;
+    }
+
+    // Rate limit: max 20 emails per user per hour to prevent abuse
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const recentCount = await prisma.notification.count({
+      where: {
+        userId: user.id,
+        type: 'email_sent',
+        createdAt: { gte: oneHourAgo },
+      },
+    });
+    if (recentCount >= 20) {
+      res.status(429).json({ error: 'Email rate limit reached. Try again later.' });
+      return;
+    }
+
     const result = await sendContactEmail({
       senderName: user.name,
       senderEmail: user.email,
@@ -102,6 +136,18 @@ router.post('/contact', async (req, res) => {
       res.status(500).json({ error: result.error || 'Failed to send email' });
       return;
     }
+
+    // Track for rate limiting
+    await prisma.notification.create({
+      data: {
+        userId: user.id,
+        type: 'email_sent',
+        title: `Email to ${recipientEmail}`,
+        body: subject,
+        isRead: true,
+        data: { recipientEmail },
+      },
+    }).catch(() => {});
 
     res.json({ success: true, emailId: result.id });
   } catch (error: any) {

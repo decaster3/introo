@@ -106,6 +106,11 @@ export function configurePassport() {
           const encryptedAccessToken = encryptToken(accessToken);
           const encryptedRefreshToken = refreshToken ? encryptToken(refreshToken) : undefined;
 
+          // Only include refreshToken fields when Google actually sent one
+          const refreshTokenFields = encryptedRefreshToken
+            ? { googleRefreshToken: encryptedRefreshToken }
+            : {};
+
           // Upsert user
           const user = await prisma.user.upsert({
             where: { email },
@@ -113,14 +118,14 @@ export function configurePassport() {
               name: profile.displayName,
               avatar: profile.photos?.[0]?.value,
               googleAccessToken: encryptedAccessToken,
-              googleRefreshToken: encryptedRefreshToken,
+              ...refreshTokenFields,
             },
             create: {
               email,
               name: profile.displayName,
               avatar: profile.photos?.[0]?.value,
               googleAccessToken: encryptedAccessToken,
-              googleRefreshToken: encryptedRefreshToken,
+              ...refreshTokenFields,
             },
           });
 
@@ -129,14 +134,14 @@ export function configurePassport() {
             where: { userId_email: { userId: user.id, email } },
             update: {
               googleAccessToken: encryptedAccessToken,
-              googleRefreshToken: encryptedRefreshToken,
+              ...refreshTokenFields,
               isActive: true,
             },
             create: {
               userId: user.id,
               email,
               googleAccessToken: encryptedAccessToken,
-              googleRefreshToken: encryptedRefreshToken,
+              ...refreshTokenFields,
             },
           });
 

@@ -11,6 +11,17 @@ const FROM_EMAIL = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
 const APP_NAME = 'Introo';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
+// ─── HTML escaping ───────────────────────────────────────────────────────────
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface EmailResult {
@@ -169,11 +180,13 @@ export async function sendInviteEmail(params: {
   recipientEmail: string;
 }): Promise<EmailResult> {
   const { senderName, senderEmail, recipientEmail } = params;
-  const senderFirst = senderName.split(' ')[0];
+  const safeSenderName = escapeHtml(senderName);
+  const safeSenderEmail = escapeHtml(senderEmail);
+  const senderFirst = escapeHtml(senderName.split(' ')[0]);
 
   const html = baseLayout(`
     <h1>${senderFirst} wants to connect with you</h1>
-    <p><span class="highlight">${senderName}</span> (${senderEmail}) invited you to join their professional network on ${APP_NAME}.</p>
+    <p><span class="highlight">${safeSenderName}</span> (${safeSenderEmail}) invited you to join their professional network on ${APP_NAME}.</p>
 
     <div class="callout">
       <p><strong>What is ${APP_NAME}?</strong></p>
@@ -187,8 +200,8 @@ export async function sendInviteEmail(params: {
     </div>
 
     <hr class="divider" />
-    <p class="muted">This invitation was sent by ${senderName} via ${APP_NAME}. If you don't know this person, you can safely ignore this email.</p>
-  `, { preheader: `${senderName} invited you to connect on ${APP_NAME} — see who you both know.` });
+    <p class="muted">This invitation was sent by ${safeSenderName} via ${APP_NAME}. If you don't know this person, you can safely ignore this email.</p>
+  `, { preheader: `${safeSenderName} invited you to connect on ${APP_NAME} — see who you both know.` });
 
   return send({
     to: recipientEmail,
@@ -206,11 +219,15 @@ export async function sendSpaceInviteEmail(params: {
   spaceEmoji: string;
 }): Promise<EmailResult> {
   const { senderName, senderEmail, recipientEmail, spaceName, spaceEmoji } = params;
-  const senderFirst = senderName.split(' ')[0];
+  const safeSenderName = escapeHtml(senderName);
+  const safeSenderEmail = escapeHtml(senderEmail);
+  const senderFirst = escapeHtml(senderName.split(' ')[0]);
+  const safeSpaceName = escapeHtml(spaceName);
+  const safeSpaceEmoji = escapeHtml(spaceEmoji);
 
   const html = baseLayout(`
-    <h1>${senderFirst} invited you to ${spaceEmoji} ${spaceName}</h1>
-    <p><span class="highlight">${senderName}</span> (${senderEmail}) wants you to join their space <span class="highlight">${spaceEmoji} ${spaceName}</span> on ${APP_NAME}.</p>
+    <h1>${senderFirst} invited you to ${safeSpaceEmoji} ${safeSpaceName}</h1>
+    <p><span class="highlight">${safeSenderName}</span> (${safeSenderEmail}) wants you to join their space <span class="highlight">${safeSpaceEmoji} ${safeSpaceName}</span> on ${APP_NAME}.</p>
 
     <div class="callout">
       <p><strong>What are Spaces?</strong></p>
@@ -224,12 +241,12 @@ export async function sendSpaceInviteEmail(params: {
     </div>
 
     <hr class="divider" />
-    <p class="muted">This invitation was sent by ${senderName} via ${APP_NAME}. If you don't know this person, you can safely ignore this email.</p>
-  `, { preheader: `${senderName} invited you to the space "${spaceName}" on ${APP_NAME}.` });
+    <p class="muted">This invitation was sent by ${safeSenderName} via ${APP_NAME}. If you don't know this person, you can safely ignore this email.</p>
+  `, { preheader: `${safeSenderName} invited you to the space "${safeSpaceName}" on ${APP_NAME}.` });
 
   return send({
     to: recipientEmail,
-    subject: `${senderFirst} invited you to ${spaceEmoji} ${spaceName} on ${APP_NAME}`,
+    subject: `${senderFirst} invited you to ${safeSpaceEmoji} ${safeSpaceName} on ${APP_NAME}`,
     html,
   });
 }
@@ -279,16 +296,20 @@ export async function sendIntroOfferEmail(params: {
   contactName?: string;
 }): Promise<EmailResult> {
   const { senderName, senderEmail, recipientEmail, recipientName, targetCompany, contactName } = params;
-  const recipientFirst = recipientName.split(' ')[0];
-  const senderFirst = senderName.split(' ')[0];
+  const safeSenderName = escapeHtml(senderName);
+  const safeSenderEmail = escapeHtml(senderEmail);
+  const senderFirst = escapeHtml(senderName.split(' ')[0]);
+  const recipientFirst = escapeHtml(recipientName.split(' ')[0]);
+  const safeTargetCompany = escapeHtml(targetCompany);
+  const safeContactName = contactName ? escapeHtml(contactName) : null;
 
-  const connectionLine = contactName
-    ? `They know <span class="highlight">${contactName}</span> at ${targetCompany} and offered to make an introduction for you.`
-    : `They have a connection at ${targetCompany} and offered to make an introduction for you.`;
+  const connectionLine = safeContactName
+    ? `They know <span class="highlight">${safeContactName}</span> at ${safeTargetCompany} and offered to make an introduction for you.`
+    : `They have a connection at ${safeTargetCompany} and offered to make an introduction for you.`;
 
   const html = baseLayout(`
     <h1>Good news, ${recipientFirst}!</h1>
-    <p><span class="highlight">${senderName}</span> saw that you're looking for an intro to someone at <span class="highlight">${targetCompany}</span>.</p>
+    <p><span class="highlight">${safeSenderName}</span> saw that you're looking for an intro to someone at <span class="highlight">${safeTargetCompany}</span>.</p>
     <p>${connectionLine}</p>
 
     <div class="callout">
@@ -296,16 +317,16 @@ export async function sendIntroOfferEmail(params: {
     </div>
 
     <div style="margin-top: 24px;">
-      <a href="mailto:${senderEmail}?subject=Re: Intro to ${targetCompany}" class="btn">Reply to ${senderFirst}</a>
+      <a href="mailto:${safeSenderEmail}?subject=Re: Intro to ${encodeURIComponent(targetCompany)}" class="btn">Reply to ${senderFirst}</a>
     </div>
 
     <hr class="divider" />
-    <p class="muted">This email was sent via ${APP_NAME} on behalf of ${senderName}. You can also reply directly to this email &mdash; it goes straight to ${senderFirst}'s inbox.</p>
-  `, { preheader: `${senderName} can introduce you to someone at ${targetCompany}.` });
+    <p class="muted">This email was sent via ${APP_NAME} on behalf of ${safeSenderName}. You can also reply directly to this email &mdash; it goes straight to ${senderFirst}'s inbox.</p>
+  `, { preheader: `${safeSenderName} can introduce you to someone at ${safeTargetCompany}.` });
 
   return send({
     to: recipientEmail,
-    subject: `${senderFirst} can intro you to someone at ${targetCompany}`,
+    subject: `${senderFirst} can intro you to someone at ${safeTargetCompany}`,
     html,
     replyTo: senderEmail,
   });
@@ -322,9 +343,13 @@ export async function sendDoubleIntroEmail(params: {
   targetCompany: string;
 }): Promise<EmailResult> {
   const { senderName, senderEmail, requesterEmail, requesterName, contactEmail, contactName, targetCompany } = params;
-  const senderFirst = senderName.split(' ')[0];
-  const requesterFirst = requesterName.split(' ')[0];
-  const contactFirst = contactName.split(' ')[0];
+  const safeSenderName = escapeHtml(senderName);
+  const senderFirst = escapeHtml(senderName.split(' ')[0]);
+  const safeRequesterName = escapeHtml(requesterName);
+  const requesterFirst = escapeHtml(requesterName.split(' ')[0]);
+  const safeContactName = escapeHtml(contactName);
+  const contactFirst = escapeHtml(contactName.split(' ')[0]);
+  const safeTargetCompany = escapeHtml(targetCompany);
 
   const html = baseLayout(`
     <h1>Meet each other!</h1>
@@ -332,9 +357,9 @@ export async function sendDoubleIntroEmail(params: {
     <p>I'd love to connect you two. Here's a bit of context:</p>
 
     <div class="callout">
-      <p><span class="highlight">${contactName}</span> &mdash; ${requesterFirst} has been looking to connect with someone at ${targetCompany}, and I thought you'd be the perfect person.</p>
+      <p><span class="highlight">${safeContactName}</span> &mdash; ${requesterFirst} has been looking to connect with someone at ${safeTargetCompany}, and I thought you'd be the perfect person.</p>
       <br/>
-      <p><span class="highlight">${requesterName}</span> &mdash; ${contactFirst} is at ${targetCompany}. I think you'll have a lot to talk about.</p>
+      <p><span class="highlight">${safeRequesterName}</span> &mdash; ${contactFirst} is at ${safeTargetCompany}. I think you'll have a lot to talk about.</p>
     </div>
 
     <p>Feel free to reply all to continue the conversation right here in this thread.</p>
@@ -346,7 +371,7 @@ export async function sendDoubleIntroEmail(params: {
   return send({
     to: [contactEmail, requesterEmail],
     cc: senderEmail,
-    subject: `${senderFirst} intro: ${requesterFirst} ↔ ${contactFirst} (${targetCompany})`,
+    subject: `${senderFirst} intro: ${requesterFirst} ↔ ${contactFirst} (${safeTargetCompany})`,
     html,
     replyTo: senderEmail,
   });
@@ -363,12 +388,15 @@ export async function sendContactEmail(params: {
 }): Promise<EmailResult> {
   const { senderName, senderEmail, recipientEmail, recipientName, subject, body } = params;
 
+  const safeBody = escapeHtml(body).replace(/\n/g, '<br/>');
+  const safeSenderName = escapeHtml(senderName);
+
   const html = baseLayout(`
-    <p>${body.replace(/\n/g, '<br/>')}</p>
+    <p>${safeBody}</p>
 
     <hr class="divider" />
     <p class="muted">Sent from <a href="${FRONTEND_URL}" style="color: #6366f1; text-decoration: none; font-weight: 600;">${APP_NAME}</a> &mdash; warm intros through people you trust.</p>
-  `, { preheader: `${senderName} sent you a message.` });
+  `, { preheader: `${safeSenderName} sent you a message.` });
 
   return send({
     to: recipientEmail,
@@ -392,9 +420,12 @@ export async function sendNotificationEmail(
   const email = await getUserEmail(userId);
   if (!email) return { success: false, error: 'User email not found' };
 
+  const safeTitle = escapeHtml(notification.title);
+  const safeBody = notification.body ? escapeHtml(notification.body) : null;
+
   const html = baseLayout(`
-    <h2>${notification.title}</h2>
-    ${notification.body ? `<p>${notification.body}</p>` : ''}
+    <h2>${safeTitle}</h2>
+    ${safeBody ? `<p>${safeBody}</p>` : ''}
 
     <div style="margin-top: 20px;">
       <a href="${FRONTEND_URL}/home" class="btn">View in ${APP_NAME}</a>

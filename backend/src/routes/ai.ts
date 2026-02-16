@@ -1,9 +1,20 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { authMiddleware } from '../middleware/auth.js';
 import OpenAI from 'openai';
 
 const router = Router();
 router.use(authMiddleware);
+
+const isProduction = process.env.NODE_ENV === 'production';
+const aiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: isProduction ? 60 : 500,
+  message: { error: 'Too many AI requests, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+router.use(aiLimiter);
 
 // Lazy-init OpenAI client so env var is read at request time
 let _openai: OpenAI | null = null;

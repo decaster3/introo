@@ -3124,34 +3124,6 @@ body {
   font-size: 0.7rem;
 }
 
-/* ── Network Graph View ──────────────────────────────── */
-
-.u-network-graph {
-  width: 100%;
-  height: calc(100vh - 160px);
-  min-height: 500px;
-  position: relative;
-  border-radius: 12px;
-  overflow: hidden;
-  background: radial-gradient(ellipse at center, rgba(22,26,36,0.95) 0%, rgba(10,12,18,0.98) 100%);
-  border: 1px solid var(--border-subtle);
-}
-
-.u-network-graph canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-  cursor: grab;
-}
-
-.u-network-graph canvas:active {
-  cursor: grabbing;
-}
-
-.u-grid--hidden {
-  display: none !important;
-}
-
 /* ── Company Grid ──────────────────────────────────── */
 
 .u-grid {

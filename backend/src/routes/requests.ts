@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authMiddleware, optionalAuthMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
+import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { validate, schemas } from '../middleware/validation.js';
 import { getPaginationParams, createPaginatedResponse } from '../lib/pagination.js';
 import { sendNotificationEmail } from '../services/email.js';
@@ -66,7 +66,7 @@ router.get('/user/mine', authMiddleware, async (req, res) => {
 });
 
 // Get all open requests (with pagination)
-router.get('/', optionalAuthMiddleware, async (req, res) => {
+router.get('/', authMiddleware, async (req, res) => {
   try {
     const pagination = getPaginationParams(req);
     const { status } = req.query;
@@ -108,8 +108,10 @@ router.get('/', optionalAuthMiddleware, async (req, res) => {
 });
 
 // Get single request
-router.get('/:id', optionalAuthMiddleware, async (req, res) => {
+router.get('/:id', authMiddleware, async (req, res) => {
   try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+
     const request = await prisma.introRequest.findUnique({
       where: { id: req.params.id },
       include: {
@@ -131,6 +133,25 @@ router.get('/:id', optionalAuthMiddleware, async (req, res) => {
 
     if (!request) {
       res.status(404).json({ error: 'Request not found' });
+      return;
+    }
+
+    // Authorization: must be the requester, or a member of the request's space,
+    // or the targeted connection peer
+    const isRequester = request.requesterId === userId;
+    const nq = (request.normalizedQuery as Record<string, unknown>) || {};
+    const isConnectionPeer = nq.connectionPeerId === userId;
+
+    let isSpaceMember = false;
+    if (request.spaceId) {
+      const membership = await prisma.spaceMember.findUnique({
+        where: { spaceId_userId: { spaceId: request.spaceId, userId } },
+      });
+      isSpaceMember = !!membership && membership.status === 'approved';
+    }
+
+    if (!isRequester && !isSpaceMember && !isConnectionPeer) {
+      res.status(403).json({ error: 'Not authorized to view this request' });
       return;
     }
 
@@ -318,6 +339,19 @@ router.patch('/:id/status', authMiddleware, validate(schemas.updateRequestStatus
       return;
     }
 
+    // Enforce valid status transitions
+    const validTransitions: Record<string, string[]> = {
+      open: ['accepted', 'completed'],
+      accepted: ['completed'],
+      completed: [],
+      declined: [],
+    };
+    const allowed = validTransitions[existing.status] || [];
+    if (!allowed.includes(status)) {
+      res.status(400).json({ error: `Cannot transition from "${existing.status}" to "${status}"` });
+      return;
+    }
+
     const request = await prisma.introRequest.update({
       where: { id: req.params.id },
       data: { status },
@@ -350,6 +384,11 @@ router.patch('/:id/decline', authMiddleware, async (req, res) => {
     // Cannot decline your own request
     if (existing.requesterId === userId) {
       res.status(400).json({ error: 'Cannot decline your own request' });
+      return;
+    }
+
+    if (existing.status !== 'open') {
+      res.status(400).json({ error: `Request is already ${existing.status}` });
       return;
     }
 
@@ -441,6 +480,22 @@ router.patch('/:id/done', authMiddleware, async (req, res) => {
       return;
     }
 
+    if (existing.status !== 'open') {
+      res.status(400).json({ error: `Request is already ${existing.status}` });
+      return;
+    }
+
+    // Must be a member of the space (same check as /decline)
+    if (existing.spaceId) {
+      const membership = await prisma.spaceMember.findUnique({
+        where: { spaceId_userId: { spaceId: existing.spaceId, userId } },
+      });
+      if (!membership || membership.status !== 'approved') {
+        res.status(403).json({ error: 'You must be a member of the space' });
+        return;
+      }
+    }
+
     const result = await prisma.$transaction(async (tx) => {
       const offer = await tx.introOffer.create({
         data: {
@@ -523,6 +578,11 @@ router.delete('/:id', authMiddleware, async (req, res) => {
     // Delete associated offers first
     await prisma.introOffer.deleteMany({
       where: { requestId: req.params.id },
+    });
+
+    // Clean up notifications referencing this request
+    await prisma.notification.deleteMany({
+      where: { data: { path: ['requestId'], equals: req.params.id } },
     });
 
     // Delete the request

@@ -5,10 +5,6 @@ import react from '@vitejs/plugin-react'
 export default defineConfig(({ mode }) => ({
   plugins: [react()],
 
-  optimizeDeps: {
-    include: ['react-force-graph-2d', 'react-kapsule', 'force-graph'],
-  },
-
   server: {
     proxy: {
       '/api': {

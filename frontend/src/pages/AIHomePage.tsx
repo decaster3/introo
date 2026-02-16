@@ -3,8 +3,6 @@ import { Navigate } from 'react-router-dom';
 import { useAppState, useAppActions } from '../store';
 import { API_BASE, calendarApi, requestsApi, notificationsApi, offersApi, tagsApi, emailApi, type CalendarAccountInfo } from '../lib/api';
 import { calculateStrength, type SpaceCompany, type DisplayContact, type MergedCompany, type HuntFilters, type Hunt, type InlinePanel } from '../types';
-import { lazy, Suspense } from 'react';
-const NetworkGraph = lazy(() => import('../components/NetworkGraph'));
 import { PersonAvatar, CompanyLogo, OnboardingTour } from '../components';
 import { ProfilePanel, SettingsPanel, NotificationsPanel } from '../components/panels';
 import { useProfile } from '../hooks/useProfile';
@@ -80,8 +78,8 @@ export function AIHomePage() {
   const [spaceFilter, setSpaceFilter] = useState<string>('all');
   const [connectionFilter, setConnectionFilter] = useState<string>('all');
   const [sortBy] = useState<'relevance' | 'contacts' | 'name' | 'strength'>('relevance');
-  const [viewMode, setViewMode] = useState<'grid' | 'table' | 'graph'>(() => {
-    try { const v = localStorage.getItem('introo_view_mode'); return v === 'table' ? 'table' : v === 'graph' ? 'graph' : 'grid'; } catch { return 'grid'; }
+  const [viewMode, setViewMode] = useState<'grid' | 'table'>(() => {
+    try { const v = localStorage.getItem('introo_view_mode'); return v === 'table' ? 'table' : 'grid'; } catch { return 'grid'; }
   });
   const [gridPage, setGridPage] = useState(0);
   const GRID_PAGE_SIZE = 50;
@@ -702,13 +700,6 @@ export function AIHomePage() {
       result = result.filter(c => c.spaceCount > 0);
     } else if (sourceFilter === 'both') {
       result = result.filter(c => c.source === 'both');
-    }
-
-    // Filter by specific calendar account
-    if (accountFilter !== 'all') {
-      result = result.filter(c =>
-        c.myContacts.some(mc => mc.sourceAccountEmails?.includes(accountFilter))
-      );
     }
 
     // Filter by specific calendar account
@@ -2340,9 +2331,6 @@ export function AIHomePage() {
                 <button className={`u-view-btn ${viewMode === 'table' ? 'active' : ''}`} onClick={() => { setViewMode('table'); localStorage.setItem('introo_view_mode', 'table'); }} title="Table view">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
                 </button>
-                <button className={`u-view-btn ${viewMode === 'graph' ? 'active' : ''}`} onClick={() => { setViewMode('graph'); localStorage.setItem('introo_view_mode', 'graph'); }} title="Graph view">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="12" cy="19" r="2"/><circle cx="12" cy="12" r="2"/><line x1="7" y1="5" x2="10" y2="12"/><line x1="17" y1="5" x2="14" y2="12"/><line x1="12" y1="14" x2="12" y2="17"/></svg>
-                </button>
               </div>
             </div>
           </div>
@@ -2424,15 +2412,7 @@ export function AIHomePage() {
           )}
 
           {/* ── Company Grid ──────────────────────────────────── */}
-          {viewMode === 'graph' && !loading && !storeLoading && (
-            <Suspense fallback={<div className="u-network-graph" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><span style={{ color: 'rgba(255,255,255,0.4)' }}>Loading graph...</span></div>}>
-              <NetworkGraph
-                companies={filteredCompanies}
-                onCompanyClick={(company) => setInlinePanel({ type: 'company', company })}
-              />
-            </Suspense>
-          )}
-          <div className={`u-grid ${viewMode === 'table' ? 'u-grid--table' : ''} ${viewMode === 'graph' ? 'u-grid--hidden' : ''}`}>
+          <div className={`u-grid ${viewMode === 'table' ? 'u-grid--table' : ''}`}>
             {loading || storeLoading ? (
               <div className="u-grid-loading-rich">
                 <div className="u-loading-orb">

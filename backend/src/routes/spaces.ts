@@ -3,6 +3,15 @@ import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { sendNotificationEmail, sendSpaceInviteEmail } from '../services/email.js';
 import prisma from '../lib/prisma.js';
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function maskEmail(email: string): string {
+  const [local, domain] = email.split('@');
+  if (!domain) return '***';
+  const maskedLocal = local.length <= 2 ? '*'.repeat(local.length) : local[0] + '*'.repeat(local.length - 2) + local[local.length - 1];
+  return `${maskedLocal}@${domain}`;
+}
+
 const router = Router();
 
 // All routes require authentication
@@ -149,8 +158,16 @@ router.post('/', async (req, res) => {
     const userId = (req as AuthenticatedRequest).user!.id;
     const { name, description, emoji, isPrivate } = req.body;
 
-    if (!name || name.trim().length === 0) {
+    if (!name || typeof name !== 'string' || name.trim().length === 0) {
       res.status(400).json({ error: 'Space name is required' });
+      return;
+    }
+    if (name.trim().length > 100) {
+      res.status(400).json({ error: 'Space name is too long (max 100 characters)' });
+      return;
+    }
+    if (description && typeof description === 'string' && description.trim().length > 1000) {
+      res.status(400).json({ error: 'Description is too long (max 1000 characters)' });
       return;
     }
 
@@ -203,6 +220,15 @@ router.patch('/:id', async (req, res) => {
 
     if (!space) {
       res.status(404).json({ error: 'Space not found or you are not the owner' });
+      return;
+    }
+
+    if (name && typeof name === 'string' && name.trim().length > 100) {
+      res.status(400).json({ error: 'Space name is too long (max 100 characters)' });
+      return;
+    }
+    if (description && typeof description === 'string' && description.trim().length > 1000) {
+      res.status(400).json({ error: 'Description is too long (max 1000 characters)' });
       return;
     }
 
@@ -593,6 +619,11 @@ router.post('/:id/members', async (req, res) => {
     const { id } = req.params;
     const { email } = req.body;
 
+    if (!email || typeof email !== 'string' || !EMAIL_REGEX.test(email.trim())) {
+      res.status(400).json({ error: 'A valid email is required' });
+      return;
+    }
+
     // Check if user has permission to add members
     const space = await prisma.space.findFirst({
       where: {
@@ -968,10 +999,11 @@ router.get('/:id/reach', async (req, res) => {
       if (!contact.company) continue;
 
       const existing = companyMap.get(contact.company.id);
+      const isOwnContact = contact.userId === userId;
       const contactInfo = {
         id: contact.id,
         name: contact.name || contact.email.split('@')[0],
-        email: contact.email,
+        email: isOwnContact ? contact.email : maskEmail(contact.email),
         title: contact.title,
         userId: contact.userId,
         userName: contact.user.name,
@@ -979,7 +1011,8 @@ router.get('/:id/reach', async (req, res) => {
 
       if (existing) {
         // Avoid duplicates (same contact from same user)
-        if (!existing.contacts.some(c => c.email === contact.email)) {
+        const dedupEmail = maskEmail(contact.email);
+        if (!existing.contacts.some(c => c.email === contact.email || c.email === dedupEmail)) {
           existing.contacts.push(contactInfo);
         }
       } else {
