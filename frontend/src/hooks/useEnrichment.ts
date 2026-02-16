@@ -48,16 +48,17 @@ export function useEnrichment(refreshData: () => Promise<void>, storeLoading: bo
     checkEnrichmentRunning();
   }, [checkEnrichmentRunning, refreshStats]);
 
-  // After store loads, poll briefly to detect enrichment that may have just started
+  // After store loads, poll briefly to detect enrichment that may have just started.
+  // Also refreshes stats each attempt so auto-enrich can react once contacts exist.
   useEffect(() => {
     if (storeLoading || enriching) return;
     let attempts = 0;
     const interval = setInterval(async () => {
       attempts++;
+      refreshStats();
       const isRunning = await checkEnrichmentRunning();
       if (isRunning || attempts >= DETECTION_ATTEMPTS) {
         clearInterval(interval);
-        if (!isRunning) refreshStats();
       }
     }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
@@ -117,6 +118,11 @@ export function useEnrichment(refreshData: () => Promise<void>, storeLoading: bo
   // Returning users and page reloads won't re-trigger because pods_last_enrich is set.
   useEffect(() => {
     if (autoEnrichTriggered || enriching || storeLoading || !enrichStats) return;
+
+    // Don't decide yet if contacts haven't loaded (calendar sync still in progress).
+    // The effect will re-fire once enrichStats updates with real contact counts.
+    if (enrichStats.contacts.total === 0) return;
+
     setAutoEnrichTriggered(true);
 
     const pendingCount = enrichStats.contacts.pending ?? 0;
