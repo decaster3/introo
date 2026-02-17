@@ -3352,7 +3352,7 @@ export function AIHomePage() {
                     <div className="u-grid-filter-bar">
                       <label className="u-grid-exclude-label">
                         <input type="checkbox" checked={excludeMyContacts} onChange={e => { setExcludeMyContacts(e.target.checked); setGridPage(0); }} />
-                        Exclude my contacts
+                        Network companies only
                       </label>
                       <span className="u-grid-section-count">{displayCompanies.length}</span>
                     </div>
@@ -3789,7 +3789,7 @@ export function AIHomePage() {
                   <div className="u-grid-filter-bar">
                     <label className="u-grid-exclude-label">
                       <input type="checkbox" checked={excludeMyContacts} onChange={e => { setExcludeMyContacts(e.target.checked); setGridPage(0); }} />
-                      Exclude my contacts
+                      Network contacts only
                     </label>
                     <span className="u-grid-section-count">{displayPeople.length}</span>
                   </div>
