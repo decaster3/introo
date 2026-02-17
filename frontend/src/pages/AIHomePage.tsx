@@ -1541,32 +1541,6 @@ export function AIHomePage() {
 
   
 
-  // ─── Keyboard ───────────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        searchRef.current?.focus();
-      }
-      if (e.key === 'Escape') {
-        // Close innermost layer first: tag picker → panel → search → view
-        if (tagPickerDomain) {
-          setTagPickerDomain(null);
-          setTagPickerSearch('');
-        } else if (inlinePanel) {
-          setInlinePanel(null);
-        } else if (searchQuery) {
-          setSearchQuery('');
-        } else if (selectedView) {
-          toggleView(selectedView);
-        }
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [tagPickerDomain, inlinePanel, searchQuery, selectedView, toggleView]);
-
   // ─── Actions ────────────────────────────────────────────────────────────────
 
   const toggleView = useCallback((viewId: string) => {
@@ -1666,6 +1640,32 @@ export function AIHomePage() {
     setExpandedDomain(null);
     setGridPage(0);
   }, [savedViews]);
+
+  // ─── Keyboard ───────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+      if (e.key === 'Escape') {
+        // Close innermost layer first: tag picker → panel → search → view
+        if (tagPickerDomain) {
+          setTagPickerDomain(null);
+          setTagPickerSearch('');
+        } else if (inlinePanel) {
+          setInlinePanel(null);
+        } else if (searchQuery) {
+          setSearchQuery('');
+        } else if (selectedView) {
+          toggleView(selectedView);
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [tagPickerDomain, inlinePanel, searchQuery, selectedView, toggleView]);
 
   // AI-powered search: parse natural language and directly fill sidebar filters
   const aiSearch = useCallback(async (query: string) => {
