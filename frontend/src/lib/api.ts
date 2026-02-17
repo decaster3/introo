@@ -284,7 +284,7 @@ export const emailApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  sendContact: (data: { recipientEmail: string; recipientName?: string; subject: string; body: string }) =>
+  sendContact: (data: { recipientEmail: string; recipientName?: string; subject: string; body: string; requestId?: string; action?: string }) =>
     request<{ success: boolean; emailId?: string }>('/api/email/contact', {
       method: 'POST',
       body: JSON.stringify(data),

@@ -1215,13 +1215,24 @@ export function AIHomePage() {
       for (const c of co.spaceContacts) {
         if (seen.has(c.email)) continue;
         seen.add(c.email);
+        let sourceLabel = 'Network';
+        if (c.spaceId) {
+          const sp = spaces.find(s => s.id === c.spaceId);
+          if (sp) sourceLabel = sp.name;
+        } else {
+          const connId = co.connectionIds?.[0];
+          if (connId) {
+            const conn = connections.find(cn => cn.id === connId);
+            if (conn) sourceLabel = conn.peer.name;
+          }
+        }
         people.push({
           id: c.id, name: c.name, email: c.email, title: c.title || '',
           companyName: co.name, companyDomain: co.domain,
           strength: 'none',
           meetings: 0,
           lastSeen: '',
-          source: c.userName || 'Network',
+          source: sourceLabel,
           photoUrl: null,
           company: co,
           isMyContact: false,
@@ -4865,6 +4876,19 @@ export function AIHomePage() {
                               <p className="u-panel-request-msg">"{r.rawText}"</p>
                             )}
 
+                            {/* Details requested banner — shown to the requester */}
+                            {isMe && isOpen && (() => {
+                              const detailsNotif = notifications.find(n => n.type === 'details_requested' && (n.data as Record<string, unknown>)?.requestId === r.id);
+                              if (!detailsNotif) return null;
+                              const connectorName = (detailsNotif.data as Record<string, unknown>)?.connectorName as string || 'A connector';
+                              return (
+                                <div className="u-panel-request-details-banner">
+                                  <span className="u-panel-request-details-icon">📩</span>
+                                  <span>{connectorName} requested details from you — check your email and reply to them.</span>
+                                </div>
+                              );
+                            })()}
+
                             {/* Your contacts at this company */}
                             {!isMe && myContactsAtCompany.length > 0 && (
                               <div className="u-panel-request-contacts">
@@ -5033,6 +5057,8 @@ export function AIHomePage() {
                                             recipientName: r.requester.name,
                                             subject: introEmailSubject,
                                             body: introEmailBody,
+                                            requestId: r.id,
+                                            action: 'ask-details',
                                           });
                                         } else if (introActionType === 'ask-permission' && contact) {
                                           await emailApi.sendContact({
@@ -5522,6 +5548,19 @@ export function AIHomePage() {
 
                             {r.rawText && <p className="u-panel-request-msg">"{r.rawText}"</p>}
 
+                            {/* Details requested banner — shown to the requester */}
+                            {isMe && isOpen && (() => {
+                              const detailsNotif = notifications.find(n => n.type === 'details_requested' && (n.data as Record<string, unknown>)?.requestId === r.id);
+                              if (!detailsNotif) return null;
+                              const connectorName = (detailsNotif.data as Record<string, unknown>)?.connectorName as string || 'A connector';
+                              return (
+                                <div className="u-panel-request-details-banner">
+                                  <span className="u-panel-request-details-icon">📩</span>
+                                  <span>{connectorName} requested details from you — check your email and reply to them.</span>
+                                </div>
+                              );
+                            })()}
+
                             {!isMe && myContactsAtCompany.length > 0 && (
                               <div className="u-panel-request-contacts">
                                 <span className="u-panel-request-contacts-label">Your contacts at {companyName}:</span>
@@ -5666,6 +5705,8 @@ export function AIHomePage() {
                                             recipientName: r.requester.name,
                                             subject: introEmailSubject,
                                             body: introEmailBody,
+                                            requestId: r.id,
+                                            action: 'ask-details',
                                           });
                                         } else if (introActionType === 'ask-permission' && contact) {
                                           await emailApi.sendContact({

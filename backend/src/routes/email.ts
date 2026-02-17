@@ -4,6 +4,7 @@ import {
   sendIntroOfferEmail,
   sendDoubleIntroEmail,
   sendContactEmail,
+  sendNotificationEmail,
 } from '../services/email.js';
 import prisma from '../lib/prisma.js';
 
@@ -97,7 +98,7 @@ router.post('/double-intro', async (req, res) => {
 router.post('/contact', async (req, res) => {
   try {
     const user = (req as AuthenticatedRequest).user!;
-    const { recipientEmail, recipientName, subject, body } = req.body;
+    const { recipientEmail, recipientName, subject, body, requestId, action } = req.body;
 
     if (!recipientEmail || !subject || !body) {
       res.status(400).json({ error: 'recipientEmail, subject, and body are required' });
@@ -135,6 +136,41 @@ router.post('/contact', async (req, res) => {
     if (!result.success) {
       res.status(500).json({ error: result.error || 'Failed to send email' });
       return;
+    }
+
+    // If this is a "details requested" email for an intro request, notify the requester
+    if (action === 'ask-details' && requestId) {
+      try {
+        const introReq = await prisma.introRequest.findUnique({
+          where: { id: requestId },
+          select: { requesterId: true, normalizedQuery: true },
+        });
+        if (introReq && introReq.requesterId !== user.id) {
+          const nq = (introReq.normalizedQuery as Record<string, unknown>) || {};
+          const companyName = (nq.companyName as string) || 'a company';
+          const detailsNotif = {
+            type: 'details_requested',
+            title: `Details requested: ${companyName}`,
+            body: `${user.name} wants more details about your intro request to ${companyName}. Check your email and reply.`,
+          };
+          await prisma.notification.create({
+            data: {
+              userId: introReq.requesterId,
+              ...detailsNotif,
+              data: {
+                requestId,
+                companyName,
+                companyDomain: (nq.companyDomain as string) || null,
+                connectorId: user.id,
+                connectorName: user.name,
+              },
+            },
+          });
+          sendNotificationEmail(introReq.requesterId, detailsNotif).catch(() => {});
+        }
+      } catch (err) {
+        console.error('Failed to create details_requested notification:', err);
+      }
     }
 
     // Track for rate limiting
