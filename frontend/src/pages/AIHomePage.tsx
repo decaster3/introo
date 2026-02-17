@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAppState, useAppActions } from '../store';
 import { API_BASE, calendarApi, requestsApi, notificationsApi, offersApi, tagsApi, emailApi, type CalendarAccountInfo } from '../lib/api';
@@ -78,9 +78,33 @@ export function AIHomePage() {
   const [spaceFilter, setSpaceFilter] = useState<string>('all');
   const [connectionFilter, setConnectionFilter] = useState<string>('all');
   const [sortBy] = useState<'relevance' | 'contacts' | 'name' | 'strength'>('relevance');
+
+  // ─── Multi-sort & Group-by (Airtable-style) ────────────────────────────────
+  type SortField = 'name' | 'contacts' | 'strength' | 'employees' | 'location' | 'industry' | 'funding' | 'tags';
+  type SortDir = 'asc' | 'desc';
+  interface SortRule { field: SortField; dir: SortDir }
+  const SORT_FIELD_LABELS: Record<SortField, string> = {
+    name: 'Company', contacts: 'Contacts', strength: 'Strength',
+    employees: 'Employees', location: 'Location', industry: 'Industry',
+    funding: 'Funding', tags: 'Tags',
+  };
+  const ALL_SORT_FIELDS: SortField[] = ['name', 'contacts', 'strength', 'employees', 'location', 'industry', 'funding', 'tags'];
+
+  const [tableSorts, setTableSorts] = useState<SortRule[]>([]);
+  const [groupByField, setGroupByField] = useState<SortField | null>(null);
+  const [groupByDir, setGroupByDir] = useState<SortDir>('asc');
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [showSortPanel, setShowSortPanel] = useState(false);
+  const [showGroupPanel, setShowGroupPanel] = useState(false);
+  const sortPanelRef = useRef<HTMLDivElement>(null);
+  const groupPanelRef = useRef<HTMLDivElement>(null);
+
   const [viewMode, setViewMode] = useState<'grid' | 'table'>(() => {
     try { const v = localStorage.getItem('introo_view_mode'); return v === 'table' ? 'table' : 'grid'; } catch { return 'grid'; }
   });
+  const [entityTab, setEntityTab] = useState<'companies' | 'people'>('companies');
+  const [peopleSortBy, setPeopleSortBy] = useState<'name' | 'company' | 'strength' | 'meetings' | 'lastSeen'>('meetings');
+  const [peopleSortDir, setPeopleSortDir] = useState<'asc' | 'desc'>('desc');
   const [gridPage, setGridPage] = useState(0);
   const GRID_PAGE_SIZE = 50;
   const [excludeMyContacts, setExcludeMyContacts] = useState(true);
@@ -255,14 +279,14 @@ export function AIHomePage() {
 
   // ─── Company tags (Airtable-style, persisted to localStorage) ──────────────
   const TAG_COLORS = [
-    { bg: 'rgba(91,141,239,0.15)', text: '#7ba8f7', border: 'rgba(91,141,239,0.25)' },
-    { bg: 'rgba(168,85,247,0.15)', text: '#c084fc', border: 'rgba(168,85,247,0.25)' },
-    { bg: 'rgba(236,72,153,0.15)', text: '#f472b6', border: 'rgba(236,72,153,0.25)' },
-    { bg: 'rgba(245,158,11,0.15)', text: '#fbbf24', border: 'rgba(245,158,11,0.25)' },
-    { bg: 'rgba(16,185,129,0.15)', text: '#34d399', border: 'rgba(16,185,129,0.25)' },
-    { bg: 'rgba(239,68,68,0.15)',  text: '#f87171', border: 'rgba(239,68,68,0.25)' },
-    { bg: 'rgba(6,182,212,0.15)',  text: '#22d3ee', border: 'rgba(6,182,212,0.25)' },
-    { bg: 'rgba(132,204,22,0.15)', text: '#a3e635', border: 'rgba(132,204,22,0.25)' },
+    { bg: 'rgba(91,141,239,0.28)', text: '#d0dffc', border: 'rgba(91,141,239,0.35)' },
+    { bg: 'rgba(168,85,247,0.28)', text: '#dcc5fa', border: 'rgba(168,85,247,0.35)' },
+    { bg: 'rgba(236,72,153,0.25)', text: '#f8c4dc', border: 'rgba(236,72,153,0.32)' },
+    { bg: 'rgba(245,158,11,0.25)', text: '#fde4a8', border: 'rgba(245,158,11,0.32)' },
+    { bg: 'rgba(16,185,129,0.25)', text: '#b2edd8', border: 'rgba(16,185,129,0.32)' },
+    { bg: 'rgba(239,68,68,0.25)',  text: '#fcc5c5', border: 'rgba(239,68,68,0.32)' },
+    { bg: 'rgba(6,182,212,0.25)',  text: '#b5eef7', border: 'rgba(6,182,212,0.32)' },
+    { bg: 'rgba(132,204,22,0.25)', text: '#ddf0b0', border: 'rgba(132,204,22,0.32)' },
   ];
 
   // Tag definitions: { name, colorIdx }
@@ -317,6 +341,21 @@ export function AIHomePage() {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [tagPickerDomain]);
+
+  // Close sort/group panels on outside click
+  useEffect(() => {
+    if (!showSortPanel && !showGroupPanel) return;
+    const handler = (e: MouseEvent) => {
+      if (showSortPanel && sortPanelRef.current && !sortPanelRef.current.contains(e.target as Node)) {
+        setShowSortPanel(false);
+      }
+      if (showGroupPanel && groupPanelRef.current && !groupPanelRef.current.contains(e.target as Node)) {
+        setShowGroupPanel(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showSortPanel, showGroupPanel]);
 
   const persistTagDefs = useCallback((defs: { name: string; colorIdx: number }[]) => {
     setTagDefs(defs);
@@ -859,14 +898,40 @@ export function AIHomePage() {
       });
     }
 
-    // Sort
-    if (sortBy !== 'relevance') {
+    // Sort — multi-sort rules (Airtable-style), falling back to legacy sortBy
+    const strengthOrder: Record<string, number> = { strong: 0, medium: 1, weak: 2, none: 3 };
+    const getSortVal = (c: MergedCompany, field: SortField): string | number => {
+      switch (field) {
+        case 'name': return c.name.toLowerCase();
+        case 'contacts': return c.totalCount;
+        case 'strength': return strengthOrder[c.bestStrength] ?? 3;
+        case 'employees': return c.employeeCount ?? 0;
+        case 'location': return [c.city, c.country].filter(Boolean).join(', ').toLowerCase();
+        case 'industry': return (c.industry || '').toLowerCase();
+        case 'funding': return (c.lastFundingRound || '').toLowerCase();
+        case 'tags': return (companyTags[c.domain] || []).join(',').toLowerCase();
+        default: return 0;
+      }
+    };
+
+    const activeSorts: SortRule[] = tableSorts.length > 0 ? tableSorts : (sortBy !== 'relevance' ? [{ field: sortBy as SortField, dir: sortBy === 'contacts' ? 'desc' : 'asc' }] : []);
+    if (groupByField || activeSorts.length > 0) {
       result = [...result].sort((a, b) => {
-        if (sortBy === 'name') return a.name.localeCompare(b.name);
-        if (sortBy === 'contacts') return b.totalCount - a.totalCount;
-        if (sortBy === 'strength') {
-          const order = { strong: 0, medium: 1, weak: 2, none: 3 };
-          return order[a.bestStrength] - order[b.bestStrength];
+        // Group-by field always sorts first
+        if (groupByField) {
+          const ga = getSortVal(a, groupByField);
+          const gb = getSortVal(b, groupByField);
+          const cmp = typeof ga === 'number' && typeof gb === 'number' ? ga - gb : String(ga).localeCompare(String(gb));
+          const grouped = groupByDir === 'desc' ? -cmp : cmp;
+          if (grouped !== 0) return grouped;
+        }
+        // Then multi-sort rules
+        for (const rule of activeSorts) {
+          const va = getSortVal(a, rule.field);
+          const vb = getSortVal(b, rule.field);
+          const cmp = typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb));
+          const directed = rule.dir === 'desc' ? -cmp : cmp;
+          if (directed !== 0) return directed;
         }
         return 0;
       });
@@ -878,10 +943,86 @@ export function AIHomePage() {
     }
 
     return result;
-  }, [mergedCompanies, selectedHunt, searchQuery, sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, sortBy, sidebarFilters, tagFilter, companyTags]);
+  }, [mergedCompanies, selectedHunt, searchQuery, sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, sortBy, sidebarFilters, tagFilter, companyTags, tableSorts, groupByField, groupByDir]);
+
+  // Flatten filteredCompanies into a deduplicated people array
+  interface FlatPerson {
+    id: string; name: string; email: string; title: string;
+    companyName: string; companyDomain: string;
+    strength: 'strong' | 'medium' | 'weak' | 'none';
+    meetings: number; lastSeen: string;
+    source: 'you' | string;
+    photoUrl?: string | null;
+    company: MergedCompany;
+    isMyContact: boolean;
+    displayContact?: DisplayContact;
+  }
+
+  const flatPeople = useMemo((): FlatPerson[] => {
+    const seen = new Set<string>();
+    const people: FlatPerson[] = [];
+
+    for (const co of filteredCompanies) {
+      for (const c of co.myContacts) {
+        if (seen.has(c.email)) continue;
+        seen.add(c.email);
+        people.push({
+          id: c.id, name: c.name, email: c.email, title: c.title || '',
+          companyName: co.name, companyDomain: co.domain,
+          strength: c.connectionStrength || 'none',
+          meetings: c.meetingsCount || 0,
+          lastSeen: c.lastSeenAt || '',
+          source: 'you',
+          photoUrl: c.photoUrl,
+          company: co,
+          isMyContact: true,
+          displayContact: c,
+        });
+      }
+      for (const c of co.spaceContacts) {
+        if (seen.has(c.email)) continue;
+        seen.add(c.email);
+        people.push({
+          id: c.id, name: c.name, email: c.email, title: c.title || '',
+          companyName: co.name, companyDomain: co.domain,
+          strength: 'none',
+          meetings: 0,
+          lastSeen: '',
+          source: c.userName || 'Network',
+          photoUrl: null,
+          company: co,
+          isMyContact: false,
+        });
+      }
+    }
+
+    const strengthVal = { strong: 0, medium: 1, weak: 2, none: 3 };
+    people.sort((a, b) => {
+      let cmp = 0;
+      switch (peopleSortBy) {
+        case 'name': cmp = a.name.localeCompare(b.name); break;
+        case 'company': cmp = a.companyName.localeCompare(b.companyName); break;
+        case 'strength': cmp = strengthVal[a.strength] - strengthVal[b.strength]; break;
+        case 'meetings': cmp = b.meetings - a.meetings; break;
+        case 'lastSeen': cmp = (b.lastSeen || '').localeCompare(a.lastSeen || ''); break;
+      }
+      return peopleSortDir === 'asc' ? cmp : (peopleSortBy === 'meetings' || peopleSortBy === 'lastSeen') ? cmp : -cmp;
+    });
+
+    return people;
+  }, [filteredCompanies, peopleSortBy, peopleSortDir]);
+
+  const totalPeopleCount = useMemo(() => {
+    const seen = new Set<string>();
+    for (const co of filteredCompanies) {
+      co.myContacts.forEach(c => seen.add(c.email));
+      co.spaceContacts.forEach(c => seen.add(c.email));
+    }
+    return seen.size;
+  }, [filteredCompanies]);
 
   // Reset page when filters change
-  useEffect(() => { setGridPage(0); }, [filteredCompanies.length, excludeMyContacts]);
+  useEffect(() => { setGridPage(0); }, [filteredCompanies.length, excludeMyContacts, entityTab]);
 
   // Reset history expand when switching companies
   useEffect(() => { setHistoryExpanded(false); }, [inlinePanel]);
@@ -2329,28 +2470,163 @@ export function AIHomePage() {
             </div>
           )}
 
-          {/* ── Results bar ────────────────────────────────────── */}
+          {/* ── Results bar with entity tabs ─────────────────── */}
           <div className="u-results-bar">
-            <span className="u-results-count">
-              <strong>{filteredCompanies.length}</strong> companies · <strong>{filteredCompanies.reduce((sum, c) => sum + c.myContacts.length + c.spaceContacts.length, 0)}</strong> people
-              {filteredCompanies.length !== mergedCompanies.length && (
-                <span className="u-results-of"> of {mergedCompanies.length}</span>
-              )}
-              {activeFilterCount > 0 && (
-                <button className="u-filters-clear" onClick={clearAllFilters}>
-                  Clear {activeFilterCount} filter{activeFilterCount > 1 ? 's' : ''}
-                </button>
-              )}
-            </span>
+            <div className="u-entity-tabs">
+              <button
+                className={`u-entity-tab ${entityTab === 'companies' ? 'u-entity-tab--active' : ''}`}
+                onClick={() => { setEntityTab('companies'); setGridPage(0); }}
+              >
+                Companies <span className="u-entity-tab-count">{filteredCompanies.length}</span>
+              </button>
+              <button
+                className={`u-entity-tab ${entityTab === 'people' ? 'u-entity-tab--active' : ''}`}
+                onClick={() => { setEntityTab('people'); setGridPage(0); }}
+              >
+                People <span className="u-entity-tab-count">{totalPeopleCount}</span>
+              </button>
+            </div>
+            {activeFilterCount > 0 && (
+              <button className="u-filters-clear" onClick={clearAllFilters}>
+                Clear {activeFilterCount} filter{activeFilterCount > 1 ? 's' : ''}
+              </button>
+            )}
             <div className="u-results-right">
-              <div className="u-view-toggle">
-                <button className={`u-view-btn ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => { setViewMode('grid'); localStorage.setItem('introo_view_mode', 'grid'); }} title="Grid view">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-                </button>
-                <button className={`u-view-btn ${viewMode === 'table' ? 'active' : ''}`} onClick={() => { setViewMode('table'); localStorage.setItem('introo_view_mode', 'table'); }} title="Table view">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-                </button>
-              </div>
+              {entityTab === 'companies' && (
+                <>
+                  {/* Group button + panel */}
+                  <div className="u-toolbar-item" ref={groupPanelRef}>
+                    <button
+                      className={`u-toolbar-btn ${groupByField ? 'u-toolbar-btn--active' : ''}`}
+                      onClick={() => { setShowGroupPanel(!showGroupPanel); setShowSortPanel(false); }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+                      </svg>
+                      {groupByField ? `Grouped by ${SORT_FIELD_LABELS[groupByField]}` : 'Group'}
+                    </button>
+                    {showGroupPanel && (
+                      <div className="u-toolbar-panel">
+                        <div className="u-toolbar-panel-header">
+                          <span>Group by</span>
+                          {groupByField && (
+                            <div className="u-toolbar-panel-actions">
+                              <button className="u-toolbar-panel-collapse" onClick={() => { setCollapsedGroups(prev => { const next = new Set(prev); if (next.size > 0) { next.clear(); } else { /* collapse all will be handled per render */ } return next; }); }}>
+                                Collapse all
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        {groupByField ? (
+                          <div className="u-toolbar-rule">
+                            <select
+                              className="u-toolbar-select"
+                              value={groupByField}
+                              onChange={e => { setGroupByField(e.target.value as SortField); setCollapsedGroups(new Set()); setGridPage(0); }}
+                            >
+                              {ALL_SORT_FIELDS.map(f => (
+                                <option key={f} value={f}>{SORT_FIELD_LABELS[f]}</option>
+                              ))}
+                            </select>
+                            <select
+                              className="u-toolbar-select u-toolbar-select--dir"
+                              value={groupByDir}
+                              onChange={e => { setGroupByDir(e.target.value as SortDir); setGridPage(0); }}
+                            >
+                              <option value="asc">A → Z</option>
+                              <option value="desc">Z → A</option>
+                            </select>
+                            <button className="u-toolbar-rule-del" onClick={() => { setGroupByField(null); setCollapsedGroups(new Set()); setGridPage(0); }} title="Remove grouping">
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="u-toolbar-pick-field">
+                            {ALL_SORT_FIELDS.map(f => (
+                              <button key={f} className="u-toolbar-pick-btn" onClick={() => { setGroupByField(f); setGroupByDir('asc'); setCollapsedGroups(new Set()); setGridPage(0); }}>
+                                {SORT_FIELD_LABELS[f]}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Sort button + panel */}
+                  <div className="u-toolbar-item" ref={sortPanelRef}>
+                    <button
+                      className={`u-toolbar-btn ${tableSorts.length > 0 ? 'u-toolbar-btn--active' : ''}`}
+                      onClick={() => { setShowSortPanel(!showSortPanel); setShowGroupPanel(false); }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M11 5h10M11 9h7M11 13h4M3 17l4 4 4-4M7 3v18"/>
+                      </svg>
+                      {tableSorts.length > 0 ? `Sorted by ${tableSorts.length} field${tableSorts.length > 1 ? 's' : ''}` : 'Sort'}
+                    </button>
+                    {showSortPanel && (
+                      <div className="u-toolbar-panel">
+                        <div className="u-toolbar-panel-header">
+                          <span>{groupByField ? 'Sort within groups by' : 'Sort by'}</span>
+                        </div>
+                        {tableSorts.map((rule, idx) => (
+                          <div key={idx} className="u-toolbar-rule">
+                            <select
+                              className="u-toolbar-select"
+                              value={rule.field}
+                              onChange={e => {
+                                const next = [...tableSorts];
+                                next[idx] = { ...next[idx], field: e.target.value as SortField };
+                                setTableSorts(next);
+                                setGridPage(0);
+                              }}
+                            >
+                              {ALL_SORT_FIELDS.map(f => (
+                                <option key={f} value={f}>{SORT_FIELD_LABELS[f]}</option>
+                              ))}
+                            </select>
+                            <select
+                              className="u-toolbar-select u-toolbar-select--dir"
+                              value={rule.dir}
+                              onChange={e => {
+                                const next = [...tableSorts];
+                                next[idx] = { ...next[idx], dir: e.target.value as SortDir };
+                                setTableSorts(next);
+                                setGridPage(0);
+                              }}
+                            >
+                              <option value="asc">A → Z</option>
+                              <option value="desc">Z → A</option>
+                            </select>
+                            <button className="u-toolbar-rule-del" onClick={() => { setTableSorts(tableSorts.filter((_, i) => i !== idx)); setGridPage(0); }} title="Remove sort">
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                            </button>
+                          </div>
+                        ))}
+                        <button
+                          className="u-toolbar-add-rule"
+                          onClick={() => {
+                            const used = new Set(tableSorts.map(s => s.field));
+                            const next = ALL_SORT_FIELDS.find(f => !used.has(f)) || 'name';
+                            setTableSorts([...tableSorts, { field: next, dir: 'asc' }]);
+                          }}
+                        >
+                          + Add {tableSorts.length > 0 ? 'another' : 'a'} sort
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="u-view-toggle">
+                    <button className={`u-view-btn ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => { setViewMode('grid'); localStorage.setItem('introo_view_mode', 'grid'); }} title="Grid view">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                    </button>
+                    <button className={`u-view-btn ${viewMode === 'table' ? 'active' : ''}`} onClick={() => { setViewMode('table'); localStorage.setItem('introo_view_mode', 'table'); }} title="Table view">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -2431,7 +2707,7 @@ export function AIHomePage() {
           )}
 
           {/* ── Company Grid ──────────────────────────────────── */}
-          <div className={`u-grid ${viewMode === 'table' ? 'u-grid--table' : ''}`}>
+          {entityTab === 'companies' && <div className={`u-grid ${viewMode === 'table' ? 'u-grid--table' : ''}`}>
             {loading || storeLoading ? (
               <div className="u-grid-loading-rich">
                 <div className="u-loading-orb">
@@ -2513,8 +2789,8 @@ export function AIHomePage() {
                       })}
                     </div>
                   )}
-                  {/* User tags */}
-                  {((companyTags[company.domain] && companyTags[company.domain].length > 0) || tagPickerDomain === company.domain) && (
+                  {/* User tags (hidden when grouped by tags — redundant with group header) */}
+                  {groupByField !== 'tags' && ((companyTags[company.domain] && companyTags[company.domain].length > 0) || tagPickerDomain === company.domain) && (
                     <div className="u-tile-tags" onClick={e => e.stopPropagation()}>
                       {(companyTags[company.domain] || []).map(t => {
                         const color = getTagColor(t);
@@ -2699,6 +2975,61 @@ export function AIHomePage() {
               const pageStart = gridPage * GRID_PAGE_SIZE;
               const pageEnd = pageStart + GRID_PAGE_SIZE;
               const totalPages = Math.ceil(displayCompanies.length / GRID_PAGE_SIZE);
+
+              // Group-by logic
+              const groupLabel = (c: MergedCompany): string => {
+                if (!groupByField) return '';
+                switch (groupByField) {
+                  case 'name': return c.name.charAt(0).toUpperCase();
+                  case 'contacts': {
+                    const n = c.totalCount;
+                    if (n >= 10) return '10+';
+                    if (n >= 5) return '5–9';
+                    if (n >= 2) return '2–4';
+                    return '1';
+                  }
+                  case 'strength': return c.bestStrength === 'none' ? 'None' : c.bestStrength.charAt(0).toUpperCase() + c.bestStrength.slice(1);
+                  case 'employees': {
+                    const e = c.employeeCount;
+                    if (!e) return 'Unknown';
+                    if (e >= 1000) return '1000+';
+                    if (e >= 100) return '100–999';
+                    if (e >= 10) return '10–99';
+                    return '1–9';
+                  }
+                  case 'location': return [c.city, c.country].filter(Boolean).join(', ') || 'Unknown';
+                  case 'industry': return c.industry || 'Unknown';
+                  case 'funding': return c.lastFundingRound ? formatFundingRound(c.lastFundingRound) || c.lastFundingRound : 'None';
+                  case 'tags': return '';
+                  default: return '';
+                }
+              };
+              type GroupedSection = { label: string; companies: MergedCompany[] };
+              const groupedSections: GroupedSection[] = (() => {
+                if (!groupByField) return [{ label: '', companies: displayCompanies }];
+                const map = new Map<string, MergedCompany[]>();
+                if (groupByField === 'tags') {
+                  for (const c of displayCompanies) {
+                    const tags = companyTags[c.domain] || [];
+                    if (tags.length === 0) {
+                      if (!map.has('No tags')) map.set('No tags', []);
+                      map.get('No tags')!.push(c);
+                    } else {
+                      for (const t of tags) {
+                        if (!map.has(t)) map.set(t, []);
+                        map.get(t)!.push(c);
+                      }
+                    }
+                  }
+                } else {
+                  for (const c of displayCompanies) {
+                    const label = groupLabel(c);
+                    if (!map.has(label)) map.set(label, []);
+                    map.get(label)!.push(c);
+                  }
+                }
+                return Array.from(map.entries()).map(([label, companies]) => ({ label, companies }));
+              })();
               return (
                 <>
                   {isNetworkView && (
@@ -2710,7 +3041,48 @@ export function AIHomePage() {
                       <span className="u-grid-section-count">{displayCompanies.length}</span>
                     </div>
                   )}
-                  {viewMode === 'grid' && displayCompanies.slice(pageStart, pageEnd).map(renderCard)}
+                  {viewMode === 'grid' && !groupByField && displayCompanies.slice(pageStart, pageEnd).map(renderCard)}
+
+                  {viewMode === 'grid' && groupByField && (() => {
+                    const renderPill = (label: string) => {
+                      if (groupByField === 'tags') {
+                        if (label === 'No tags') return <span className="u-group-pill u-group-pill--empty">No tags</span>;
+                        const color = getTagColor(label);
+                        return <span className="u-group-pill" style={{ background: color.bg, color: color.text, borderColor: color.border }}>{label}</span>;
+                      }
+                      if (groupByField === 'strength') {
+                        return <span className={`u-group-pill u-group-pill--strength u-group-pill--${label.toLowerCase()}`}>{label}</span>;
+                      }
+                      return <span className="u-group-pill u-group-pill--default">{label}</span>;
+                    };
+                    return groupedSections.map(section => {
+                      const isCollapsed = collapsedGroups.has(section.label);
+                      return (
+                        <div key={section.label} className="u-grid-group">
+                          <div
+                            className="u-grid-group-header"
+                            onClick={() => setCollapsedGroups(prev => {
+                              const next = new Set(prev);
+                              if (next.has(section.label)) next.delete(section.label);
+                              else next.add(section.label);
+                              return next;
+                            })}
+                          >
+                            <span className={`u-group-chevron ${isCollapsed ? 'u-group-chevron--collapsed' : ''}`}>
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                            </span>
+                            {renderPill(section.label)}
+                            <span className="u-group-count">{section.companies.length}</span>
+                          </div>
+                          {!isCollapsed && (
+                            <div className="u-grid-group-cards">
+                              {section.companies.map(c => renderCard(c))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    });
+                  })()}
 
                   {viewMode === 'table' && (
                     <div className="u-table-wrap">
@@ -2729,63 +3101,163 @@ export function AIHomePage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {displayCompanies.slice(pageStart, pageEnd).map(company => {
-                            const tags = companyTags[company.domain] || [];
-                            const totalMeetings = company.myContacts.reduce((sum, c) => sum + (c.meetingsCount || 0), 0);
-                            return (
-                              <tr
-                                key={company.domain}
-                                className={`u-tr ${company.matchingHunts.length > 0 ? 'u-tr--hunt' : ''} ${newSpaceCompanies.has(company.domain) ? 'u-tr--space-new' : ''}`}
-                                onClick={() => setInlinePanel({ type: 'company', company })}
-                              >
-                                <td className="u-td-company">
-                                  <div className="u-td-company-inner">
-                                    <CompanyLogo domain={company.domain} name={company.name} size={22} />
-                                    <div className="u-td-company-info">
-                                      <span className="u-td-company-name">{company.name}</span>
-                                      <span className="u-td-company-domain">{company.domain}</span>
+                          {(() => {
+                            const colCount = 9;
+                            const renderRow = (company: MergedCompany) => {
+                              const tags = companyTags[company.domain] || [];
+                              const totalMeetings = company.myContacts.reduce((sum, c) => sum + (c.meetingsCount || 0), 0);
+                              return (
+                                <tr
+                                  key={company.domain}
+                                  className={`u-tr ${company.matchingHunts.length > 0 ? 'u-tr--hunt' : ''} ${newSpaceCompanies.has(company.domain) ? 'u-tr--space-new' : ''}`}
+                                  onClick={() => setInlinePanel({ type: 'company', company })}
+                                >
+                                  <td className="u-td-company">
+                                    <div className="u-td-company-inner">
+                                      <CompanyLogo domain={company.domain} name={company.name} size={22} />
+                                      <div className="u-td-company-info">
+                                        <span className="u-td-company-name">{company.name}</span>
+                                        <span className="u-td-company-domain">{company.domain}</span>
+                                      </div>
                                     </div>
-                                  </div>
-                                </td>
-                                <td className="u-td-contacts">
-                                  <span className="u-td-num">{company.totalCount}</span>
-                                  {totalMeetings > 0 && <span className="u-td-meetings">{totalMeetings} mtg</span>}
-                                </td>
-                                <td className="u-td-strength">
-                                  {company.bestStrength !== 'none' && (
-                                    <span className={`u-td-strength-pill u-td-strength--${company.bestStrength}`}>
-                                      {company.bestStrength}
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="u-td-employees">
-                                  {company.employeeCount ? company.employeeCount.toLocaleString() : enriching && !company.enrichedAt ? <span className="u-td-shimmer" /> : '—'}
-                                </td>
-                                <td className="u-td-location">
-                                  {company.city || company.country
-                                    ? [company.city, company.country].filter(Boolean).join(', ')
-                                    : enriching && !company.enrichedAt ? <span className="u-td-shimmer" /> : '—'}
-                                </td>
-                                <td className="u-td-industry">
-                                  {company.industry || (enriching && !company.enrichedAt ? <span className="u-td-shimmer" /> : '—')}
-                                </td>
-                                <td className="u-td-funding">
-                                  {company.lastFundingRound ? formatFundingRound(company.lastFundingRound) : enriching && !company.enrichedAt ? <span className="u-td-shimmer" /> : '—'}
-                                </td>
-                                <td className="u-td-tags" onClick={e => e.stopPropagation()}>
-                                  {tags.map(t => {
-                                    const color = getTagColor(t);
-                                    return <span key={t} className="u-td-tag" style={{ background: color.bg, color: color.text }}>{t}</span>;
-                                  })}
-                                </td>
-                                <td className="u-td-actions" onClick={e => e.stopPropagation()}>
-                                  {company.spaceCount > 0 && (
-                                    <button className="u-td-intro-btn" onClick={() => openIntroPanel(company)}>Intro</button>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
+                                  </td>
+                                  <td className="u-td-contacts">
+                                    <span className="u-td-num">{company.totalCount}</span>
+                                    {totalMeetings > 0 && <span className="u-td-meetings">{totalMeetings} mtg</span>}
+                                  </td>
+                                  <td className="u-td-strength">
+                                    {company.bestStrength !== 'none' && (
+                                      <span className={`u-td-strength-pill u-td-strength--${company.bestStrength}`}>
+                                        {company.bestStrength}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="u-td-employees">
+                                    {company.employeeCount ? company.employeeCount.toLocaleString() : enriching && !company.enrichedAt ? <span className="u-td-shimmer" /> : '—'}
+                                  </td>
+                                  <td className="u-td-location">
+                                    {company.city || company.country
+                                      ? [company.city, company.country].filter(Boolean).join(', ')
+                                      : enriching && !company.enrichedAt ? <span className="u-td-shimmer" /> : '—'}
+                                  </td>
+                                  <td className="u-td-industry">
+                                    {company.industry || (enriching && !company.enrichedAt ? <span className="u-td-shimmer" /> : '—')}
+                                  </td>
+                                  <td className="u-td-funding">
+                                    {company.lastFundingRound ? formatFundingRound(company.lastFundingRound) : enriching && !company.enrichedAt ? <span className="u-td-shimmer" /> : '—'}
+                                  </td>
+                                  <td className="u-td-tags" onClick={e => e.stopPropagation()}>
+                                    <div className="u-td-tags-inner">
+                                      {tags.map(t => {
+                                        const color = getTagColor(t);
+                                        return <span key={t} className="u-td-tag" style={{ background: color.bg, color: color.text }}>{t}</span>;
+                                      })}
+                                      <div className="u-tag-picker-wrap" ref={tagPickerDomain === company.domain ? tagPickerRef : undefined}>
+                                        <button
+                                          className="u-td-tag-add"
+                                          onClick={() => { setTagPickerDomain(tagPickerDomain === company.domain ? null : company.domain); setTagPickerSearch(''); }}
+                                          title="Add tag"
+                                        >+</button>
+                                        {tagPickerDomain === company.domain && (
+                                          <div className="u-tag-picker u-tag-picker--table">
+                                            <input
+                                              className="u-tag-picker-input"
+                                              placeholder="Search or create..."
+                                              autoFocus
+                                              value={tagPickerSearch}
+                                              onChange={e => setTagPickerSearch(e.target.value)}
+                                              onKeyDown={e => {
+                                                if (e.key === 'Enter' && tagPickerSearch.trim()) {
+                                                  const existing = tagDefs.find(t => t.name.toLowerCase() === tagPickerSearch.trim().toLowerCase());
+                                                  if (existing) {
+                                                    toggleTagOnCompany(company.domain, existing.name);
+                                                  } else {
+                                                    const name = createTag(tagPickerSearch.trim());
+                                                    if (name) toggleTagOnCompany(company.domain, name);
+                                                  }
+                                                  setTagPickerSearch('');
+                                                }
+                                                if (e.key === 'Escape') { setTagPickerDomain(null); setTagPickerSearch(''); }
+                                              }}
+                                            />
+                                            <div className="u-tag-picker-list">
+                                              {tagDefs.filter(t => !tagPickerSearch || t.name.toLowerCase().includes(tagPickerSearch.toLowerCase())).map(t => {
+                                                const color = TAG_COLORS[t.colorIdx % TAG_COLORS.length];
+                                                const isSelected = (companyTags[company.domain] || []).includes(t.name);
+                                                return (
+                                                  <button key={t.name} className={`u-tag-picker-option ${isSelected ? 'selected' : ''}`} onClick={() => toggleTagOnCompany(company.domain, t.name)}>
+                                                    <span className="u-tag-picker-dot" style={{ background: color.text }} />
+                                                    <span className="u-tag-picker-name">{t.name}</span>
+                                                    {isSelected && <span className="u-tag-picker-check">✓</span>}
+                                                  </button>
+                                                );
+                                              })}
+                                              {tagPickerSearch.trim() && !tagDefs.some(t => t.name.toLowerCase() === tagPickerSearch.trim().toLowerCase()) && (
+                                                <button className="u-tag-picker-create" onClick={() => {
+                                                  const name = createTag(tagPickerSearch.trim());
+                                                  if (name) toggleTagOnCompany(company.domain, name);
+                                                  setTagPickerSearch('');
+                                                }}>
+                                                  + Create "<strong>{tagPickerSearch.trim()}</strong>"
+                                                </button>
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="u-td-actions" onClick={e => e.stopPropagation()}>
+                                    {company.spaceCount > 0 && (
+                                      <button className="u-td-intro-btn" onClick={() => openIntroPanel(company)}>Intro</button>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            };
+
+                            if (!groupByField) {
+                              return displayCompanies.slice(pageStart, pageEnd).map(renderRow);
+                            }
+                            // Grouped rendering
+                            const renderTblPill = (label: string) => {
+                              if (groupByField === 'tags') {
+                                if (label === 'No tags') return <span className="u-group-pill u-group-pill--empty">No tags</span>;
+                                const color = getTagColor(label);
+                                return <span className="u-group-pill" style={{ background: color.bg, color: color.text, borderColor: color.border }}>{label}</span>;
+                              }
+                              if (groupByField === 'strength') {
+                                return <span className={`u-group-pill u-group-pill--strength u-group-pill--${label.toLowerCase()}`}>{label}</span>;
+                              }
+                              return <span className="u-group-pill u-group-pill--default">{label}</span>;
+                            };
+
+                            return groupedSections.map(section => {
+                              const isCollapsed = collapsedGroups.has(section.label);
+                              return (
+                                <React.Fragment key={section.label}>
+                                  <tr
+                                    className="u-tr-group-header"
+                                    onClick={() => setCollapsedGroups(prev => {
+                                      const next = new Set(prev);
+                                      if (next.has(section.label)) next.delete(section.label);
+                                      else next.add(section.label);
+                                      return next;
+                                    })}
+                                  >
+                                    <td colSpan={colCount} className="u-td-group-header">
+                                      <span className={`u-group-chevron ${isCollapsed ? 'u-group-chevron--collapsed' : ''}`}>
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                                      </span>
+                                      {renderTblPill(section.label)}
+                                      <span className="u-group-count">{section.companies.length}</span>
+                                    </td>
+                                  </tr>
+                                  {!isCollapsed && section.companies.map(renderRow)}
+                                </React.Fragment>
+                              );
+                            });
+                          })()}
                         </tbody>
                       </table>
                     </div>
@@ -2801,7 +3273,101 @@ export function AIHomePage() {
                 </>
               );
             })()}
-          </div>
+          </div>}
+
+          {/* ── People Table ──────────────────────────────────── */}
+          {entityTab === 'people' && (() => {
+            const peoplePageStart = gridPage * GRID_PAGE_SIZE;
+            const peoplePageEnd = peoplePageStart + GRID_PAGE_SIZE;
+            const peopleTotalPages = Math.ceil(flatPeople.length / GRID_PAGE_SIZE);
+
+            const handlePeopleSort = (col: typeof peopleSortBy) => {
+              if (peopleSortBy === col) {
+                setPeopleSortDir(d => d === 'asc' ? 'desc' : 'asc');
+              } else {
+                setPeopleSortBy(col);
+                setPeopleSortDir(col === 'meetings' || col === 'lastSeen' ? 'desc' : 'asc');
+              }
+              setGridPage(0);
+            };
+
+            const sortIcon = (col: typeof peopleSortBy) =>
+              peopleSortBy === col ? (peopleSortDir === 'asc' ? ' ↑' : ' ↓') : '';
+
+            return (
+              <div className="u-grid u-grid--table">
+                <div className="u-table-wrap">
+                  <table className="u-table u-table--people">
+                    <thead>
+                      <tr>
+                        <th className="u-th-person" onClick={() => handlePeopleSort('name')} style={{ cursor: 'pointer' }}>Person{sortIcon('name')}</th>
+                        <th className="u-th-pcompany" onClick={() => handlePeopleSort('company')} style={{ cursor: 'pointer' }}>Company{sortIcon('company')}</th>
+                        <th className="u-th-pstrength" onClick={() => handlePeopleSort('strength')} style={{ cursor: 'pointer' }}>Strength{sortIcon('strength')}</th>
+                        <th className="u-th-pmeetings" onClick={() => handlePeopleSort('meetings')} style={{ cursor: 'pointer' }}>Meetings{sortIcon('meetings')}</th>
+                        <th className="u-th-plastseen" onClick={() => handlePeopleSort('lastSeen')} style={{ cursor: 'pointer' }}>Last met{sortIcon('lastSeen')}</th>
+                        <th className="u-th-psource">Source</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {flatPeople.slice(peoplePageStart, peoplePageEnd).map(person => (
+                        <tr
+                          key={person.email}
+                          className="u-tr u-tr--person"
+                          onClick={() => {
+                            const contact = person.displayContact || { id: person.id, name: person.name, email: person.email, title: person.title, userName: person.source };
+                            setInlinePanel({ type: 'person', contact, company: person.company, fromPeopleTab: true });
+                          }}
+                        >
+                          <td className="u-td-person">
+                            <div className="u-td-person-inner">
+                              <PersonAvatar email={person.email} name={person.name} avatarUrl={person.photoUrl} size={28} />
+                              <div className="u-td-person-info">
+                                <span className="u-td-person-name">{person.name}</span>
+                                {person.title && <span className="u-td-person-title">{person.title}</span>}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="u-td-pcompany">
+                            <div className="u-td-company-inner">
+                              <CompanyLogo domain={person.companyDomain} name={person.companyName} size={20} />
+                              <span className="u-td-company-name">{person.companyName}</span>
+                            </div>
+                          </td>
+                          <td className="u-td-pstrength">
+                            {person.strength !== 'none' && (
+                              <span className={`u-td-strength-pill u-td-strength--${person.strength}`}>
+                                {person.strength}
+                              </span>
+                            )}
+                          </td>
+                          <td className="u-td-pmeetings">
+                            {person.meetings > 0 ? <span className="u-td-num">{person.meetings}</span> : <span className="u-td-muted">—</span>}
+                          </td>
+                          <td className="u-td-plastseen">
+                            {person.lastSeen ? <span className="u-td-muted">{getTimeAgo(person.lastSeen)}</span> : <span className="u-td-muted">—</span>}
+                          </td>
+                          <td className="u-td-psource">
+                            <span className={`u-td-source-badge ${person.source === 'you' ? 'u-td-source--you' : 'u-td-source--network'}`}>
+                              {person.source === 'you' ? 'You' : person.source}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {peopleTotalPages > 1 && (
+                  <div className="u-grid-pagination">
+                    <button className="u-grid-page-btn" disabled={gridPage === 0} onClick={() => setGridPage(gridPage - 1)}>← Prev</button>
+                    <span className="u-grid-page-info">{gridPage + 1} / {peopleTotalPages}</span>
+                    <button className="u-grid-page-btn" disabled={gridPage >= peopleTotalPages - 1} onClick={() => setGridPage(gridPage + 1)}>Next →</button>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
         </div>
 
       {/* ── Inline Panel ────────────────────────────────────────────── */}
@@ -2818,12 +3384,17 @@ export function AIHomePage() {
               const isInNetwork = isMyContact || connections.some(conn => conn.peer.email === c.email && conn.status === 'accepted');
               return (
               <div className="u-panel-person">
-                {fromSpace && (
+                {inlinePanel.fromPeopleTab && (
+                  <button className="u-panel-breadcrumb" onClick={() => setInlinePanel(null)}>
+                    ← People
+                  </button>
+                )}
+                {!inlinePanel.fromPeopleTab && fromSpace && (
                   <button className="u-panel-breadcrumb" onClick={() => setInlinePanel({ type: 'space', spaceId: fromSpace.id })}>
                     ← {fromSpace.emoji} {fromSpace.name}
                   </button>
                 )}
-                {!fromSpace && co && (
+                {!inlinePanel.fromPeopleTab && !fromSpace && co && (
                   <button className="u-panel-breadcrumb" onClick={() => setInlinePanel({ type: 'company', company: co, fromSpaceId: inlinePanel.fromSpaceId })}>
                     ← {co.name}
                   </button>
@@ -2885,11 +3456,12 @@ export function AIHomePage() {
                 {/* Company section */}
                 {co && (
                   <div className="u-panel-company-section">
-                    <div className="u-panel-section-header">
+                    <div className="u-panel-section-header u-panel-section-header--link" onClick={() => setInlinePanel({ type: 'company', company: co })}>
                       <CompanyLogo domain={co.domain} name={co.name} size={20} />
                       <span className="u-panel-section-title">{co.name}</span>
+                      <span className="u-panel-section-arrow">→</span>
                       {co.linkedinUrl && (
-                        <a href={co.linkedinUrl} target="_blank" rel="noopener noreferrer" className="u-panel-link-sm">in</a>
+                        <a href={co.linkedinUrl} target="_blank" rel="noopener noreferrer" className="u-panel-link-sm" onClick={e => e.stopPropagation()}>in</a>
                       )}
                     </div>
                     {co.description && (

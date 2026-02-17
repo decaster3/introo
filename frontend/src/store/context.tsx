@@ -28,12 +28,27 @@ const AppContext = createContext<AppContextValue | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(appReducer, initialState);
 
-  // Initialize - check auth status and load data
+  // Initialize - check auth status and load data (with retry for transient failures)
   useEffect(() => {
+    async function checkAuthWithRetry(retries = 2): Promise<{ authenticated: boolean }> {
+      for (let i = 0; i <= retries; i++) {
+        try {
+          return await authApi.getStatus();
+        } catch (err) {
+          if (i < retries) {
+            await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+          } else {
+            throw err;
+          }
+        }
+      }
+      return { authenticated: false };
+    }
+
     async function init() {
       try {
         dispatch({ type: 'SET_LOADING_PHASE', payload: 'init' });
-        const { authenticated } = await authApi.getStatus();
+        const { authenticated } = await checkAuthWithRetry();
         
         if (authenticated) {
           dispatch({ type: 'SET_LOADING_PHASE', payload: 'auth' });

@@ -261,6 +261,7 @@ export interface InlinePanel {
   connectionId?: string;
   fromSpaceId?: string;
   fromProfile?: boolean;
+  fromPeopleTab?: boolean;
   introSourceFilter?: string;
   introSpaceFilter?: string;
   introConnectionFilter?: string;
