@@ -40,6 +40,10 @@ router.post('/', authMiddleware, async (req, res) => {
       res.status(400).json({ error: 'Title is required' });
       return;
     }
+    if (title.trim().length > 500) {
+      res.status(400).json({ error: 'Title must be 500 characters or less' });
+      return;
+    }
 
     const maxPos = await prisma.savedView.aggregate({
       where: { userId },
@@ -90,7 +94,17 @@ router.patch('/:id', authMiddleware, async (req, res) => {
     }
 
     const data: Record<string, unknown> = {};
-    if (title !== undefined) data.title = title.trim();
+    if (title !== undefined) {
+      if (typeof title !== 'string' || title.trim().length === 0) {
+        res.status(400).json({ error: 'Title is required' });
+        return;
+      }
+      if (title.trim().length > 500) {
+        res.status(400).json({ error: 'Title must be 500 characters or less' });
+        return;
+      }
+      data.title = title.trim();
+    }
     if (keywords !== undefined) data.keywords = keywords;
     if (filters !== undefined) data.filters = filters;
     if (sortRules !== undefined) data.sortRules = sortRules;

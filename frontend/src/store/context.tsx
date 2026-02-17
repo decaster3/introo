@@ -60,7 +60,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
           // Load essential data in parallel
           const [contactsResponse, companies, calendarStatus] = await Promise.all([
-            relationshipsApi.getContacts({ limit: 10000 }).catch(() => ({ data: [] })),
+            relationshipsApi.getContacts({ limit: 50000 }).catch(() => ({ data: [] })),
             relationshipsApi.getCompanies().catch(() => []),
             calendarApi.getStatus().catch(() => ({ isConnected: false })),
           ]);
@@ -97,7 +97,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
               dispatch({ type: 'SET_CALENDAR_CONNECTED', payload: true });
 
               const [freshContacts, freshCompanies] = await Promise.all([
-                relationshipsApi.getContacts({ limit: 10000 }).catch(() => ({ data: [] })),
+                relationshipsApi.getContacts({ limit: 50000 }).catch(() => ({ data: [] })),
                 relationshipsApi.getCompanies().catch(() => []),
               ]);
               const parsed = Array.isArray(freshContacts) ? freshContacts : (freshContacts?.data || []);
@@ -153,7 +153,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       
       // Refresh contacts & companies after sync
       const [contactsResponse, companies] = await Promise.all([
-        relationshipsApi.getContacts({ limit: 10000 }),
+        relationshipsApi.getContacts({ limit: 50000 }),
         relationshipsApi.getCompanies(),
       ]);
       const contacts = Array.isArray(contactsResponse)
@@ -173,7 +173,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       console.log('[refreshData] Fetching contacts and companies...');
       const [contactsResponse, companies] = await Promise.all([
-        relationshipsApi.getContacts({ limit: 10000 }),
+        relationshipsApi.getContacts({ limit: 50000 }),
         relationshipsApi.getCompanies(),
       ]);
       const contacts = Array.isArray(contactsResponse)

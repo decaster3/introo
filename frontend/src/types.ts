@@ -110,12 +110,14 @@ export interface Space {
   id: string;
   name: string;
   emoji: string;
+  isPrivate?: boolean;
   memberCount?: number;
   openRequestCount?: number;
+  pendingCount?: number;
   description?: string | null;
   inviteCode?: string;
   ownerId?: string;
-  members?: { id: string; role: string; user: { id: string; name: string; email: string; avatar: string | null } }[];
+  members?: { id: string; role: string; status?: string; user: { id: string; name: string; email: string; avatar: string | null } }[];
 }
 
 export interface PendingSpace {
@@ -169,7 +171,7 @@ export interface DisplayContact {
   id: string; name: string; email: string; title: string;
   company: string; companyDomain: string;
   lastSeenAt: string; meetingsCount: number;
-  firstSeenAt: string;
+  firstSeenAt?: string;
   connectionStrength: 'strong' | 'medium' | 'weak';
   linkedinUrl?: string | null;
   photoUrl?: string | null;

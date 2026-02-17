@@ -100,8 +100,19 @@ if (isProduction) {
   app.use(httpsRedirect);
 }
 
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
 }));
 app.use(globalLimiter);
@@ -207,7 +218,14 @@ process.on('uncaughtException', (error) => {
 
 const SYNC_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
+let syncRunning = false;
+
 async function backgroundCalendarSync() {
+  if (syncRunning) {
+    console.log('[cron] Skipping calendar sync — previous run still in progress');
+    return;
+  }
+  syncRunning = true;
   console.log('[cron] Starting background calendar sync for all users...');
   try {
     // Get all users that have calendar connected (primary tokens)
@@ -255,7 +273,7 @@ async function backgroundCalendarSync() {
 
     for (const u of allUsers) {
       try {
-        runEnrichmentForUser(u.id);
+        await runEnrichmentForUser(u.id);
         console.log(`[cron] Queued enrichment for ${u.email}`);
       } catch (err) {
         console.error(`[cron] Failed to queue enrichment for ${u.email}:`, (err as Error).message);
@@ -263,6 +281,8 @@ async function backgroundCalendarSync() {
     }
   } catch (err) {
     console.error('[cron] Background sync error:', err);
+  } finally {
+    syncRunning = false;
   }
 }
 
@@ -346,8 +366,10 @@ verifyDatabaseConnection().then(() => {
   server = app.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
 
+    // Run initial sync after a short delay to let the server stabilize
+    setTimeout(backgroundCalendarSync, 30 * 1000);
     setInterval(backgroundCalendarSync, SYNC_INTERVAL_MS);
-    console.log(`[cron] Calendar background sync scheduled every ${SYNC_INTERVAL_MS / 3600000}h`);
+    console.log(`[cron] Calendar background sync scheduled every ${SYNC_INTERVAL_MS / 3600000}h (initial run in 30s)`);
 
     setInterval(backgroundWeeklyDigest, DIGEST_INTERVAL_MS);
     console.log(`[cron] Weekly digest email scheduled every 7 days`);

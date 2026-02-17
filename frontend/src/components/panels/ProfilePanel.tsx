@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { enrichmentApi } from '../../lib/api';
 import { PersonAvatar, CompanyLogo } from '../../components';
 import type { User, MergedCompany, InlinePanel } from '../../types';
@@ -18,9 +19,12 @@ export function ProfilePanel({
   mergedCompanies, onUpdateField, onSave, onNavigate,
 }: ProfilePanelProps) {
   const labelStyle = { fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', marginBottom: '-0.2rem' } as const;
+  const [companyLoading, setCompanyLoading] = useState(false);
 
   const openCompany = async () => {
-    const domain = currentUser.companyDomain!;
+    const domain = currentUser.companyDomain;
+    if (!domain) return;
+    setCompanyLoading(true);
     const existing = mergedCompanies.find(c => c.domain === domain);
     if (existing) {
       onNavigate({ type: 'company', company: existing, fromProfile: true });
@@ -53,6 +57,8 @@ export function ProfilePanel({
         hasStrongConnection: false, bestStrength: 'none',
         source: 'mine', matchingViews: [], spaceIds: [], connectionIds: [],
       }});
+    } finally {
+      setCompanyLoading(false);
     }
   };
 
@@ -81,11 +87,12 @@ export function ProfilePanel({
           {currentUser.companyDomain && (
             <button
               className="u-panel-breadcrumb"
-              style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.1rem', fontSize: '0.7rem', padding: '0.3rem 0.5rem', background: 'rgba(255,255,255,0.04)', borderRadius: '0.4rem' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.1rem', fontSize: '0.7rem', padding: '0.3rem 0.5rem', background: 'rgba(255,255,255,0.04)', borderRadius: '0.4rem', opacity: companyLoading ? 0.5 : 1 }}
               onClick={openCompany}
+              disabled={companyLoading}
             >
               <CompanyLogo domain={currentUser.companyDomain} name={currentUser.company || currentUser.companyDomain} size={16} />
-              <span>{currentUser.company || currentUser.companyDomain}</span>
+              <span>{companyLoading ? 'Loading...' : (currentUser.company || currentUser.companyDomain)}</span>
               <span style={{ color: 'rgba(255,255,255,0.3)' }}>→</span>
             </button>
           )}

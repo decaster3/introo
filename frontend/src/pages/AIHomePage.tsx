@@ -171,8 +171,7 @@ export function AIHomePage() {
   const [showTagTip, setShowTagTip] = useState(false);
   const [showViewPrompt, setShowViewPrompt] = useState(false);
   const [viewPromptDismissed, setViewPromptDismissed] = useState(() => !!localStorage.getItem('introo_view_prompt_dismissed'));
-  const [newSpaceCompanies, setNewSpaceCompanies] = useState<Set<string>>(new Set());
-  const prevSpaceCompanyDomainsRef = useRef<Set<string>>(new Set());
+  
 
   // AI search state
   const [aiParsing, setAiParsing] = useState(false);
@@ -445,8 +444,8 @@ export function AIHomePage() {
 
   const deleteTagDef = useCallback((name: string) => {
     const usageCount = Object.values(companyTags).filter(tags => tags.includes(name)).length;
-    if (usageCount > 1) {
-      if (!window.confirm(`"${name}" is used on ${usageCount} companies. Delete it?`)) return;
+    if (usageCount > 0) {
+      if (!window.confirm(`"${name}" is used on ${usageCount} company${usageCount > 1 ? 'ies' : ''}. Delete it?`)) return;
     }
     persistTagDefs(tagDefs.filter(t => t.name !== name));
     const next = { ...companyTags };
@@ -527,7 +526,7 @@ export function AIHomePage() {
       companyDomain: c.company?.domain || c.email.split('@')[1] || '',
       lastSeenAt: c.lastSeenAt,
       meetingsCount: c.meetingsCount,
-      firstSeenAt: c.firstSeenAt || c.lastSeenAt,
+      firstSeenAt: c.firstSeenAt || undefined,
       connectionStrength: calculateStrength(c.lastSeenAt, c.meetingsCount),
       linkedinUrl: c.linkedinUrl,
       photoUrl: c.photoUrl,
@@ -848,6 +847,7 @@ export function AIHomePage() {
           if (hf.connectedYears && hf.connectedYears.length > 0 && filterMatch) {
             hasAnyFilter = true;
             const hasMatchingContact = co.myContacts.some(c => {
+              if (!c.firstSeenAt) return false;
               const y = String(new Date(c.firstSeenAt).getFullYear());
               return hf.connectedYears!.includes(y);
             });
@@ -856,6 +856,7 @@ export function AIHomePage() {
           if (hf.connectedMonths && hf.connectedMonths.length > 0 && filterMatch) {
             hasAnyFilter = true;
             const hasMatchingContact = co.myContacts.some(c => {
+              if (!c.firstSeenAt) return false;
               const m = String(new Date(c.firstSeenAt).getMonth() + 1);
               return hf.connectedMonths!.includes(m);
             });
@@ -1063,8 +1064,8 @@ export function AIHomePage() {
         case 'funding': return (c.lastFundingRound || '').toLowerCase();
         case 'tags': return (companyTags[c.domain] || []).join(',').toLowerCase();
         case 'connectedSince': {
-          const dates = c.myContacts.map(ct => ct.firstSeenAt).filter(Boolean);
-          if (dates.length === 0) return '';
+          const dates = c.myContacts.map(ct => ct.firstSeenAt).filter((d): d is string => !!d);
+          if (dates.length === 0) return '\uffff';
           return dates.sort()[0];
         }
         default: return 0;
@@ -1169,7 +1170,7 @@ export function AIHomePage() {
         case 'employees': return p.company.employeeCount ?? 0;
         case 'funding': return (p.company.lastFundingRound || '').toLowerCase();
         case 'tags': return (companyTags[p.companyDomain] || []).join(',').toLowerCase();
-        case 'connectedSince': return p.firstSeenAt || '';
+        case 'connectedSince': return p.firstSeenAt || '\uffff';
         default: return 0;
       }
     };
@@ -1286,6 +1287,7 @@ export function AIHomePage() {
   // Count active filters
   const activeFilterCount = useMemo(() => {
     let n = 0;
+    if (searchQuery.trim()) n++;
     if (sourceFilter !== 'all') n++;
     if (accountFilter !== 'all') n++;
     if (strengthFilter !== 'all') n++;
@@ -1308,7 +1310,7 @@ export function AIHomePage() {
     if (sf.connectedYears.length > 0 || sf.connectedMonths.length > 0) n++;
     if (tagFilter.length > 0) n++;
     return n;
-  }, [sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, sidebarFilters, tagFilter]);
+  }, [searchQuery, sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, sidebarFilters, tagFilter]);
 
   // Build removable pills for every active filter
   // Compute year/month counts from contacts for "Connected since" filter
@@ -1529,22 +1531,7 @@ export function AIHomePage() {
     }
   }, [activeFilterCount, viewPromptDismissed, savedViews.length, selectedView, showViewPrompt, sidebarFilters, tagFilter]);
 
-  // #8 Detect new Space companies appearing
-  useEffect(() => {
-    const currentSpaceDomains = new Set(
-      mergedCompanies.filter(c => c.spaceCount > 0).map(c => c.domain)
-    );
-    const prev = prevSpaceCompanyDomainsRef.current;
-    if (prev.size > 0) {
-      const newOnes = new Set<string>();
-      currentSpaceDomains.forEach(d => { if (!prev.has(d)) newOnes.add(d); });
-      if (newOnes.size > 0) {
-        setNewSpaceCompanies(newOnes);
-        setTimeout(() => setNewSpaceCompanies(new Set()), 4000);
-      }
-    }
-    prevSpaceCompanyDomainsRef.current = currentSpaceDomains;
-  }, [mergedCompanies]);
+  
 
   // ─── Keyboard ───────────────────────────────────────────────────────────────
 
@@ -1838,7 +1825,13 @@ export function AIHomePage() {
       recipientEmail: contact.email,
       recipientName: contact.name,
       targetCompany: companyName,
-    }).catch(() => {});
+    }).then(() => {
+      setIntroToast(`Intro offer sent to ${contact.name}`);
+      setTimeout(() => setIntroToast(null), 3000);
+    }).catch(() => {
+      setIntroToast('Failed to send intro offer');
+      setTimeout(() => setIntroToast(null), 3000);
+    });
   }, []);
 
   // Fetch space detail requests when space panel opens
@@ -2725,11 +2718,12 @@ export function AIHomePage() {
             <div className="sb-bottom-actions">
               <button className="sb-save-search-btn" onClick={() => {
                 const sf = sidebarFilters;
-                const keywords = [
+                let keywords = [
                   ...sf.aiKeywords,
                   ...sf.categories.map(c => c.toLowerCase()),
                   ...(sf.description ? sf.description.toLowerCase().split(/\s+/).filter(w => w.length > 1) : []),
                 ].filter((k, i, arr) => k && arr.indexOf(k) === i);
+                if (keywords.length === 0) keywords = ['custom'];
 
                 const savedFilters = buildViewFilters();
 
@@ -2955,13 +2949,13 @@ export function AIHomePage() {
             <div className="u-entity-tabs">
               <button
                 className={`u-entity-tab ${entityTab === 'companies' ? 'u-entity-tab--active' : ''}`}
-                onClick={() => { setEntityTab('companies'); setGridPage(0); }}
+                onClick={() => { setEntityTab('companies'); setGridPage(0); setTagPickerDomain(null); }}
               >
                 Companies <span className="u-entity-tab-count">{filteredCompanies.length}</span>
               </button>
               <button
                 className={`u-entity-tab ${entityTab === 'people' ? 'u-entity-tab--active' : ''}`}
-                onClick={() => { setEntityTab('people'); setGridPage(0); }}
+                onClick={() => { setEntityTab('people'); setGridPage(0); setTagPickerDomain(null); }}
               >
                 People <span className="u-entity-tab-count">{totalPeopleCount}</span>
               </button>
@@ -3028,7 +3022,7 @@ export function AIHomePage() {
           )}
 
           {/* #7 View prompt — nudge to save filters as a view */}
-          {showViewPrompt && activeFilterCount > 0 && (
+          {showViewPrompt && (activeFilterCount > 0 || groupByField || tableSorts.length > 0) && (
             <div className="ob-hunt-prompt">
               <span className="ob-hunt-prompt-icon">🎯</span>
               <span className="ob-hunt-prompt-text">You've set filters. <strong>Save as a View</strong> to track matching companies over time.</span>
@@ -3126,7 +3120,6 @@ export function AIHomePage() {
                   className={[
                     'u-tile',
                     expandedDomain === company.domain ? 'expanded' : '',
-                    newSpaceCompanies.has(company.domain) ? 'u-tile--space-new' : '',
                   ].filter(Boolean).join(' ')}
                 >
                   {/* User tags (hidden when grouped by tags — redundant with group header) */}
@@ -3343,7 +3336,7 @@ export function AIHomePage() {
                   case 'funding': return c.lastFundingRound ? formatFundingRound(c.lastFundingRound) || c.lastFundingRound : 'None';
                   case 'tags': return '';
                   case 'connectedSince': {
-                    const dates = c.myContacts.map(ct => ct.firstSeenAt).filter(Boolean);
+                    const dates = c.myContacts.map(ct => ct.firstSeenAt).filter((d): d is string => !!d);
                     if (dates.length === 0) return 'Unknown';
                     const earliest = new Date(dates.sort()[0]);
                     if (isNaN(earliest.getTime())) return 'Unknown';
@@ -3457,7 +3450,7 @@ export function AIHomePage() {
                               return (
                                 <tr
                                   key={company.domain}
-                                  className={`u-tr ${newSpaceCompanies.has(company.domain) ? 'u-tr--space-new' : ''}`}
+                                  className="u-tr"
                                   onClick={() => setInlinePanel({ type: 'company', company })}
                                 >
                                   <td className="u-td-company">

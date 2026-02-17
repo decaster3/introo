@@ -24,7 +24,8 @@ if (!ENCRYPTION_KEY) {
   }
   console.warn('WARNING: ENCRYPTION_KEY not set. Using insecure default for development only. OAuth tokens will be lost on restart.');
 }
-const EFFECTIVE_ENCRYPTION_KEY = ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex');
+const DEV_FALLBACK_ENCRYPTION_KEY = 'a'.repeat(64);
+const EFFECTIVE_ENCRYPTION_KEY = ENCRYPTION_KEY || DEV_FALLBACK_ENCRYPTION_KEY;
 const ENCRYPTION_ALGORITHM = 'aes-256-gcm';
 
 export function encryptToken(token: string): string {
@@ -249,6 +250,15 @@ export function verifyToken(token: string): JwtPayload | null {
 // In-memory user cache to avoid DB hit on every authenticated request
 const USER_CACHE = new Map<string, { user: AuthUser; expiry: number }>();
 const USER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const USER_CACHE_MAX_SIZE = 10000;
+
+// Periodic eviction of expired entries (every 10 minutes)
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of USER_CACHE) {
+    if (entry.expiry <= now) USER_CACHE.delete(key);
+  }
+}, 10 * 60 * 1000);
 
 export function invalidateUserCache(userId: string) {
   USER_CACHE.delete(userId);
@@ -290,7 +300,11 @@ export const authMiddleware: RequestHandler = async (req, res, next) => {
       return;
     }
 
-    // Cache the user
+    // Cache the user (with size cap)
+    if (USER_CACHE.size >= USER_CACHE_MAX_SIZE) {
+      const oldest = USER_CACHE.keys().next().value;
+      if (oldest) USER_CACHE.delete(oldest);
+    }
     USER_CACHE.set(payload.userId, { user, expiry: Date.now() + USER_CACHE_TTL });
 
     (req as AuthenticatedRequest).user = user;

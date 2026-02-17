@@ -2,6 +2,7 @@ import type {
   User,
   Company,
   Contact,
+  Space,
 } from '../types';
 
 // Re-export types for convenience
@@ -9,6 +10,7 @@ export type {
   User,
   Company,
   Contact,
+  Space,
 };
 
 export const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -292,18 +294,6 @@ export interface IntroRequestResponse {
 }
 
 // Additional types for API responses
-export interface Space {
-  id: string;
-  name: string;
-  description?: string | null;
-  emoji: string;
-  isPrivate: boolean;
-  inviteCode: string;
-  ownerId: string;
-  members: SpaceMember[];
-  pendingCount?: number;
-}
-
 export interface SpaceMember {
   id: string;
   role: string;
