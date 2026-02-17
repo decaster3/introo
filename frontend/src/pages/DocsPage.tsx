@@ -1,14 +1,250 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 
-type ArticleId = 'filters' | 'connections' | 'spaces' | 'intros';
+type ArticleId = 'getting-started' | 'filters' | 'connections' | 'spaces' | 'intros';
 
 const articles: { id: ArticleId; title: string; icon: string; subtitle: string }[] = [
+  { id: 'getting-started', title: 'Getting Started', icon: '🚀', subtitle: 'What is Introo and how it works' },
   { id: 'filters', title: 'Filters, Tags & Views', icon: '🔍', subtitle: 'Use Introo as your personal CRM' },
   { id: 'connections', title: '1:1 Connections', icon: '🤝', subtitle: 'Share networks with trusted people' },
   { id: 'spaces', title: 'Spaces', icon: '👥', subtitle: 'Pool networks in private groups' },
   { id: 'intros', title: 'How Intros Work', icon: '✨', subtitle: 'Request and make warm introductions' },
 ];
+
+function GettingStartedArticle({ onNavigate }: { onNavigate: (id: ArticleId) => void }) {
+  return (
+    <article className="docs-article">
+      <h1>What is Introo?</h1>
+      <p className="docs-lead">
+        Introo turns your scattered calls, meetings, and emails into a structured, searchable map of your professional
+        network. It finds every person you've ever interacted with, enriches them with company data, and lets you
+        share your network with trusted people to make warm introductions — no spreadsheets, no cold outreach.
+      </p>
+
+      <section>
+        <h2>How it works</h2>
+        <div className="docs-steps">
+          <div className="docs-step">
+            <span className="docs-step-num">1</span>
+            <div>
+              <strong>Connect your Google Calendar</strong>
+              <p>Sign in with Google and Introo scans the past 5 years of your meetings. It extracts every person you've met with from calendar event attendees — automatically.</p>
+            </div>
+          </div>
+          <div className="docs-step">
+            <span className="docs-step-num">2</span>
+            <div>
+              <strong>Review & approve contacts</strong>
+              <p>Introo shows you everyone it found. Approve the contacts you want in your network. Personal email domains (Gmail, Yahoo, etc.) are filtered out — only business contacts make it through.</p>
+            </div>
+          </div>
+          <div className="docs-step">
+            <span className="docs-step-num">3</span>
+            <div>
+              <strong>Automatic enrichment</strong>
+              <p>Every contact and company is enriched with data — job titles, LinkedIn profiles, photos, company size, industry, funding stage, and more. This happens in the background, no manual data entry needed.</p>
+            </div>
+          </div>
+          <div className="docs-step">
+            <span className="docs-step-num">4</span>
+            <div>
+              <strong>Explore your network</strong>
+              <p>Browse by company or by person. Search, filter, sort, group, tag — like a CRM, but built automatically from your real relationships.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Your data stays yours</h2>
+        <p>
+          Privacy is baked into how Introo works. Here's what you need to know:
+        </p>
+        <div className="docs-grid">
+          <div className="docs-card">
+            <h4>Your contacts are private</h4>
+            <p>Nobody can see your contacts, emails, or meeting history unless you explicitly share through a Connection or Space.</p>
+          </div>
+          <div className="docs-card">
+            <h4>Emails are always masked</h4>
+            <p>When you do share, contact emails are partially hidden (e.g. j***n@company.com). Full emails are never exposed to others.</p>
+          </div>
+          <div className="docs-card">
+            <h4>Meetings are never shared</h4>
+            <p>Your calendar event titles, dates, and frequency — the raw data from your calendar — are never visible to anyone else.</p>
+          </div>
+          <div className="docs-card">
+            <h4>You control sharing</h4>
+            <p>Sharing only happens through 1:1 Connections or Spaces that you explicitly join. You can leave anytime and your data is immediately removed from the shared view.</p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>What can you do with Introo?</h2>
+        <div className="docs-examples">
+          <div className="docs-example-card">
+            <h4>🎯 Find warm paths to any company</h4>
+            <p>Looking to reach someone at a target company? See if anyone in your network (or your connections' networks) already knows someone there. Request a warm intro instead of cold outreach.</p>
+          </div>
+          <div className="docs-example-card">
+            <h4>📋 Use it as a lightweight CRM</h4>
+            <p>Tag companies as "Customer," "Prospect," or "Partner." Create saved Views like "Strong prospects" or "Cold clients" to organize your pipeline without the complexity of a full CRM.</p>
+          </div>
+          <div className="docs-example-card">
+            <h4>👥 Pool networks with your team</h4>
+            <p>Create a Space for your sales team, investor syndicate, or industry group. Everyone contributes their contacts and the whole group benefits from a larger combined reach.</p>
+          </div>
+          <div className="docs-example-card">
+            <h4>🤝 Help others with warm intros</h4>
+            <p>When someone in your Space or Connections needs to reach a company where you know people, you get notified. Help them with a 3-way introduction email — all from within the app.</p>
+          </div>
+          <div className="docs-example-card">
+            <h4>📊 Understand your relationship strength</h4>
+            <p>Introo scores how strong your connection is to each company based on meeting recency and frequency. See at a glance which relationships are strong and which are going cold.</p>
+          </div>
+          <div className="docs-example-card">
+            <h4>🔄 Always up to date</h4>
+            <p>Your calendar syncs automatically every few hours. New meetings, new contacts, new companies — they all show up without you lifting a finger.</p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Key concepts</h2>
+        <p>Here's a quick overview of the main features. Click any to learn more:</p>
+        <div className="docs-concepts">
+          <button className="docs-concept-link" onClick={() => onNavigate('filters')}>
+            <span className="docs-concept-icon">🔍</span>
+            <div>
+              <strong>Filters, Tags & Views</strong>
+              <p>Slice your network by industry, strength, location, funding stage, and more. Tag companies and save custom Views for one-click access.</p>
+            </div>
+            <span className="docs-concept-arrow">→</span>
+          </button>
+          <button className="docs-concept-link" onClick={() => onNavigate('connections')}>
+            <span className="docs-concept-icon">🤝</span>
+            <div>
+              <strong>1:1 Connections</strong>
+              <p>Link directly with another Introo user. Both of you share visibility into each other's professional networks.</p>
+            </div>
+            <span className="docs-concept-arrow">→</span>
+          </button>
+          <button className="docs-concept-link" onClick={() => onNavigate('spaces')}>
+            <span className="docs-concept-icon">👥</span>
+            <div>
+              <strong>Spaces</strong>
+              <p>Private groups where members pool their contacts. Think shared rolodex — everyone contributes, everyone benefits.</p>
+            </div>
+            <span className="docs-concept-arrow">→</span>
+          </button>
+          <button className="docs-concept-link" onClick={() => onNavigate('intros')}>
+            <span className="docs-concept-icon">✨</span>
+            <div>
+              <strong>How Intros Work</strong>
+              <p>Request warm introductions through your network. Connectors choose how to help — ask for details, check with the contact, or make a direct intro.</p>
+            </div>
+            <span className="docs-concept-arrow">→</span>
+          </button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Real-world scenarios</h2>
+        <div className="docs-scenarios">
+          <div className="docs-scenario-card">
+            <div className="docs-scenario-header">
+              <span className="docs-scenario-emoji">💰</span>
+              <strong>Founder raising a Series A</strong>
+            </div>
+            <p>See who in your advisory network knows investors at target funds. Request warm intros instead of cold-emailing.</p>
+            <div className="docs-scenario-features">Spaces · Intros</div>
+          </div>
+          <div className="docs-scenario-card">
+            <div className="docs-scenario-header">
+              <span className="docs-scenario-emoji">🎯</span>
+              <strong>Sales team at a startup</strong>
+            </div>
+            <p>Pool the whole team's contacts. Before cold-calling Acme, check if anyone on the team already has a warm path in.</p>
+            <div className="docs-scenario-features">Spaces · Filters</div>
+          </div>
+          <div className="docs-scenario-card">
+            <div className="docs-scenario-header">
+              <span className="docs-scenario-emoji">📋</span>
+              <strong>Consultant managing clients</strong>
+            </div>
+            <p>Tag companies as clients, prospects, or partners. Create a "Going cold" view to catch relationships before they fade.</p>
+            <div className="docs-scenario-features">Tags · Views · Strength</div>
+          </div>
+          <div className="docs-scenario-card">
+            <div className="docs-scenario-header">
+              <span className="docs-scenario-emoji">🔍</span>
+              <strong>Job seeker exploring options</strong>
+            </div>
+            <p>Filter by industry and company size. Connect 1:1 with a mentor to see their network and request intros to hiring managers.</p>
+            <div className="docs-scenario-features">Connections · Filters</div>
+          </div>
+          <div className="docs-scenario-card">
+            <div className="docs-scenario-header">
+              <span className="docs-scenario-emoji">📊</span>
+              <strong>VC mapping deal flow</strong>
+            </div>
+            <p>Partners create a Space. Search pipeline companies to see who already has relationships there. Prioritize warm deals.</p>
+            <div className="docs-scenario-features">Spaces · Strength · Intros</div>
+          </div>
+          <div className="docs-scenario-card">
+            <div className="docs-scenario-header">
+              <span className="docs-scenario-emoji">🤝</span>
+              <strong>BD at a growing company</strong>
+            </div>
+            <p>Before reaching out to a potential partner, check if someone on the team already met them at a conference or past deal. Start warm, close faster.</p>
+            <div className="docs-scenario-features">Spaces · Filters · Intros</div>
+          </div>
+          <div className="docs-scenario-card">
+            <div className="docs-scenario-header">
+              <span className="docs-scenario-emoji">🏗️</span>
+              <strong>Hiring for a hard-to-fill role</strong>
+            </div>
+            <p>Search your network by job title — "Staff Engineer," "Head of Design." See who you've actually met with, how recently, and ask a mutual contact to make the intro.</p>
+            <div className="docs-scenario-features">Filters · Strength · Intros</div>
+          </div>
+          <div className="docs-scenario-card">
+            <div className="docs-scenario-header">
+              <span className="docs-scenario-emoji">🌍</span>
+              <strong>Expanding into a new market</strong>
+            </div>
+            <p>Filter your combined network by country or city. Discover who already has contacts in your target region and get introduced to local partners or clients.</p>
+            <div className="docs-scenario-features">Spaces · Filters · Intros</div>
+          </div>
+          <div className="docs-scenario-card">
+            <div className="docs-scenario-header">
+              <span className="docs-scenario-emoji">🎓</span>
+              <strong>Mentor connecting mentees</strong>
+            </div>
+            <p>Share your network with people you're advising via 1:1 Connections. They can browse your contacts and request intros — you stay in control of every introduction.</p>
+            <div className="docs-scenario-features">Connections · Intros</div>
+          </div>
+          <div className="docs-scenario-card">
+            <div className="docs-scenario-header">
+              <span className="docs-scenario-emoji">🔄</span>
+              <strong>Re-engaging dormant relationships</strong>
+            </div>
+            <p>Sort by last contact date to surface people you haven't spoken to in months. Tag them "Re-engage" and create a View to work through the list.</p>
+            <div className="docs-scenario-features">Views · Tags · Strength</div>
+          </div>
+          <div className="docs-scenario-card">
+            <div className="docs-scenario-header">
+              <span className="docs-scenario-emoji">🚀</span>
+              <strong>Launching a product</strong>
+            </div>
+            <p>Find every contact in your network at companies in your target industry. Filter by company size and funding stage to build a launch outreach list from real relationships.</p>
+            <div className="docs-scenario-features">Filters · Tags · Views</div>
+          </div>
+        </div>
+      </section>
+    </article>
+  );
+}
 
 function FiltersArticle() {
   return (
@@ -474,7 +710,7 @@ export function DocsPage() {
   const location = useLocation();
   const [activeArticle, setActiveArticle] = useState<ArticleId>(() => {
     const hash = window.location.hash.replace('#', '') as ArticleId;
-    return articles.some(a => a.id === hash) ? hash : 'filters';
+    return articles.some(a => a.id === hash) ? hash : 'getting-started';
   });
 
   useEffect(() => {
@@ -527,6 +763,7 @@ export function DocsPage() {
         </aside>
 
         <main className="docs-main">
+          {activeArticle === 'getting-started' && <GettingStartedArticle onNavigate={navigate} />}
           {activeArticle === 'filters' && <FiltersArticle />}
           {activeArticle === 'connections' && <ConnectionsArticle />}
           {activeArticle === 'spaces' && <SpacesArticle />}

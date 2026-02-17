@@ -1661,6 +1661,127 @@ body {
   max-width: none;
 }
 
+/* Scenario cards (Getting Started article) */
+.docs-scenarios {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+  margin-top: 0.75rem;
+}
+
+.docs-scenario-card {
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  padding: 1rem 1.15rem;
+}
+
+.docs-scenario-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.docs-scenario-emoji {
+  font-size: 1.1rem;
+}
+
+.docs-scenario-header strong {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: rgba(255,255,255,0.85);
+}
+
+.docs-scenario-card p {
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: rgba(255,255,255,0.42);
+  margin: 0 0 0.6rem;
+  max-width: none;
+}
+
+.docs-scenario-features {
+  font-size: 0.68rem;
+  color: rgba(255,255,255,0.3);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+@media (max-width: 768px) {
+  .docs-scenarios {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Concept links (Getting Started article) */
+.docs-concepts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.docs-concept-link {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 1rem 1.1rem;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  text-align: left;
+  color: inherit;
+  width: 100%;
+}
+
+.docs-concept-link:hover {
+  background: rgba(255,255,255,0.05);
+  border-color: rgba(255,255,255,0.12);
+}
+
+.docs-concept-icon {
+  font-size: 1.4rem;
+  flex-shrink: 0;
+  width: 2rem;
+  text-align: center;
+}
+
+.docs-concept-link div {
+  flex: 1;
+  min-width: 0;
+}
+
+.docs-concept-link strong {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: rgba(255,255,255,0.88);
+  margin-bottom: 0.2rem;
+}
+
+.docs-concept-link p {
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: rgba(255,255,255,0.42);
+  margin: 0;
+  max-width: none;
+}
+
+.docs-concept-arrow {
+  flex-shrink: 0;
+  font-size: 0.9rem;
+  color: rgba(255,255,255,0.25);
+  transition: color 0.15s, transform 0.15s;
+}
+
+.docs-concept-link:hover .docs-concept-arrow {
+  color: rgba(255,255,255,0.5);
+  transform: translateX(2px);
+}
+
 /* Mobile responsive */
 @media (max-width: 768px) {
   .docs-layout {
