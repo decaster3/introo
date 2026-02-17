@@ -3276,7 +3276,7 @@ export function AIHomePage() {
                 </div>
               );
 
-              const isNetworkView = connectionFilter !== 'all' || spaceFilter !== 'all';
+              const isNetworkView = sourceFilter === 'spaces' || connectionFilter !== 'all' || spaceFilter !== 'all';
               const displayCompanies = isNetworkView && excludeMyContacts
                 ? filteredCompanies.filter(c => !(c.myCount > 0 && c.spaceCount === 0))
                 : filteredCompanies;
@@ -3593,9 +3593,13 @@ export function AIHomePage() {
 
           {/* ── People Table ──────────────────────────────────── */}
           {entityTab === 'people' && (() => {
+            const isPeopleNetworkView = sourceFilter === 'spaces' || connectionFilter !== 'all' || spaceFilter !== 'all';
+            const displayPeople = isPeopleNetworkView && excludeMyContacts
+              ? flatPeople.filter(p => !p.isMyContact)
+              : flatPeople;
             const peoplePageStart = gridPage * GRID_PAGE_SIZE;
             const peoplePageEnd = peoplePageStart + GRID_PAGE_SIZE;
-            const peopleTotalPages = Math.ceil(flatPeople.length / GRID_PAGE_SIZE);
+            const peopleTotalPages = Math.ceil(displayPeople.length / GRID_PAGE_SIZE);
 
             const handlePeopleSort = (col: typeof peopleSortBy) => {
               if (peopleSortBy === col) {
@@ -3657,10 +3661,10 @@ export function AIHomePage() {
             };
             type PeopleGroupedSection = { label: string; people: FlatPerson[] };
             const peopleGroupedSections: PeopleGroupedSection[] = (() => {
-              if (!peopleGroupByField) return [{ label: '', people: flatPeople }];
+              if (!peopleGroupByField) return [{ label: '', people: displayPeople }];
               const map = new Map<string, FlatPerson[]>();
               if (peopleGroupByField === 'tags') {
-                for (const p of flatPeople) {
+                for (const p of displayPeople) {
                   const tags = companyTags[p.companyDomain] || [];
                   if (tags.length === 0) {
                     if (!map.has('No tags')) map.set('No tags', []);
@@ -3673,7 +3677,7 @@ export function AIHomePage() {
                   }
                 }
               } else {
-                for (const p of flatPeople) {
+                for (const p of displayPeople) {
                   const label = peopleGroupLabel(p);
                   if (!map.has(label)) map.set(label, []);
                   map.get(label)!.push(p);
@@ -3781,10 +3785,19 @@ export function AIHomePage() {
 
             return (
               <>
+                {isPeopleNetworkView && (
+                  <div className="u-grid-filter-bar">
+                    <label className="u-grid-exclude-label">
+                      <input type="checkbox" checked={excludeMyContacts} onChange={e => { setExcludeMyContacts(e.target.checked); setGridPage(0); }} />
+                      Exclude my contacts
+                    </label>
+                    <span className="u-grid-section-count">{displayPeople.length}</span>
+                  </div>
+                )}
                 {/* ── Card view ── */}
                 {viewMode === 'grid' && !peopleGroupByField && (
                   <div className="u-grid u-grid--people-cards">
-                    {flatPeople.slice(peoplePageStart, peoplePageEnd).map(renderPersonCard)}
+                    {displayPeople.slice(peoplePageStart, peoplePageEnd).map(renderPersonCard)}
                   </div>
                 )}
                 {viewMode === 'grid' && peopleGroupByField && peopleGroupedSections.map(section => {
@@ -3831,7 +3844,7 @@ export function AIHomePage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {!peopleGroupByField && flatPeople.slice(peoplePageStart, peoplePageEnd).map(renderPersonRow)}
+                          {!peopleGroupByField && displayPeople.slice(peoplePageStart, peoplePageEnd).map(renderPersonRow)}
                           {peopleGroupByField && peopleGroupedSections.map(section => {
                             const isCollapsed = peopleCollapsedGroups.has(section.label);
                             return (
