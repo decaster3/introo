@@ -91,6 +91,11 @@ export function AIHomePage() {
     funding: 'Funding', tags: 'Tags', connectedSince: 'Connected Since',
   };
   const ALL_SORT_FIELDS: SortField[] = ['name', 'contacts', 'strength', 'employees', 'location', 'industry', 'funding', 'tags', 'connectedSince'];
+  const DATE_FIELDS = new Set(['connectedSince', 'lastSeen']);
+  const dirLabel = (field: string, dir: 'asc' | 'desc') =>
+    DATE_FIELDS.has(field)
+      ? (dir === 'asc' ? 'Oldest first' : 'Newest first')
+      : (dir === 'asc' ? 'A → Z' : 'Z → A');
 
   const [tableSorts, setTableSorts] = useState<SortRule[]>([]);
   const [groupByField, setGroupByField] = useState<SortField | null>(null);
@@ -129,7 +134,7 @@ export function AIHomePage() {
   const [peopleSortDir, setPeopleSortDir] = useState<'asc' | 'desc'>('desc');
   const [gridPage, setGridPage] = useState(0);
   const GRID_PAGE_SIZE = 50;
-  const [excludeMyContacts, setExcludeMyContacts] = useState(true);
+  const [excludeMyContacts, setExcludeMyContacts] = useState(false);
   const [expandedDomain, setExpandedDomain] = useState<string | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [inlinePanel, setInlinePanel] = useState<InlinePanel | null>(null);
@@ -903,7 +908,9 @@ export function AIHomePage() {
     if (sf.connectedYears.length > 0 || sf.connectedMonths.length > 0) {
       result = result.filter(c =>
         c.myContacts.some(mc => {
+          if (!mc.firstSeenAt) return false;
           const d = new Date(mc.firstSeenAt);
+          if (isNaN(d.getTime())) return false;
           const y = String(d.getFullYear());
           const m = String(d.getMonth() + 1); // 1-indexed
           const yearOk = sf.connectedYears.length === 0 || sf.connectedYears.includes(y);
@@ -974,6 +981,7 @@ export function AIHomePage() {
         const emp = c.employeeCount;
         return sf.employeeRanges.some(range => {
           if (range === '5000+') return emp >= 5000;
+          if (range === '1000-5000') return emp >= 1000 && emp < 5000;
           const [min, max] = range.split('-').map(Number);
           return emp >= min && emp <= max;
         });
@@ -1194,13 +1202,12 @@ export function AIHomePage() {
   }, [filteredCompanies, peopleSortBy, peopleSortDir, peopleSorts, peopleGroupByField, peopleGroupByDir, companyTags]);
 
   const totalPeopleCount = useMemo(() => {
-    const seen = new Set<string>();
-    for (const co of filteredCompanies) {
-      co.myContacts.forEach(c => seen.add(c.email));
-      co.spaceContacts.forEach(c => seen.add(c.email));
+    const isNetworkActive = sourceFilter === 'spaces' || connectionFilter !== 'all' || spaceFilter !== 'all';
+    if (isNetworkActive && excludeMyContacts) {
+      return flatPeople.filter(p => !p.isMyContact).length;
     }
-    return seen.size;
-  }, [filteredCompanies]);
+    return flatPeople.length;
+  }, [flatPeople, sourceFilter, connectionFilter, spaceFilter, excludeMyContacts]);
 
   // Reset page when filters change
   useEffect(() => { setGridPage(0); }, [filteredCompanies.length, excludeMyContacts, entityTab]);
@@ -1228,7 +1235,7 @@ export function AIHomePage() {
       { value: '51-200', min: 51, max: 200 },
       { value: '201-500', min: 201, max: 500 },
       { value: '501-1000', min: 501, max: 1000 },
-      { value: '1000-5000', min: 1000, max: 5000 },
+      { value: '1000-5000', min: 1000, max: 4999 },
       { value: '5000+', min: 5000, max: Infinity },
     ];
     const counts: Record<string, number> = {};
@@ -1309,7 +1316,9 @@ export function AIHomePage() {
     const yearCounts: Record<string, number> = {};
     const monthCounts: Record<string, number> = {};
     contacts.forEach(c => {
+      if (!c.firstSeenAt) return;
       const d = new Date(c.firstSeenAt);
+      if (isNaN(d.getTime())) return;
       const y = String(d.getFullYear());
       const m = String(d.getMonth() + 1);
       yearCounts[y] = (yearCounts[y] || 0) + 1;
@@ -1344,8 +1353,10 @@ export function AIHomePage() {
     if (spaceFilter !== 'all') filters.spaceFilter = spaceFilter;
     if (connectionFilter !== 'all') filters.connectionFilter = connectionFilter;
     if (accountFilter !== 'all') filters.accountFilter = accountFilter;
+    if (peopleSorts.length > 0) filters.peopleSortRules = peopleSorts.map(s => ({ field: s.field, dir: s.dir }));
+    if (peopleGroupByField) filters.peopleGroupBy = { field: peopleGroupByField, dir: peopleGroupByDir };
     return filters;
-  }, [sidebarFilters, sourceFilter, strengthFilter, tagFilter, spaceFilter, connectionFilter, accountFilter]);
+  }, [sidebarFilters, sourceFilter, strengthFilter, tagFilter, spaceFilter, connectionFilter, accountFilter, peopleSorts, peopleGroupByField, peopleGroupByDir]);
 
   const clearAllFilters = useCallback(() => {
     setSourceFilter('all');
@@ -1357,6 +1368,13 @@ export function AIHomePage() {
     setGridPage(0);
     setAiExplanation(null);
     setLastAiQuery(null);
+    setSearchQuery('');
+    setTableSorts([]);
+    setGroupByField(null);
+    setCollapsedGroups(new Set());
+    setPeopleSorts([]);
+    setPeopleGroupByField(null);
+    setPeopleCollapsedGroups(new Set());
     setSidebarFilters({
       description: '',
       categories: [],
@@ -1586,6 +1604,8 @@ export function AIHomePage() {
         setAccountFilter('all');
         setTableSorts([]);
         setGroupByField(null);
+        setPeopleSorts([]);
+        setPeopleGroupByField(null);
         return null;
       }
       // Restore full state from the saved view
@@ -1629,6 +1649,17 @@ export function AIHomePage() {
         setSpaceFilter((f.spaceFilter as string) || 'all');
         setConnectionFilter((f.connectionFilter as string) || 'all');
         setAccountFilter((f.accountFilter as string) || 'all');
+        if (f.peopleSortRules && f.peopleSortRules.length > 0) {
+          setPeopleSorts(f.peopleSortRules as PeopleSortRule[]);
+        } else {
+          setPeopleSorts([]);
+        }
+        if (f.peopleGroupBy) {
+          setPeopleGroupByField(f.peopleGroupBy.field as PeopleSortField);
+          setPeopleGroupByDir(f.peopleGroupBy.dir);
+        } else {
+          setPeopleGroupByField(null);
+        }
       }
       return viewId;
     });
@@ -2097,8 +2128,8 @@ export function AIHomePage() {
                           {ALL_SORT_FIELDS.map(f => <option key={f} value={f}>{SORT_FIELD_LABELS[f]}</option>)}
                         </select>
                         <select className="sb-sg-sel sb-sg-sel--dir" value={groupByDir} onChange={e => { const dir = e.target.value as SortDir; setGroupByDir(dir); setTableSorts(prev => prev.map(s => s.field === groupByField ? { ...s, dir } : s)); setGridPage(0); }}>
-                          <option value="asc">A → Z</option>
-                          <option value="desc">Z → A</option>
+                          <option value="asc">{dirLabel(groupByField!, 'asc')}</option>
+                          <option value="desc">{dirLabel(groupByField!, 'desc')}</option>
                         </select>
                         <button className="sb-sg-x" onClick={() => { setGroupByField(null); setCollapsedGroups(new Set()); setGridPage(0); }}>×</button>
                       </div>
@@ -2115,8 +2146,8 @@ export function AIHomePage() {
                           {ALL_PEOPLE_FIELDS.map(f => <option key={f} value={f}>{PEOPLE_FIELD_LABELS[f]}</option>)}
                         </select>
                         <select className="sb-sg-sel sb-sg-sel--dir" value={peopleGroupByDir} onChange={e => { const dir = e.target.value as SortDir; setPeopleGroupByDir(dir); setPeopleSorts(prev => prev.map(s => s.field === peopleGroupByField ? { ...s, dir } : s)); setGridPage(0); }}>
-                          <option value="asc">A → Z</option>
-                          <option value="desc">Z → A</option>
+                          <option value="asc">{dirLabel(peopleGroupByField!, 'asc')}</option>
+                          <option value="desc">{dirLabel(peopleGroupByField!, 'desc')}</option>
                         </select>
                         <button className="sb-sg-x" onClick={() => { setPeopleGroupByField(null); setPeopleCollapsedGroups(new Set()); setGridPage(0); }}>×</button>
                       </div>
@@ -2140,8 +2171,8 @@ export function AIHomePage() {
                             {ALL_SORT_FIELDS.map(f => <option key={f} value={f}>{SORT_FIELD_LABELS[f]}</option>)}
                           </select>
                           <select className="sb-sg-sel sb-sg-sel--dir" value={rule.dir} onChange={e => { const dir = e.target.value as SortDir; const next = [...tableSorts]; next[idx] = { ...next[idx], dir }; setTableSorts(next); if (rule.field === groupByField) setGroupByDir(dir); setGridPage(0); }}>
-                            <option value="asc">A → Z</option>
-                            <option value="desc">Z → A</option>
+                            <option value="asc">{dirLabel(rule.field, 'asc')}</option>
+                            <option value="desc">{dirLabel(rule.field, 'desc')}</option>
                           </select>
                           <button className="sb-sg-x" onClick={() => { setTableSorts(tableSorts.filter((_, i) => i !== idx)); setGridPage(0); }}>×</button>
                         </div>
@@ -2158,8 +2189,8 @@ export function AIHomePage() {
                             {ALL_PEOPLE_FIELDS.map(f => <option key={f} value={f}>{PEOPLE_FIELD_LABELS[f]}</option>)}
                           </select>
                           <select className="sb-sg-sel sb-sg-sel--dir" value={rule.dir} onChange={e => { const dir = e.target.value as SortDir; const next = [...peopleSorts]; next[idx] = { ...next[idx], dir }; setPeopleSorts(next); if (rule.field === peopleGroupByField) setPeopleGroupByDir(dir); setGridPage(0); }}>
-                            <option value="asc">A → Z</option>
-                            <option value="desc">Z → A</option>
+                            <option value="asc">{dirLabel(rule.field, 'asc')}</option>
+                            <option value="desc">{dirLabel(rule.field, 'desc')}</option>
                           </select>
                           <button className="sb-sg-x" onClick={() => { setPeopleSorts(peopleSorts.filter((_, i) => i !== idx)); setGridPage(0); }}>×</button>
                         </div>
@@ -3315,6 +3346,7 @@ export function AIHomePage() {
                     const dates = c.myContacts.map(ct => ct.firstSeenAt).filter(Boolean);
                     if (dates.length === 0) return 'Unknown';
                     const earliest = new Date(dates.sort()[0]);
+                    if (isNaN(earliest.getTime())) return 'Unknown';
                     return `${MONTH_NAMES[earliest.getMonth()]} ${earliest.getFullYear()}`;
                   }
                   default: return '';
@@ -3579,7 +3611,7 @@ export function AIHomePage() {
                     </div>
                   )}
 
-                  {totalPages > 1 && (
+                  {!groupByField && totalPages > 1 && (
                     <div className="u-grid-pagination">
                       <button className="u-grid-page-btn" disabled={gridPage === 0} onClick={() => setGridPage(gridPage - 1)}>← Prev</button>
                       <span className="u-grid-page-info">{gridPage + 1} / {totalPages}</span>
@@ -3654,6 +3686,7 @@ export function AIHomePage() {
                 case 'connectedSince': {
                   if (!p.firstSeenAt) return 'Unknown';
                   const d = new Date(p.firstSeenAt);
+                  if (isNaN(d.getTime())) return 'Unknown';
                   return `${PEOPLE_MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
                 }
                 default: return '';

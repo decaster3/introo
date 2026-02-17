@@ -247,6 +247,8 @@ export interface ViewFilters {
   spaceFilter?: string;
   connectionFilter?: string;
   accountFilter?: string;
+  peopleSortRules?: ViewSortRule[];
+  peopleGroupBy?: { field: string; dir: 'asc' | 'desc' } | null;
 }
 
 /** @deprecated Use ViewFilters instead */
