@@ -233,23 +233,30 @@ router.post('/lookup-contact', async (req, res) => {
       } else {
         const org = await enrichOrganization(domain).catch(() => null);
         if (org && org.name) {
-          companyData = {
-            domain,
-            name: org.name,
-            industry: org.industry || null,
-            employeeCount: org.estimated_num_employees || null,
-            foundedYear: org.founded_year || null,
-            linkedinUrl: org.linkedin_url || null,
-            websiteUrl: org.website_url || null,
-            logo: org.logo_url || null,
-            city: org.city || null,
-            state: org.state || null,
-            country: org.country || null,
-            description: org.short_description || null,
-            annualRevenue: org.annual_revenue ? String(org.annual_revenue) : null,
-            totalFunding: org.total_funding ? String(org.total_funding) : null,
-            lastFundingRound: org.latest_funding_stage || null,
-          };
+          // Persist enriched company to DB so data isn't lost
+          const created = await prisma.company.create({
+            data: {
+              domain,
+              name: org.name,
+              industry: org.industry || null,
+              employeeCount: org.estimated_num_employees || null,
+              foundedYear: org.founded_year || null,
+              linkedinUrl: org.linkedin_url || null,
+              websiteUrl: org.website_url || null,
+              logo: org.logo_url || null,
+              city: org.city || null,
+              state: org.state || null,
+              country: org.country || null,
+              description: org.short_description || null,
+              apolloId: org.id || null,
+              annualRevenue: org.annual_revenue ? String(org.annual_revenue) : null,
+              totalFunding: org.total_funding ? String(org.total_funding) : null,
+              lastFundingRound: org.latest_funding_stage || null,
+              lastFundingDate: org.latest_funding_round_date ? new Date(org.latest_funding_round_date) : null,
+              enrichedAt: new Date(),
+            },
+          });
+          companyData = created;
         }
       }
     }
@@ -309,22 +316,28 @@ router.post('/add-contact', async (req, res) => {
       return;
     }
 
-    // Upsert company if domain provided
+    // Find or create company if domain provided
     let companyId: string | null = null;
     const domain = companyDomain?.trim().toLowerCase();
     if (domain) {
-      const company = await prisma.company.upsert({
-        where: { domain },
-        update: {
-          ...(companyName && { name: companyName }),
-          ...(websiteUrl && { websiteUrl }),
-        },
-        create: {
-          domain,
-          name: companyName || domain,
-          websiteUrl: websiteUrl || null,
-        },
-      });
+      let company = await prisma.company.findUnique({ where: { domain } });
+      if (company) {
+        // Only update name/website if user provided them and company has no enriched data for those fields
+        const updates: Record<string, string> = {};
+        if (companyName && !company.name) updates.name = companyName;
+        if (websiteUrl && !company.websiteUrl) updates.websiteUrl = websiteUrl;
+        if (Object.keys(updates).length > 0) {
+          company = await prisma.company.update({ where: { domain }, data: updates });
+        }
+      } else {
+        company = await prisma.company.create({
+          data: {
+            domain,
+            name: companyName || domain,
+            websiteUrl: websiteUrl || null,
+          },
+        });
+      }
       companyId = company.id;
     }
 
