@@ -146,7 +146,7 @@ export async function enrichOrganization(domain: string): Promise<ApolloOrganiza
  * Match a person by email. Returns full profile.
  * COSTS: 1 credit per call.
  */
-async function matchPersonByEmail(email: string): Promise<ApolloMatchedPerson | null> {
+export async function matchPersonByEmail(email: string): Promise<ApolloMatchedPerson | null> {
   const apiKey = getApiKey();
   try {
     const res = await fetch(`${APOLLO_BASE}/people/match`, {

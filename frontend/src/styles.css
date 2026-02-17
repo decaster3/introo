@@ -9043,3 +9043,199 @@ body {
   color: var(--text-primary);
 }
 
+/* ─── Add Contact Button & Modal ──────────────────────────────────────── */
+
+.u-add-contact-btn {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: rgba(91,141,239,0.12);
+  color: #5b8def;
+  border: 1px solid rgba(91,141,239,0.2);
+  border-radius: 0.45rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  margin-left: 0.5rem;
+}
+.u-add-contact-btn:hover {
+  background: rgba(91,141,239,0.22);
+  border-color: rgba(91,141,239,0.35);
+}
+
+.u-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: modalFadeIn 0.15s ease-out;
+}
+@keyframes modalFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.u-modal {
+  position: relative;
+  background: var(--surface-secondary, #1a1d23);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 1rem;
+  padding: 2rem;
+  width: 90%;
+  max-width: 480px;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.5);
+  animation: modalSlideIn 0.2s ease-out;
+}
+@keyframes modalSlideIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.u-modal--add-contact {
+  max-width: 520px;
+}
+.u-modal-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,0.06);
+  border: none;
+  border-radius: 50%;
+  color: var(--text-muted);
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.u-modal-close:hover {
+  background: rgba(255,255,255,0.12);
+  color: var(--text-primary);
+}
+.u-modal-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 0.25rem;
+}
+.u-modal-desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: 0 0 1.25rem;
+  line-height: 1.4;
+}
+.u-modal-desc--success {
+  color: #4ade80;
+}
+.u-modal-input {
+  width: 100%;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.85rem;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 0.5rem;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+.u-modal-input:focus {
+  border-color: rgba(91,141,239,0.5);
+}
+.u-modal-input--readonly {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.u-modal-input::placeholder {
+  color: rgba(255,255,255,0.25);
+}
+.u-modal-error {
+  font-size: 0.78rem;
+  color: #f87171;
+  margin: 0.5rem 0 0;
+}
+.u-modal-submit {
+  width: 100%;
+  padding: 0.65rem;
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: #5b8def;
+  color: white;
+  border: none;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.u-modal-submit:hover:not(:disabled) {
+  background: #4a7ad4;
+}
+.u-modal-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.u-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.u-modal-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+.u-modal-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.u-modal-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: rgba(255,255,255,0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.u-modal-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+.u-modal-actions .u-modal-submit {
+  flex: 1;
+  margin-top: 0;
+}
+.u-modal-btn-secondary {
+  padding: 0.65rem 1.2rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-muted);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.u-modal-btn-secondary:hover {
+  background: rgba(255,255,255,0.1);
+  color: var(--text-primary);
+}
+.u-modal-company-desc {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+.u-modal-company-desc p {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin: 0.35rem 0 0;
+  line-height: 1.5;
+}
+

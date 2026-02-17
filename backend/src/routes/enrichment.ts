@@ -3,6 +3,8 @@ import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import {
   enrichContactsFree,
   enrichOrganizationFree,
+  matchPersonByEmail,
+  enrichOrganization,
   getEnrichmentStats,
   type BatchResult,
 } from '../services/apollo.js';
@@ -188,6 +190,170 @@ router.get('/company/:domain', async (req, res) => {
   } catch (error: any) {
     console.error('Company lookup error:', error.message);
     res.status(500).json({ error: 'Failed to look up company' });
+  }
+});
+
+// ─── Lookup contact by email (for manual add) ────────────────────────────────
+
+router.post('/lookup-contact', async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+    const { email } = req.body as { email?: string };
+
+    if (!email || !email.includes('@')) {
+      res.status(400).json({ error: 'Valid email is required' });
+      return;
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const domain = normalizedEmail.split('@')[1];
+
+    // Check if contact already exists for this user
+    const existing = await prisma.contact.findUnique({
+      where: { userId_email: { userId, email: normalizedEmail } },
+      select: { id: true, name: true, email: true },
+    });
+    if (existing) {
+      res.status(409).json({ error: 'Contact already exists', contactId: existing.id });
+      return;
+    }
+
+    // Enrich person via Apollo
+    const person = await matchPersonByEmail(normalizedEmail).catch(() => null);
+
+    // Enrich company via Apollo (or find in DB)
+    let companyData: Record<string, any> | null = null;
+    const genericDomains = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com', 'mail.ru', 'yandex.ru', 'protonmail.com', 'live.com', 'aol.com'];
+    const isGenericDomain = genericDomains.includes(domain);
+
+    if (!isGenericDomain) {
+      const dbCompany = await prisma.company.findUnique({ where: { domain } });
+      if (dbCompany) {
+        companyData = dbCompany;
+      } else {
+        const org = await enrichOrganization(domain).catch(() => null);
+        if (org && org.name) {
+          companyData = {
+            domain,
+            name: org.name,
+            industry: org.industry || null,
+            employeeCount: org.estimated_num_employees || null,
+            foundedYear: org.founded_year || null,
+            linkedinUrl: org.linkedin_url || null,
+            websiteUrl: org.website_url || null,
+            logo: org.logo_url || null,
+            city: org.city || null,
+            state: org.state || null,
+            country: org.country || null,
+            description: org.short_description || null,
+            annualRevenue: org.annual_revenue ? String(org.annual_revenue) : null,
+            totalFunding: org.total_funding ? String(org.total_funding) : null,
+            lastFundingRound: org.latest_funding_stage || null,
+          };
+        }
+      }
+    }
+
+    const enrichedPerson = person ? {
+      name: person.name || null,
+      title: person.title || null,
+      headline: person.headline || null,
+      linkedinUrl: person.linkedin_url || null,
+      photoUrl: person.photo_url || null,
+      city: person.city || null,
+      country: person.country || null,
+      company: person.organization?.name || null,
+      companyDomain: person.organization?.primary_domain || domain,
+    } : null;
+
+    res.json({
+      person: enrichedPerson,
+      company: companyData,
+      email: normalizedEmail,
+      domain: isGenericDomain ? null : domain,
+      source: person ? 'apollo' : (companyData ? 'partial' : 'none'),
+    });
+  } catch (error: any) {
+    console.error('Lookup contact error:', error.message);
+    res.status(500).json({ error: 'Failed to look up contact' });
+  }
+});
+
+// ─── Save manually added contact ──────────────────────────────────────────────
+
+router.post('/add-contact', async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+    const {
+      email, name, title, linkedinUrl, photoUrl, city, country,
+      companyName, companyDomain, websiteUrl,
+    } = req.body as {
+      email: string; name?: string; title?: string; linkedinUrl?: string;
+      photoUrl?: string; city?: string; country?: string;
+      companyName?: string; companyDomain?: string; websiteUrl?: string;
+    };
+
+    if (!email || !email.includes('@')) {
+      res.status(400).json({ error: 'Valid email is required' });
+      return;
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Check for duplicates
+    const existing = await prisma.contact.findUnique({
+      where: { userId_email: { userId, email: normalizedEmail } },
+    });
+    if (existing) {
+      res.status(409).json({ error: 'Contact already exists', contactId: existing.id });
+      return;
+    }
+
+    // Upsert company if domain provided
+    let companyId: string | null = null;
+    const domain = companyDomain?.trim().toLowerCase();
+    if (domain) {
+      const company = await prisma.company.upsert({
+        where: { domain },
+        update: {
+          ...(companyName && { name: companyName }),
+          ...(websiteUrl && { websiteUrl }),
+        },
+        create: {
+          domain,
+          name: companyName || domain,
+          websiteUrl: websiteUrl || null,
+        },
+      });
+      companyId = company.id;
+    }
+
+    // Create contact
+    const contact = await prisma.contact.create({
+      data: {
+        userId,
+        email: normalizedEmail,
+        name: name || null,
+        title: title || null,
+        linkedinUrl: linkedinUrl || null,
+        photoUrl: photoUrl || null,
+        city: city || null,
+        country: country || null,
+        companyId,
+        isApproved: true,
+        source: 'manual',
+        meetingsCount: 0,
+        lastSeenAt: new Date(),
+      },
+      include: {
+        company: true,
+      },
+    });
+
+    res.json({ contact });
+  } catch (error: any) {
+    console.error('Add contact error:', error.message);
+    res.status(500).json({ error: 'Failed to add contact' });
   }
 });
 

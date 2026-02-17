@@ -149,6 +149,19 @@ export const enrichmentApi = {
     }),
   lookupCompany: (domain: string) =>
     request<{ company: any; source: 'db' | 'apollo' | 'none' }>(`/api/enrichment/company/${encodeURIComponent(domain)}`),
+  lookupContact: (email: string) =>
+    request<{
+      person: { name: string | null; title: string | null; headline: string | null; linkedinUrl: string | null; photoUrl: string | null; city: string | null; country: string | null; company: string | null; companyDomain: string | null } | null;
+      company: { domain: string; name: string; industry: string | null; employeeCount: number | null; city: string | null; country: string | null; description: string | null; websiteUrl: string | null; logo: string | null; [key: string]: unknown } | null;
+      email: string;
+      domain: string | null;
+      source: 'apollo' | 'partial' | 'none';
+    }>('/api/enrichment/lookup-contact', { method: 'POST', body: JSON.stringify({ email }) }),
+  addContact: (data: {
+    email: string; name?: string; title?: string; linkedinUrl?: string; photoUrl?: string;
+    city?: string; country?: string; companyName?: string; companyDomain?: string; websiteUrl?: string;
+  }) =>
+    request<{ contact: any }>('/api/enrichment/add-contact', { method: 'POST', body: JSON.stringify(data) }),
 };
 
 // Intro Requests
