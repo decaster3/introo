@@ -1559,13 +1559,13 @@ export function AIHomePage() {
         } else if (searchQuery) {
           setSearchQuery('');
         } else if (selectedView) {
-          setSelectedView(null);
+          toggleView(selectedView);
         }
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [tagPickerDomain, inlinePanel, searchQuery, selectedView]);
+  }, [tagPickerDomain, inlinePanel, searchQuery, selectedView, toggleView]);
 
   // ─── Actions ────────────────────────────────────────────────────────────────
 
@@ -1599,8 +1599,10 @@ export function AIHomePage() {
         setAccountFilter('all');
         setTableSorts([]);
         setGroupByField(null);
+        setCollapsedGroups(new Set());
         setPeopleSorts([]);
         setPeopleGroupByField(null);
+        setPeopleCollapsedGroups(new Set());
         return null;
       }
       // Restore full state from the saved view
@@ -1618,6 +1620,7 @@ export function AIHomePage() {
         } else {
           setGroupByField(null);
         }
+        setCollapsedGroups(new Set());
         // Restore sidebar filters
         const f = view.filters || {};
         setSidebarFilters({
@@ -1655,9 +1658,11 @@ export function AIHomePage() {
         } else {
           setPeopleGroupByField(null);
         }
+        setPeopleCollapsedGroups(new Set());
       }
       return viewId;
     });
+    setSearchQuery('');
     setExpandedDomain(null);
     setGridPage(0);
   }, [savedViews]);
@@ -2726,17 +2731,20 @@ export function AIHomePage() {
             <div className="sb-bottom-actions">
               <button className="sb-save-search-btn" onClick={() => {
                 const sf = sidebarFilters;
+                const searchTerms = searchQuery.trim() ? searchQuery.trim().toLowerCase().split(/\s+/).filter(w => w.length > 1) : [];
                 let keywords = [
                   ...sf.aiKeywords,
                   ...sf.categories.map(c => c.toLowerCase()),
                   ...(sf.description ? sf.description.toLowerCase().split(/\s+/).filter(w => w.length > 1) : []),
+                  ...searchTerms,
                 ].filter((k, i, arr) => k && arr.indexOf(k) === i);
                 if (keywords.length === 0) keywords = ['custom'];
 
                 const savedFilters = buildViewFilters();
 
                 const titleParts: string[] = [];
-                if (sf.description) titleParts.push(sf.description);
+                if (searchQuery.trim()) titleParts.push(searchQuery.trim());
+                else if (sf.description) titleParts.push(sf.description);
                 else if (sf.aiKeywords.length > 0) titleParts.push(sf.aiKeywords.slice(0, 3).join(', '));
                 else if (sf.categories.length > 0) titleParts.push(sf.categories.join(', '));
                 if (sf.employeeRanges.length > 0) titleParts.push(sf.employeeRanges.join('/') + ' emp');
@@ -3039,8 +3047,10 @@ export function AIHomePage() {
                 const savedFilters = buildViewFilters();
                 const sortRules: ViewSortRule[] = tableSorts.map(s => ({ field: s.field, dir: s.dir }));
                 const groupBy = groupByField ? { field: groupByField, dir: groupByDir } : null;
-                const keywords = sf.aiKeywords.length > 0 ? sf.aiKeywords : ['custom'];
-                viewsApi.create({ title: 'My first view', keywords, filters: savedFilters as Record<string, unknown>, sortRules, groupBy }).then(created => {
+                const promptSearchTerms = searchQuery.trim() ? searchQuery.trim().toLowerCase().split(/\s+/).filter(w => w.length > 1) : [];
+                const keywords = [...(sf.aiKeywords.length > 0 ? sf.aiKeywords : []), ...promptSearchTerms].filter((k, i, arr) => k && arr.indexOf(k) === i);
+                const title = searchQuery.trim() || (sf.aiKeywords.length > 0 ? sf.aiKeywords.slice(0, 3).join(', ') : 'My first view');
+                viewsApi.create({ title, keywords: keywords.length > 0 ? keywords : ['custom'], filters: savedFilters as Record<string, unknown>, sortRules, groupBy }).then(created => {
                   setSavedViews(prev => [...prev, { id: created.id, title: created.title, keywords: created.keywords as string[], filters: created.filters as ViewFilters, sortRules: created.sortRules as ViewSortRule[], groupBy: created.groupBy as { field: string; dir: 'asc' | 'desc' } | null, isActive: true }]);
                   setSelectedView(created.id);
                   setSidebarTab('views');
@@ -3813,7 +3823,7 @@ export function AIHomePage() {
 
             return (
               <>
-                {isPeopleNetworkView && (
+                {isNetworkView && (
                   <div className="u-grid-filter-bar">
                     <label className="u-grid-exclude-label">
                       <input type="checkbox" checked={excludeMyContacts} onChange={e => { setExcludeMyContacts(e.target.checked); setGridPage(0); }} />
