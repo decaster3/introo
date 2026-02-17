@@ -173,8 +173,7 @@ export function AIHomePage() {
   const [viewPromptDismissed, setViewPromptDismissed] = useState(() => !!localStorage.getItem('introo_view_prompt_dismissed'));
   
 
-  // ─── Add contact modal state ─────────────────────────────────────────────────
-  const [addContactOpen, setAddContactOpen] = useState(false);
+  // ─── Add contact panel state ──────────────────────────────────────────────────
   const [addContactStep, setAddContactStep] = useState<'email' | 'form'>('email');
   const [addContactEmail, setAddContactEmail] = useState('');
   const [addContactLoading, setAddContactLoading] = useState(false);
@@ -2023,176 +2022,6 @@ export function AIHomePage() {
         </div>
       )}
 
-      {/* ── Add Contact Modal ──────────────────────────────── */}
-      {addContactOpen && (
-        <div className="u-modal-overlay" onClick={() => setAddContactOpen(false)}>
-          <div className="u-modal u-modal--add-contact" onClick={e => e.stopPropagation()}>
-            <button className="u-modal-close" onClick={() => setAddContactOpen(false)}>×</button>
-
-            {addContactStep === 'email' && (
-              <>
-                <h2 className="u-modal-title">Add a contact</h2>
-                <p className="u-modal-desc">Enter an email to auto-fill their details from Apollo.</p>
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  if (!addContactEmail.trim() || !addContactEmail.includes('@')) {
-                    setAddContactError('Enter a valid email address');
-                    return;
-                  }
-                  setAddContactLoading(true);
-                  setAddContactError(null);
-                  try {
-                    const data = await enrichmentApi.lookupContact(addContactEmail.trim());
-                    setAddContactData(data as any);
-                    setAddForm({
-                      name: data.person?.name || '',
-                      title: data.person?.title || '',
-                      linkedinUrl: data.person?.linkedinUrl || '',
-                      city: data.person?.city || data.company?.city || '',
-                      country: data.person?.country || data.company?.country || '',
-                      companyName: data.company?.name || data.person?.company || '',
-                      companyDomain: data.domain || data.person?.companyDomain || '',
-                      websiteUrl: data.company?.websiteUrl || (data.domain ? `https://${data.domain}` : ''),
-                    });
-                    setAddContactStep('form');
-                  } catch (err: any) {
-                    if (err.message?.includes('already exists')) {
-                      setAddContactError('This contact is already in your network');
-                    } else {
-                      setAddContactError(err.message || 'Lookup failed');
-                    }
-                  } finally {
-                    setAddContactLoading(false);
-                  }
-                }}>
-                  <input
-                    className="u-modal-input"
-                    type="email"
-                    placeholder="name@company.com"
-                    autoFocus
-                    value={addContactEmail}
-                    onChange={e => { setAddContactEmail(e.target.value); setAddContactError(null); }}
-                    onKeyDown={e => { if (e.key === 'Escape') setAddContactOpen(false); }}
-                  />
-                  {addContactError && <p className="u-modal-error">{addContactError}</p>}
-                  <button className="u-modal-submit" type="submit" disabled={addContactLoading}>
-                    {addContactLoading ? 'Looking up...' : 'Look up'}
-                  </button>
-                </form>
-              </>
-            )}
-
-            {addContactStep === 'form' && addContactData && (
-              <>
-                <h2 className="u-modal-title">
-                  {addContactData.source === 'apollo' ? 'Contact found' : addContactData.source === 'partial' ? 'Company found' : 'Manual entry'}
-                </h2>
-                {addContactData.source === 'apollo' && (
-                  <p className="u-modal-desc u-modal-desc--success">Auto-filled from Apollo. Review and save.</p>
-                )}
-                {addContactData.source === 'partial' && (
-                  <p className="u-modal-desc">Company info found. Fill in the person details.</p>
-                )}
-                {addContactData.source === 'none' && (
-                  <p className="u-modal-desc">No data found. Enter details manually.</p>
-                )}
-
-                <form className="u-modal-form" onSubmit={async (e) => {
-                  e.preventDefault();
-                  setAddContactSaving(true);
-                  setAddContactError(null);
-                  try {
-                    await enrichmentApi.addContact({
-                      email: addContactData.email,
-                      name: addForm.name || undefined,
-                      title: addForm.title || undefined,
-                      linkedinUrl: addForm.linkedinUrl || undefined,
-                      city: addForm.city || undefined,
-                      country: addForm.country || undefined,
-                      companyName: addForm.companyName || undefined,
-                      companyDomain: addForm.companyDomain || undefined,
-                      websiteUrl: addForm.websiteUrl || undefined,
-                    });
-                    setAddContactOpen(false);
-                    setIntroToast('Contact added successfully');
-                    setTimeout(() => setIntroToast(null), 3000);
-                    refreshData();
-                  } catch (err: any) {
-                    setAddContactError(err.message || 'Failed to save');
-                  } finally {
-                    setAddContactSaving(false);
-                  }
-                }}>
-                  <div className="u-modal-form-row">
-                    <label className="u-modal-label">Email</label>
-                    <input className="u-modal-input u-modal-input--readonly" value={addContactData.email} readOnly />
-                  </div>
-
-                  <div className="u-modal-form-grid">
-                    <div className="u-modal-form-row">
-                      <label className="u-modal-label">Name</label>
-                      <input className="u-modal-input" placeholder="Full name" value={addForm.name} onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))} autoFocus />
-                    </div>
-                    <div className="u-modal-form-row">
-                      <label className="u-modal-label">Title</label>
-                      <input className="u-modal-input" placeholder="Job title" value={addForm.title} onChange={e => setAddForm(f => ({ ...f, title: e.target.value }))} />
-                    </div>
-                  </div>
-
-                  <div className="u-modal-form-grid">
-                    <div className="u-modal-form-row">
-                      <label className="u-modal-label">Company</label>
-                      <input className="u-modal-input" placeholder="Company name" value={addForm.companyName} onChange={e => setAddForm(f => ({ ...f, companyName: e.target.value }))} />
-                    </div>
-                    <div className="u-modal-form-row">
-                      <label className="u-modal-label">Domain</label>
-                      <input className="u-modal-input" placeholder="company.com" value={addForm.companyDomain} onChange={e => setAddForm(f => ({ ...f, companyDomain: e.target.value }))} />
-                    </div>
-                  </div>
-
-                  <div className="u-modal-form-row">
-                    <label className="u-modal-label">Website</label>
-                    <input className="u-modal-input" placeholder="https://company.com" value={addForm.websiteUrl} onChange={e => setAddForm(f => ({ ...f, websiteUrl: e.target.value }))} />
-                  </div>
-
-                  <div className="u-modal-form-grid">
-                    <div className="u-modal-form-row">
-                      <label className="u-modal-label">City</label>
-                      <input className="u-modal-input" placeholder="City" value={addForm.city} onChange={e => setAddForm(f => ({ ...f, city: e.target.value }))} />
-                    </div>
-                    <div className="u-modal-form-row">
-                      <label className="u-modal-label">Country</label>
-                      <input className="u-modal-input" placeholder="Country" value={addForm.country} onChange={e => setAddForm(f => ({ ...f, country: e.target.value }))} />
-                    </div>
-                  </div>
-
-                  <div className="u-modal-form-row">
-                    <label className="u-modal-label">LinkedIn</label>
-                    <input className="u-modal-input" placeholder="https://linkedin.com/in/..." value={addForm.linkedinUrl} onChange={e => setAddForm(f => ({ ...f, linkedinUrl: e.target.value }))} />
-                  </div>
-
-                  {addContactData.company?.description && (
-                    <div className="u-modal-company-desc">
-                      <span className="u-modal-label">About {addForm.companyName}</span>
-                      <p>{addContactData.company.description}</p>
-                    </div>
-                  )}
-
-                  {addContactError && <p className="u-modal-error">{addContactError}</p>}
-
-                  <div className="u-modal-actions">
-                    <button type="button" className="u-modal-btn-secondary" onClick={() => setAddContactStep('email')}>← Back</button>
-                    <button type="submit" className="u-modal-submit" disabled={addContactSaving}>
-                      {addContactSaving ? 'Saving...' : 'Save contact'}
-                    </button>
-                  </div>
-                </form>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* #1 Network stats splash screen after first sync */}
       {showNetworkSplash && networkSplashData && (
         <div className="ob-splash-overlay" onClick={() => setShowNetworkSplash(false)}>
@@ -3163,7 +2992,7 @@ export function AIHomePage() {
               </button>
               <button
                 className="u-add-contact-btn"
-                onClick={() => { setAddContactOpen(true); setAddContactStep('email'); setAddContactEmail(''); setAddContactError(null); setAddContactData(null); }}
+                onClick={() => { setInlinePanel({ type: 'add-contact' }); setAddContactStep('email'); setAddContactEmail(''); setAddContactError(null); setAddContactData(null); }}
               >
                 + Add
               </button>
@@ -5833,6 +5662,164 @@ export function AIHomePage() {
               </div>
               );
             })()}
+
+            {/* ── Add Contact Panel ── */}
+            {inlinePanel.type === 'add-contact' && (
+              <div className="u-panel-add-contact">
+                <h2 className="u-panel-title" style={{ marginBottom: '0.25rem' }}>Add a contact</h2>
+
+                {addContactStep === 'email' && (
+                  <>
+                    <p className="u-panel-subtitle" style={{ marginBottom: '1.25rem' }}>Enter an email to auto-fill from Apollo.</p>
+                    <form onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!addContactEmail.trim() || !addContactEmail.includes('@')) {
+                        setAddContactError('Enter a valid email address');
+                        return;
+                      }
+                      setAddContactLoading(true);
+                      setAddContactError(null);
+                      try {
+                        const data = await enrichmentApi.lookupContact(addContactEmail.trim());
+                        setAddContactData(data as any);
+                        setAddForm({
+                          name: data.person?.name || '',
+                          title: data.person?.title || '',
+                          linkedinUrl: data.person?.linkedinUrl || '',
+                          city: data.person?.city || data.company?.city || '',
+                          country: data.person?.country || data.company?.country || '',
+                          companyName: data.company?.name || data.person?.company || '',
+                          companyDomain: data.domain || data.person?.companyDomain || '',
+                          websiteUrl: data.company?.websiteUrl || (data.domain ? `https://${data.domain}` : ''),
+                        });
+                        setAddContactStep('form');
+                      } catch (err: any) {
+                        if (err.message?.includes('already exists')) {
+                          setAddContactError('This contact is already in your network');
+                        } else {
+                          setAddContactError(err.message || 'Lookup failed');
+                        }
+                      } finally {
+                        setAddContactLoading(false);
+                      }
+                    }}>
+                      <input
+                        className="u-add-input"
+                        type="email"
+                        placeholder="name@company.com"
+                        autoFocus
+                        value={addContactEmail}
+                        onChange={e => { setAddContactEmail(e.target.value); setAddContactError(null); }}
+                      />
+                      {addContactError && <p className="u-add-error">{addContactError}</p>}
+                      <button className="u-add-submit" type="submit" disabled={addContactLoading}>
+                        {addContactLoading ? 'Looking up...' : 'Look up'}
+                      </button>
+                    </form>
+                  </>
+                )}
+
+                {addContactStep === 'form' && addContactData && (
+                  <>
+                    {addContactData.source === 'apollo' && (
+                      <p className="u-add-status u-add-status--success">Auto-filled from Apollo</p>
+                    )}
+                    {addContactData.source === 'partial' && (
+                      <p className="u-add-status">Company found — fill in person details</p>
+                    )}
+                    {addContactData.source === 'none' && (
+                      <p className="u-add-status">No data found — enter manually</p>
+                    )}
+
+                    <form className="u-add-form" onSubmit={async (e) => {
+                      e.preventDefault();
+                      setAddContactSaving(true);
+                      setAddContactError(null);
+                      try {
+                        await enrichmentApi.addContact({
+                          email: addContactData.email,
+                          name: addForm.name || undefined,
+                          title: addForm.title || undefined,
+                          linkedinUrl: addForm.linkedinUrl || undefined,
+                          city: addForm.city || undefined,
+                          country: addForm.country || undefined,
+                          companyName: addForm.companyName || undefined,
+                          companyDomain: addForm.companyDomain || undefined,
+                          websiteUrl: addForm.websiteUrl || undefined,
+                        });
+                        setInlinePanel(null);
+                        setIntroToast('Contact added successfully');
+                        setTimeout(() => setIntroToast(null), 3000);
+                        refreshData();
+                      } catch (err: any) {
+                        setAddContactError(err.message || 'Failed to save');
+                      } finally {
+                        setAddContactSaving(false);
+                      }
+                    }}>
+                      <div className="u-add-field">
+                        <label className="u-add-label">Email</label>
+                        <input className="u-add-input u-add-input--readonly" value={addContactData.email} readOnly />
+                      </div>
+                      <div className="u-add-row">
+                        <div className="u-add-field">
+                          <label className="u-add-label">Name</label>
+                          <input className="u-add-input" placeholder="Full name" value={addForm.name} onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))} autoFocus />
+                        </div>
+                        <div className="u-add-field">
+                          <label className="u-add-label">Title</label>
+                          <input className="u-add-input" placeholder="Job title" value={addForm.title} onChange={e => setAddForm(f => ({ ...f, title: e.target.value }))} />
+                        </div>
+                      </div>
+                      <div className="u-add-row">
+                        <div className="u-add-field">
+                          <label className="u-add-label">Company</label>
+                          <input className="u-add-input" placeholder="Company name" value={addForm.companyName} onChange={e => setAddForm(f => ({ ...f, companyName: e.target.value }))} />
+                        </div>
+                        <div className="u-add-field">
+                          <label className="u-add-label">Domain</label>
+                          <input className="u-add-input" placeholder="company.com" value={addForm.companyDomain} onChange={e => setAddForm(f => ({ ...f, companyDomain: e.target.value }))} />
+                        </div>
+                      </div>
+                      <div className="u-add-field">
+                        <label className="u-add-label">Website</label>
+                        <input className="u-add-input" placeholder="https://company.com" value={addForm.websiteUrl} onChange={e => setAddForm(f => ({ ...f, websiteUrl: e.target.value }))} />
+                      </div>
+                      <div className="u-add-row">
+                        <div className="u-add-field">
+                          <label className="u-add-label">City</label>
+                          <input className="u-add-input" placeholder="City" value={addForm.city} onChange={e => setAddForm(f => ({ ...f, city: e.target.value }))} />
+                        </div>
+                        <div className="u-add-field">
+                          <label className="u-add-label">Country</label>
+                          <input className="u-add-input" placeholder="Country" value={addForm.country} onChange={e => setAddForm(f => ({ ...f, country: e.target.value }))} />
+                        </div>
+                      </div>
+                      <div className="u-add-field">
+                        <label className="u-add-label">LinkedIn</label>
+                        <input className="u-add-input" placeholder="https://linkedin.com/in/..." value={addForm.linkedinUrl} onChange={e => setAddForm(f => ({ ...f, linkedinUrl: e.target.value }))} />
+                      </div>
+
+                      {addContactData.company?.description && (
+                        <div className="u-add-about">
+                          <span className="u-add-label">About {addForm.companyName}</span>
+                          <p>{addContactData.company.description}</p>
+                        </div>
+                      )}
+
+                      {addContactError && <p className="u-add-error">{addContactError}</p>}
+
+                      <div className="u-add-actions">
+                        <button type="button" className="u-add-btn-back" onClick={() => setAddContactStep('email')}>← Back</button>
+                        <button type="submit" className="u-add-submit" disabled={addContactSaving}>
+                          {addContactSaving ? 'Saving...' : 'Save contact'}
+                        </button>
+                      </div>
+                    </form>
+                  </>
+                )}
+              </div>
+            )}
         </div>
       )}
       </div>{/* end u-layout */}

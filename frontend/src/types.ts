@@ -275,7 +275,7 @@ export interface SavedView {
 export type Hunt = SavedView;
 
 export interface InlinePanel {
-  type: 'person' | 'intro-request' | 'intro-offer' | 'company' | 'space' | 'spaces-manage' | 'connection' | 'connections-manage' | 'network-manage' | 'profile' | 'settings' | 'notifications';
+  type: 'person' | 'intro-request' | 'intro-offer' | 'company' | 'space' | 'spaces-manage' | 'connection' | 'connections-manage' | 'network-manage' | 'profile' | 'settings' | 'notifications' | 'add-contact';
   company?: MergedCompany;
   contact?: DisplayContact | { id: string; name: string; email: string; title?: string; userName?: string };
   spaceId?: string;
