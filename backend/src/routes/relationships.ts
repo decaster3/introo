@@ -326,4 +326,91 @@ router.post('/contacts/approve-all', authMiddleware, async (req, res) => {
   }
 });
 
+// Delete a contact from user's network (Company stays in shared DB)
+router.delete('/contacts/:contactId', authMiddleware, async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+    const { contactId } = req.params;
+
+    const contact = await prisma.contact.findUnique({
+      where: { id: contactId },
+      select: { id: true, userId: true, companyId: true },
+    });
+
+    if (!contact) {
+      res.status(404).json({ error: 'Contact not found' });
+      return;
+    }
+    if (contact.userId !== userId) {
+      res.status(403).json({ error: 'Not your contact' });
+      return;
+    }
+
+    // Delete the contact (meetings cascade automatically)
+    await prisma.contact.delete({ where: { id: contactId } });
+
+    // If this was the last contact at the company for this user, clean up the relationship
+    if (contact.companyId) {
+      const remaining = await prisma.contact.count({
+        where: { userId, companyId: contact.companyId, isApproved: true },
+      });
+      if (remaining === 0) {
+        await prisma.relationship.deleteMany({
+          where: { userId, companyId: contact.companyId },
+        });
+      }
+    }
+
+    res.json({ deleted: true });
+  } catch (error: unknown) {
+    console.error('Error deleting contact:', error);
+    res.status(500).json({ error: 'Failed to delete contact' });
+  }
+});
+
+// Bulk-delete contacts by IDs (Company stays in shared DB)
+router.post('/contacts/delete-bulk', authMiddleware, async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+    const { contactIds } = req.body as { contactIds: string[] };
+
+    if (!contactIds || !Array.isArray(contactIds) || contactIds.length === 0) {
+      res.status(400).json({ error: 'contactIds array is required' });
+      return;
+    }
+
+    // Find all contacts that belong to this user
+    const contacts = await prisma.contact.findMany({
+      where: { id: { in: contactIds }, userId },
+      select: { id: true, companyId: true },
+    });
+
+    if (contacts.length === 0) {
+      res.status(404).json({ error: 'No matching contacts found' });
+      return;
+    }
+
+    const ids = contacts.map(c => c.id);
+    const companyIds = [...new Set(contacts.map(c => c.companyId).filter(Boolean))] as string[];
+
+    // Delete contacts (meetings cascade)
+    await prisma.contact.deleteMany({ where: { id: { in: ids } } });
+
+    // Clean up relationships for companies where no contacts remain
+    for (const companyId of companyIds) {
+      const remaining = await prisma.contact.count({
+        where: { userId, companyId, isApproved: true },
+      });
+      if (remaining === 0) {
+        await prisma.relationship.deleteMany({ where: { userId, companyId } });
+      }
+    }
+
+    res.json({ deleted: contacts.length });
+  } catch (error: unknown) {
+    console.error('Error bulk-deleting contacts:', error);
+    res.status(500).json({ error: 'Failed to delete contacts' });
+  }
+});
+
 export default router;

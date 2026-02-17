@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAppState, useAppActions } from '../store';
-import { API_BASE, calendarApi, requestsApi, notificationsApi, offersApi, tagsApi, emailApi, viewsApi, enrichmentApi, type CalendarAccountInfo } from '../lib/api';
+import { API_BASE, calendarApi, requestsApi, notificationsApi, offersApi, tagsApi, emailApi, viewsApi, enrichmentApi, relationshipsApi, type CalendarAccountInfo } from '../lib/api';
 import { calculateStrength, type SpaceCompany, type DisplayContact, type MergedCompany, type ViewFilters, type SavedView, type ViewSortRule, type InlinePanel } from '../types';
 import { PersonAvatar, CompanyLogo, OnboardingTour } from '../components';
 import { ProfilePanel, SettingsPanel, NotificationsPanel } from '../components/panels';
@@ -11,6 +11,15 @@ import { useSpaceManagement } from '../hooks/useSpaceManagement';
 import { useConnectionManagement } from '../hooks/useConnectionManagement';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function normalizeCompanyName(domain: string): string {
+  const withoutTld = domain.replace(/\.[^.]+$/, '');
+  const base = withoutTld.replace(/\.(co|com|org|net|ac|gov)$/, '');
+  return base
+    .split('.')
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
 
 function getTimeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -83,15 +92,16 @@ export function AIHomePage() {
   type SortDir = 'asc' | 'desc';
 
   // Company fields
-  type SortField = 'name' | 'contacts' | 'strength' | 'employees' | 'location' | 'industry' | 'funding' | 'tags' | 'connectedSince';
+  type SortField = 'name' | 'contacts' | 'strength' | 'employees' | 'location' | 'industry' | 'funding' | 'tags' | 'connectedSince' | 'lastContactDate';
   interface SortRule { field: SortField; dir: SortDir }
   const SORT_FIELD_LABELS: Record<SortField, string> = {
     name: 'Company', contacts: 'Contacts', strength: 'Strength',
     employees: 'Employees', location: 'Location', industry: 'Industry',
     funding: 'Funding', tags: 'Tags', connectedSince: 'Connected Since',
+    lastContactDate: 'Last Contact Date',
   };
-  const ALL_SORT_FIELDS: SortField[] = ['name', 'contacts', 'strength', 'employees', 'location', 'industry', 'funding', 'tags', 'connectedSince'];
-  const DATE_FIELDS = new Set(['connectedSince', 'lastSeen']);
+  const ALL_SORT_FIELDS: SortField[] = ['name', 'contacts', 'strength', 'employees', 'location', 'industry', 'funding', 'tags', 'connectedSince', 'lastContactDate'];
+  const DATE_FIELDS = new Set(['connectedSince', 'lastSeen', 'lastContactDate']);
   const dirLabel = (field: string, dir: 'asc' | 'desc') =>
     DATE_FIELDS.has(field)
       ? (dir === 'asc' ? 'Oldest first' : 'Newest first')
@@ -137,6 +147,8 @@ export function AIHomePage() {
   const [excludeMyContacts, setExcludeMyContacts] = useState(false);
   const [expandedDomain, setExpandedDomain] = useState<string | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [contactsExpanded, setContactsExpanded] = useState(false);
+  const [aboutExpanded, setAboutExpanded] = useState(false);
   const [inlinePanel, setInlinePanel] = useState<InlinePanel | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 768);
   const [sidebarTab, setSidebarTab] = useState<'filters' | 'views'>('filters');
@@ -186,7 +198,11 @@ export function AIHomePage() {
     domain: string | null;
     source: 'apollo' | 'partial' | 'none';
   } | null>(null);
-  const [addForm, setAddForm] = useState({ name: '', title: '', linkedinUrl: '', city: '', country: '', companyName: '', companyDomain: '', websiteUrl: '' });
+  const [addForm, setAddForm] = useState({ name: '', title: '', linkedinUrl: '', city: '', country: '', companyDomain: '' });
+
+  // Delete contact state
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // AI search state
   const [aiParsing, setAiParsing] = useState(false);
@@ -272,6 +288,8 @@ export function AIHomePage() {
     technologies: [] as string[],
     connectedYears: [] as string[],
     connectedMonths: [] as string[],
+    lastContactYears: [] as string[],
+    lastContactMonths: [] as string[],
   });
   const [aiKeywordsLoading, setAiKeywordsLoading] = useState(false);
 
@@ -507,6 +525,7 @@ export function AIHomePage() {
     if (strengthFilter !== 'all') active.add('strength');
     if (sidebarFilters.aiKeywords.length > 0 || sidebarFilters.excludeKeywords.length > 0 || sidebarFilters.description) active.add('description');
     if (sidebarFilters.connectedYears.length > 0 || sidebarFilters.connectedMonths.length > 0) active.add('connected-time');
+    if (sidebarFilters.lastContactYears.length > 0 || sidebarFilters.lastContactMonths.length > 0) active.add('last-contact-time');
     if (sidebarFilters.employeeRanges.length > 0) active.add('employees');
     if (sidebarFilters.country || sidebarFilters.city) active.add('location');
     if (sidebarFilters.fundingRounds.length > 0 || sidebarFilters.fundingRecency !== 'any') active.add('funding');
@@ -580,7 +599,7 @@ export function AIHomePage() {
       const d = c.companyDomain || 'unknown';
       if (!map.has(d)) {
         map.set(d, {
-          domain: d, name: c.company || d,
+          domain: d, name: c.company || normalizeCompanyName(d),
           myContacts: [], spaceContacts: [],
           myCount: 0, spaceCount: 0, totalCount: 0,
           hasStrongConnection: false, bestStrength: 'none',
@@ -877,6 +896,24 @@ export function AIHomePage() {
             });
             if (!hasMatchingContact) filterMatch = false;
           }
+          if (hf.lastContactYears && hf.lastContactYears.length > 0 && filterMatch) {
+            hasAnyFilter = true;
+            const hasMatchingContact = co.myContacts.some(c => {
+              if (!c.lastSeenAt) return false;
+              const y = String(new Date(c.lastSeenAt).getFullYear());
+              return hf.lastContactYears!.includes(y);
+            });
+            if (!hasMatchingContact) filterMatch = false;
+          }
+          if (hf.lastContactMonths && hf.lastContactMonths.length > 0 && filterMatch) {
+            hasAnyFilter = true;
+            const hasMatchingContact = co.myContacts.some(c => {
+              if (!c.lastSeenAt) return false;
+              const m = String(new Date(c.lastSeenAt).getMonth() + 1);
+              return hf.lastContactMonths!.includes(m);
+            });
+            if (!hasMatchingContact) filterMatch = false;
+          }
 
           if (hasAnyFilter && filterMatch) matches = true;
         }
@@ -886,10 +923,10 @@ export function AIHomePage() {
     });
 
     return companies.sort((a, b) => {
-      // Both > mine > space, then by strong > count
-      const sourceOrder = { both: 0, mine: 1, space: 2 };
-      if (sourceOrder[a.source] !== sourceOrder[b.source]) return sourceOrder[a.source] - sourceOrder[b.source];
-      if (a.hasStrongConnection !== b.hasStrongConnection) return a.hasStrongConnection ? -1 : 1;
+      // Default sort: most recently contacted first
+      const aDate = Math.max(...a.myContacts.map(c => new Date(c.lastSeenAt).getTime()).concat(0));
+      const bDate = Math.max(...b.myContacts.map(c => new Date(c.lastSeenAt).getTime()).concat(0));
+      if (aDate !== bDate) return bDate - aDate;
       return b.totalCount - a.totalCount;
     });
   }, [contacts, spaceCompanies, connectionCompanies, savedViews, companyTags]);
@@ -931,6 +968,22 @@ export function AIHomePage() {
           const m = String(d.getMonth() + 1); // 1-indexed
           const yearOk = sf.connectedYears.length === 0 || sf.connectedYears.includes(y);
           const monthOk = sf.connectedMonths.length === 0 || sf.connectedMonths.includes(m);
+          return yearOk && monthOk;
+        })
+      );
+    }
+
+    // Filter by last contact date (year/month tags) — uses lastSeenAt (most recent meeting)
+    if (sf.lastContactYears.length > 0 || sf.lastContactMonths.length > 0) {
+      result = result.filter(c =>
+        c.myContacts.some(mc => {
+          if (!mc.lastSeenAt) return false;
+          const d = new Date(mc.lastSeenAt);
+          if (isNaN(d.getTime())) return false;
+          const y = String(d.getFullYear());
+          const m = String(d.getMonth() + 1);
+          const yearOk = sf.lastContactYears.length === 0 || sf.lastContactYears.includes(y);
+          const monthOk = sf.lastContactMonths.length === 0 || sf.lastContactMonths.includes(m);
           return yearOk && monthOk;
         })
       );
@@ -1082,6 +1135,11 @@ export function AIHomePage() {
           const dates = c.myContacts.map(ct => ct.firstSeenAt).filter((d): d is string => !!d);
           if (dates.length === 0) return '\uffff';
           return dates.sort()[0];
+        }
+        case 'lastContactDate': {
+          const dates = c.myContacts.map(ct => ct.lastSeenAt).filter((d): d is string => !!d);
+          if (dates.length === 0) return '\uffff';
+          return dates.sort().reverse()[0];
         }
         default: return 0;
       }
@@ -1236,8 +1294,8 @@ export function AIHomePage() {
   // Reset page when filters change
   useEffect(() => { setGridPage(0); }, [filteredCompanies.length, excludeMyContacts, entityTab]);
 
-  // Reset history expand when switching companies
-  useEffect(() => { setHistoryExpanded(false); }, [inlinePanel]);
+  // Reset expand / menu states when switching panels
+  useEffect(() => { setHistoryExpanded(false); setContactsExpanded(false); setAboutExpanded(false); setDeleteConfirmId(null); setDeletingId(null); }, [inlinePanel]);
 
   // View match counts
   // Dynamic country list from enriched data
@@ -1331,6 +1389,7 @@ export function AIHomePage() {
     if (sf.revenueRanges.length > 0) n++;
     if (sf.technologies.length > 0) n++;
     if (sf.connectedYears.length > 0 || sf.connectedMonths.length > 0) n++;
+    if (sf.lastContactYears.length > 0 || sf.lastContactMonths.length > 0) n++;
     if (tagFilter.length > 0) n++;
     return n;
   }, [searchQuery, sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, sidebarFilters, tagFilter]);
@@ -1343,6 +1402,23 @@ export function AIHomePage() {
     contacts.forEach(c => {
       if (!c.firstSeenAt) return;
       const d = new Date(c.firstSeenAt);
+      if (isNaN(d.getTime())) return;
+      const y = String(d.getFullYear());
+      const m = String(d.getMonth() + 1);
+      yearCounts[y] = (yearCounts[y] || 0) + 1;
+      monthCounts[m] = (monthCounts[m] || 0) + 1;
+    });
+    const years = Object.keys(yearCounts).sort();
+    return { yearCounts, monthCounts, years };
+  }, [contacts]);
+
+  // Compute year/month counts from contacts for "Last contact date" filter
+  const lastContactStats = useMemo(() => {
+    const yearCounts: Record<string, number> = {};
+    const monthCounts: Record<string, number> = {};
+    contacts.forEach(c => {
+      if (!c.lastSeenAt) return;
+      const d = new Date(c.lastSeenAt);
       if (isNaN(d.getTime())) return;
       const y = String(d.getFullYear());
       const m = String(d.getMonth() + 1);
@@ -1372,6 +1448,8 @@ export function AIHomePage() {
     if (sf.technologies.length > 0) filters.technologies = [...sf.technologies];
     if (sf.connectedYears.length > 0) filters.connectedYears = [...sf.connectedYears];
     if (sf.connectedMonths.length > 0) filters.connectedMonths = [...sf.connectedMonths];
+    if (sf.lastContactYears.length > 0) filters.lastContactYears = [...sf.lastContactYears];
+    if (sf.lastContactMonths.length > 0) filters.lastContactMonths = [...sf.lastContactMonths];
     if (sourceFilter !== 'all') filters.sourceFilter = sourceFilter;
     if (strengthFilter !== 'all') filters.strengthFilter = strengthFilter;
     if (tagFilter.length > 0) filters.tagFilter = [...tagFilter];
@@ -1417,6 +1495,8 @@ export function AIHomePage() {
       technologies: [],
       connectedYears: [],
       connectedMonths: [],
+      lastContactYears: [],
+      lastContactMonths: [],
     });
     setTagFilter([]);
   }, []);
@@ -1545,6 +1625,7 @@ export function AIHomePage() {
       (sf.city ? 1 : 0) +
       (tagFilter.length > 0 ? 1 : 0) +
       (sf.connectedYears.length > 0 || sf.connectedMonths.length > 0 ? 1 : 0) +
+      (sf.lastContactYears.length > 0 || sf.lastContactMonths.length > 0 ? 1 : 0) +
       (sf.foundedFrom ? 1 : 0) +
       (sf.foundedTo ? 1 : 0);
     const shouldShow = specificFilterCount >= 2 || (specificFilterCount >= 1 && activeFilterCount >= 3);
@@ -1579,6 +1660,8 @@ export function AIHomePage() {
           technologies: [],
           connectedYears: [],
           connectedMonths: [],
+          lastContactYears: [],
+          lastContactMonths: [],
         });
         setSourceFilter('all');
         setStrengthFilter('all');
@@ -1629,6 +1712,8 @@ export function AIHomePage() {
           technologies: f.technologies || [],
           connectedYears: f.connectedYears || [],
           connectedMonths: f.connectedMonths || [],
+          lastContactYears: f.lastContactYears || [],
+          lastContactMonths: f.lastContactMonths || [],
         });
         setSourceFilter((f.sourceFilter as 'all' | 'mine' | 'spaces' | 'both') || 'all');
         setStrengthFilter((f.strengthFilter as 'all' | 'strong' | 'medium' | 'weak') || 'all');
@@ -2225,8 +2310,8 @@ export function AIHomePage() {
               </div>
             </SidebarSection>
 
-            {/* ── Source ── */}
-            <SidebarSection id="source" icon="📂" title="Source">
+            {/* ── Source & Network ── */}
+            <SidebarSection id="source" icon="📂" title="Source & Network">
               <div className="sb-chips">
                 {([
                   { key: 'all', label: 'All', count: stats.total },
@@ -2265,10 +2350,7 @@ export function AIHomePage() {
                   })}
                 </div>
               )}
-            </SidebarSection>
 
-            {/* ── My Network (spaces + connections) ── */}
-            <SidebarSection id="network" icon="🌐" title="My Network">
               {/* Spaces */}
               {spaces.length > 0 && (
                 <div className="sb-spaces-list">
@@ -2321,10 +2403,6 @@ export function AIHomePage() {
                     </div>
                   ))}
                 </div>
-              )}
-
-              {spaces.length === 0 && connections.filter(c => c.status === 'accepted').length === 0 && (
-                <p className="sb-empty-hint">No spaces or connections yet.</p>
               )}
             </SidebarSection>
 
@@ -2542,6 +2620,61 @@ export function AIHomePage() {
               </div>
             </SidebarSection>
 
+            {/* ── Last contact date (year/month tags) ── */}
+            <SidebarSection id="last-contact-time" icon="🕐" title="Last contact date">
+              <div className="sb-chips-group">
+                <span className="sb-chips-label">Year</span>
+                <div className="sb-chips">
+                  {lastContactStats.years.map(y => (
+                    <button
+                      key={y}
+                      className={`sb-chip sb-chip--time ${sidebarFilters.lastContactYears.includes(y) ? 'active' : ''}`}
+                      onClick={() => setSidebarFilters(prev => ({
+                        ...prev,
+                        lastContactYears: prev.lastContactYears.includes(y)
+                          ? prev.lastContactYears.filter(v => v !== y)
+                          : [...prev.lastContactYears, y],
+                      }))}
+                    >
+                      {y} <span className="sb-chip-count">{lastContactStats.yearCounts[y]}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="sb-chips-group">
+                <span className="sb-chips-label">Month</span>
+                <div className="sb-chips">
+                  {[
+                    { label: 'Jan', value: '1' },
+                    { label: 'Feb', value: '2' },
+                    { label: 'Mar', value: '3' },
+                    { label: 'Apr', value: '4' },
+                    { label: 'May', value: '5' },
+                    { label: 'Jun', value: '6' },
+                    { label: 'Jul', value: '7' },
+                    { label: 'Aug', value: '8' },
+                    { label: 'Sep', value: '9' },
+                    { label: 'Oct', value: '10' },
+                    { label: 'Nov', value: '11' },
+                    { label: 'Dec', value: '12' },
+                  ].map(m => (
+                    <button
+                      key={m.value}
+                      className={`sb-chip sb-chip--time ${sidebarFilters.lastContactMonths.includes(m.value) ? 'active' : ''}`}
+                      onClick={() => setSidebarFilters(prev => ({
+                        ...prev,
+                        lastContactMonths: prev.lastContactMonths.includes(m.value)
+                          ? prev.lastContactMonths.filter(v => v !== m.value)
+                          : [...prev.lastContactMonths, m.value],
+                      }))}
+                    >
+                      {m.label} {lastContactStats.monthCounts[m.value] ? <span className="sb-chip-count">{lastContactStats.monthCounts[m.value]}</span> : null}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </SidebarSection>
+
             {/* ── Employee count ── */}
             <SidebarSection id="employees" icon="👥" title="Employee count">
               <div className="sb-chips">
@@ -2741,6 +2874,17 @@ export function AIHomePage() {
               )}
             </SidebarSection>
           </div>
+          {/* Docs CTA when no filters active */}
+          {activeFilterCount === 0 && !groupByField && tableSorts.length === 0 && (
+            <a className="sb-docs-cta" href="/docs#filters" target="_blank" rel="noopener noreferrer">
+              <span className="sb-docs-cta-icon">📖</span>
+              <div className="sb-docs-cta-text">
+                <span className="sb-docs-cta-title">Learn how to use filters</span>
+                <span className="sb-docs-cta-desc">Tags, views, and CRM workflows</span>
+              </div>
+              <span className="sb-docs-cta-arrow">→</span>
+            </a>
+          )}
           {/* Bottom actions — Save as View + Clear all */}
           {(activeFilterCount > 0 || groupByField || tableSorts.length > 0) && (
             <div className="sb-bottom-actions">
@@ -2992,7 +3136,7 @@ export function AIHomePage() {
               </button>
               <button
                 className="u-add-contact-btn"
-                onClick={() => { setInlinePanel({ type: 'add-contact' }); setAddContactStep('email'); setAddContactEmail(''); setAddContactError(null); setAddContactData(null); }}
+                onClick={() => { setInlinePanel({ type: 'add-contact' }); setAddContactStep('email'); setAddContactEmail(''); setAddContactError(null); setAddContactData(null); setAddContactLoading(false); setAddContactSaving(false); }}
               >
                 + Add
               </button>
@@ -3375,6 +3519,13 @@ export function AIHomePage() {
                     const earliest = new Date(dates.sort()[0]);
                     if (isNaN(earliest.getTime())) return 'Unknown';
                     return `${MONTH_NAMES[earliest.getMonth()]} ${earliest.getFullYear()}`;
+                  }
+                  case 'lastContactDate': {
+                    const dates = c.myContacts.map(ct => ct.lastSeenAt).filter((d): d is string => !!d);
+                    if (dates.length === 0) return 'Unknown';
+                    const latest = new Date(dates.sort().reverse()[0]);
+                    if (isNaN(latest.getTime())) return 'Unknown';
+                    return `${MONTH_NAMES[latest.getMonth()]} ${latest.getFullYear()}`;
                   }
                   default: return '';
                 }
@@ -3962,6 +4113,47 @@ export function AIHomePage() {
               const isInNetwork = isMyContact || connections.some(conn => conn.peer.email === c.email && conn.status === 'accepted');
               return (
               <div className="u-panel-person">
+                {dc && (
+                  <div className="u-panel-menu-wrap">
+                    <button className="u-panel-menu-trigger" onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(deleteConfirmId === 'person' ? null : 'person'); }}>···</button>
+                    {deleteConfirmId === 'person' && (
+                      <div className="u-contact-menu">
+                        <button
+                          className="u-contact-menu-item u-contact-menu-item--danger"
+                          disabled={deletingId === 'person'}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            setDeletingId('person');
+                            try {
+                              await relationshipsApi.deleteContact(c.id);
+                              setDeleteConfirmId(null);
+                              if (co) {
+                                const remaining = co.myContacts.filter(mc => mc.id !== c.id);
+                                if (remaining.length > 0) {
+                                  setInlinePanel({ type: 'company', company: { ...co, myContacts: remaining, myCount: remaining.length, totalCount: remaining.length + co.spaceCount } });
+                                } else {
+                                  setInlinePanel(null);
+                                }
+                              } else {
+                                setInlinePanel(null);
+                              }
+                              setIntroToast('Contact removed');
+                              setTimeout(() => setIntroToast(null), 3000);
+                              refreshData();
+                            } catch {
+                              setIntroToast('Failed to remove contact');
+                              setTimeout(() => setIntroToast(null), 3000);
+                            } finally {
+                              setDeletingId(null);
+                            }
+                          }}
+                        >
+                          {deletingId === 'person' ? 'Removing...' : 'Delete contact'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {inlinePanel.fromPeopleTab && (
                   <button className="u-panel-breadcrumb" onClick={() => setInlinePanel(null)}>
                     ← People
@@ -4105,7 +4297,47 @@ export function AIHomePage() {
               const co = inlinePanel.company;
               const fromSpaceForCompany = inlinePanel.fromSpaceId ? spaces.find(s => s.id === inlinePanel.fromSpaceId) : null;
               return (
-              <div className="u-panel-company">
+              <div className="u-panel-company" onClick={() => { if (deleteConfirmId) setDeleteConfirmId(null); }}>
+                {co.myCount > 0 && (
+                  <div className="u-panel-menu-wrap">
+                    <button className="u-panel-menu-trigger" onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(deleteConfirmId === 'company' ? null : 'company'); }}>···</button>
+                    {deleteConfirmId === 'company' && (
+                      <div className="u-contact-menu">
+                        <button
+                          className="u-contact-menu-item u-contact-menu-item--danger"
+                          disabled={deletingId === 'company'}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            setDeletingId('company');
+                            try {
+                              await relationshipsApi.deleteContacts(co.myContacts.map(c => c.id));
+                              setDeleteConfirmId(null);
+                              setInlinePanel(null);
+                              setIntroToast(`${co.name} removed from your network`);
+                              setTimeout(() => setIntroToast(null), 3000);
+                              refreshData();
+                            } catch {
+                              setIntroToast('Failed to remove');
+                              setTimeout(() => setIntroToast(null), 3000);
+                            } finally {
+                              setDeletingId(null);
+                            }
+                          }}
+                        >
+                          {deletingId === 'company' ? 'Removing...' : `Delete company including ${co.myCount} contact${co.myCount > 1 ? 's' : ''}`}
+                        </button>
+                        {co.spaceCount > 0 && (
+                          <button
+                            className="u-contact-menu-item"
+                            onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(null); openIntroPanel(co, undefined, inlinePanel.fromSpaceId || undefined); }}
+                          >
+                            ✨ Request Intro
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {inlinePanel.fromProfile && (
                   <button className="u-panel-breadcrumb" onClick={() => setInlinePanel({ type: 'profile' })}>
                     ← My Profile
@@ -4132,49 +4364,6 @@ export function AIHomePage() {
                     <button className="ob-tag-tip-dismiss" onClick={() => setShowTagTip(false)}>Got it</button>
                   </div>
                 )}
-
-                {/* Quick stats */}
-                {(() => {
-                  const totalMeetings = co.myContacts.reduce((sum, c) => sum + (c.meetingsCount || 0), 0);
-                  return (
-                    <div className="u-panel-company-stats">
-                      <div className="u-panel-stat">
-                        <span className="u-panel-stat-value">{co.totalCount}</span>
-                        <span className="u-panel-stat-label">Contacts</span>
-                      </div>
-                      {totalMeetings > 0 && (
-                        <div className="u-panel-stat">
-                          <span className="u-panel-stat-value">{totalMeetings}</span>
-                          <span className="u-panel-stat-label">Meetings</span>
-                        </div>
-                      )}
-                      {co.employeeCount && (
-                        <div className="u-panel-stat">
-                          <span className="u-panel-stat-value">{co.employeeCount.toLocaleString()}</span>
-                          <span className="u-panel-stat-label">Employees</span>
-                        </div>
-                      )}
-                      {co.foundedYear && (
-                        <div className="u-panel-stat">
-                          <span className="u-panel-stat-value">{co.foundedYear}</span>
-                          <span className="u-panel-stat-label">Founded</span>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-
-                {/* Links — always show */}
-                <div className="u-panel-links">
-                  <a href={`https://${co.domain}`} target="_blank" rel="noopener noreferrer" className="u-panel-link-btn">
-                    Website
-                  </a>
-                  {co.linkedinUrl && (
-                    <a href={co.linkedinUrl} target="_blank" rel="noopener noreferrer" className="u-panel-link-btn">
-                      LinkedIn
-                    </a>
-                  )}
-                </div>
 
                 {/* Tags */}
                 <div className="u-panel-tags">
@@ -4241,11 +4430,67 @@ export function AIHomePage() {
                   </div>
                 </div>
 
+                {/* Quick stats */}
+                {(() => {
+                  const totalMeetings = co.myContacts.reduce((sum, c) => sum + (c.meetingsCount || 0), 0);
+                  return (
+                    <div className="u-panel-company-stats">
+                      <div className="u-panel-stat">
+                        <span className="u-panel-stat-value">{co.totalCount}</span>
+                        <span className="u-panel-stat-label">Contacts</span>
+                      </div>
+                      {totalMeetings > 0 && (
+                        <div className="u-panel-stat">
+                          <span className="u-panel-stat-value">{totalMeetings}</span>
+                          <span className="u-panel-stat-label">Meetings</span>
+                        </div>
+                      )}
+                      {co.employeeCount && (
+                        <div className="u-panel-stat">
+                          <span className="u-panel-stat-value">{co.employeeCount.toLocaleString()}</span>
+                          <span className="u-panel-stat-label">Employees</span>
+                        </div>
+                      )}
+                      {co.foundedYear && (
+                        <div className="u-panel-stat">
+                          <span className="u-panel-stat-value">{co.foundedYear}</span>
+                          <span className="u-panel-stat-label">Founded</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Links */}
+                {co.spaceCount > 0 && (
+                  <div className="u-panel-links">
+                    <button className="u-panel-link-btn u-panel-link-btn--intro" onClick={() => openIntroPanel(co, undefined, inlinePanel.fromSpaceId || undefined)}>
+                      ✨ Request Intro
+                    </button>
+                    <a className="u-panel-intro-learn" href="/docs#intros" target="_blank" rel="noopener noreferrer">How intros work →</a>
+                  </div>
+                )}
+                <div className="u-panel-links">
+                  <a href={`https://${co.domain}`} target="_blank" rel="noopener noreferrer" className="u-panel-link-btn">
+                    Website
+                  </a>
+                  {co.linkedinUrl && (
+                    <a href={co.linkedinUrl} target="_blank" rel="noopener noreferrer" className="u-panel-link-btn">
+                      LinkedIn
+                    </a>
+                  )}
+                </div>
+
                 {/* Description */}
                 {co.description && (
                   <div className="u-panel-section">
                     <h4 className="u-panel-section-h">About</h4>
-                    <p className="u-panel-section-text">{co.description}</p>
+                    <p className={`u-panel-section-text ${aboutExpanded ? '' : 'u-panel-section-text--clamped'}`}>{co.description}</p>
+                    {co.description.length > 120 && (
+                      <button className="u-panel-history-toggle" onClick={() => setAboutExpanded(!aboutExpanded)}>
+                        {aboutExpanded ? 'Show less' : 'Show more'}
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -4356,35 +4601,82 @@ export function AIHomePage() {
                   </div>
                 )}
 
-                {co.myContacts.length > 0 && (
+                {co.myContacts.length > 0 && (() => {
+                  const visibleContacts = contactsExpanded ? co.myContacts : co.myContacts.slice(0, 5);
+                  const hasMoreContacts = co.myContacts.length > 5;
+                  return (
                   <div className="u-panel-section">
                     <h4 className="u-panel-section-h">Your contacts ({co.myContacts.length})</h4>
                     <div className="u-panel-contact-list">
-                      {co.myContacts.map(c => (
-                        <div key={c.id} className="u-panel-contact-row" onClick={() => setInlinePanel({ type: 'person', contact: c, company: co, fromSpaceId: inlinePanel.fromSpaceId })}>
-                          <PersonAvatar email={c.email} name={c.name} avatarUrl={c.photoUrl} size={28} />
-                          <div className="u-panel-contact-info">
-                            <span className="u-panel-contact-name">{c.name}</span>
-                            <span className="u-panel-contact-title">{c.title || c.email}</span>
+                      {visibleContacts.map(c => (
+                        <div key={c.id} className="u-panel-contact-row">
+                          <div className="u-panel-contact-row-main" onClick={() => setInlinePanel({ type: 'person', contact: c, company: co, fromSpaceId: inlinePanel.fromSpaceId })}>
+                            <PersonAvatar email={c.email} name={c.name} avatarUrl={c.photoUrl} size={28} />
+                            <div className="u-panel-contact-info">
+                              <span className="u-panel-contact-name">{c.name}</span>
+                              <span className="u-panel-contact-title">{c.title || c.email}</span>
+                            </div>
+                            <span className={`u-strength u-strength--${c.connectionStrength}`}>{c.connectionStrength}</span>
                           </div>
-                          <span className={`u-strength u-strength--${c.connectionStrength}`}>{c.connectionStrength}</span>
+                          <div className="u-contact-menu-wrap">
+                            <button className="u-contact-menu-trigger" onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(deleteConfirmId === c.id ? null : c.id); }}>···</button>
+                            {deleteConfirmId === c.id && (
+                              <div className="u-contact-menu">
+                                <button
+                                  className="u-contact-menu-item u-contact-menu-item--danger"
+                                  disabled={deletingId === c.id}
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    setDeletingId(c.id);
+                                    try {
+                                      await relationshipsApi.deleteContact(c.id);
+                                      setDeleteConfirmId(null);
+                                      setIntroToast('Contact removed');
+                                      setTimeout(() => setIntroToast(null), 3000);
+                                      refreshData();
+                                      const remaining = co.myContacts.filter(mc => mc.id !== c.id);
+                                      if (remaining.length > 0) {
+                                        setInlinePanel({ type: 'company', company: { ...co, myContacts: remaining, myCount: remaining.length, totalCount: remaining.length + co.spaceCount } });
+                                      } else {
+                                        setInlinePanel(null);
+                                      }
+                                    } catch {
+                                      setIntroToast('Failed to remove contact');
+                                      setTimeout(() => setIntroToast(null), 3000);
+                                    } finally {
+                                      setDeletingId(null);
+                                    }
+                                  }}
+                                >
+                                  {deletingId === c.id ? 'Removing...' : 'Delete'}
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
+                    {hasMoreContacts && (
+                      <button className="u-panel-history-toggle" onClick={() => setContactsExpanded(!contactsExpanded)}>
+                        {contactsExpanded ? 'Show less' : `Show all ${co.myContacts.length} contacts`}
+                      </button>
+                    )}
+                  </div>
+                  );
+                })()}
+
+                {/* Request Intro CTA */}
+                {co.spaceCount > 0 && (
+                  <div className="u-panel-section u-panel-intro-section">
+                    <h4 className="u-panel-section-h">Request an Intro</h4>
+                    <p className="u-panel-intro-desc">Someone in your network knows people at {co.name}. Request an intro and we'll connect you via email.</p>
+                    <button className="u-panel-link-btn u-panel-link-btn--intro" onClick={() => openIntroPanel(co, undefined, inlinePanel.fromSpaceId || undefined)}>
+                      ✨ Request Intro
+                    </button>
+                    <a className="u-panel-intro-learn" href="/docs#intros" target="_blank" rel="noopener noreferrer">How intros work →</a>
                   </div>
                 )}
 
-                {/* Actions */}
-                <div className="u-panel-actions">
-                  {co.spaceCount > 0 && (
-                    <button className="u-primary-btn" onClick={() => openIntroPanel(co, undefined, inlinePanel.fromSpaceId || undefined)}>
-                      ✨ Request Intro
-                    </button>
-                  )}
-                  <button className="u-action-btn" onClick={() => window.open(`https://${co.domain}`, '_blank')}>
-                    🌐 Visit
-                  </button>
-                </div>
               </div>
               );
             })()}
@@ -5031,6 +5323,11 @@ export function AIHomePage() {
                       {joinStatus.message}
                     </div>
                   )}
+                  <a className="u-panel-docs-cta" href="/docs#spaces" target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+                    <span className="u-panel-docs-cta-icon">📖</span>
+                    <span className="u-panel-docs-cta-text">Learn how Spaces work</span>
+                    <span className="u-panel-docs-cta-arrow">→</span>
+                  </a>
                 </div>
 
                 {/* 1:1 Connections section */}
@@ -5039,12 +5336,14 @@ export function AIHomePage() {
                   <div className="u-panel-spaces-list">
                     {connections.filter(c => c.status === 'accepted').map(c => {
                       const connReqCount = incomingRequests.filter(r => r.requester.id === c.peer.id && r.status === 'open' && !dismissedRequestIds.has(r.id)).length;
+                      const connCompanies = connectionCompanies.filter(cc => cc.connectionId === c.id);
+                      const connContactCount = connCompanies.reduce((sum, cc) => sum + cc.contactCount, 0);
                       return (
                         <div key={c.id} className="u-panel-space-card" onClick={() => setInlinePanel({ type: 'connection', connectionId: c.id })}>
                           <PersonAvatar email={c.peer.email} name={c.peer.name} avatarUrl={c.peer.avatar} size={32} />
                           <div className="u-panel-space-card-info">
                             <span className="u-panel-space-card-name">{c.peer.name}</span>
-                            <span className="u-panel-space-card-stats">{c.peer.email}</span>
+                            <span className="u-panel-space-card-stats">{connCompanies.length} companies · {connContactCount} contacts</span>
                           </div>
                           {connReqCount > 0 && (
                             <span className="u-panel-space-notif">{connReqCount} {connReqCount === 1 ? 'request' : 'requests'}</span>
@@ -5064,7 +5363,10 @@ export function AIHomePage() {
                           <PersonAvatar email={c.peer.email} name={c.peer.name} avatarUrl={c.peer.avatar} size={32} />
                           <div className="u-panel-space-card-info">
                             <span className="u-panel-space-card-name">{c.peer.name}</span>
-                            <span className="u-panel-space-card-stats">{c.direction === 'sent' ? 'Waiting for response' : 'Wants to connect'}</span>
+                            <span className="u-panel-space-card-stats">
+                              {c.direction === 'sent' ? 'Waiting for response' : 'Wants to connect'}
+                              {(c.peerCompanyCount || 0) > 0 && <> · {c.peerCompanyCount} companies · {c.peerContactCount} contacts</>}
+                            </span>
                           </div>
                           {c.direction === 'received' ? (
                             <div style={{ display: 'flex', gap: '0.3rem', flexShrink: 0 }}>
@@ -5100,6 +5402,11 @@ export function AIHomePage() {
                     <button className="sb-space-action-btn primary" style={{ marginTop: '0.35rem', width: '100%' }} onClick={() => sendConnectionRequest(connectEmail)} disabled={!connectEmail.trim()}>+ Connect</button>
                     <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.3)', marginTop: '0.35rem', display: 'block', lineHeight: 1.4 }}>Works with anyone — if they're not on Introo yet, we'll send them an invite.</span>
                   </div>
+                  <a className="u-panel-docs-cta" href="/docs#connections" target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+                    <span className="u-panel-docs-cta-icon">📖</span>
+                    <span className="u-panel-docs-cta-text">Learn how 1:1 Connections work</span>
+                    <span className="u-panel-docs-cta-arrow">→</span>
+                  </a>
                 </div>
               </div>
             )}
@@ -5688,9 +5995,7 @@ export function AIHomePage() {
                           linkedinUrl: data.person?.linkedinUrl || '',
                           city: data.person?.city || data.company?.city || '',
                           country: data.person?.country || data.company?.country || '',
-                          companyName: data.company?.name || data.person?.company || '',
-                          companyDomain: data.domain || data.person?.companyDomain || '',
-                          websiteUrl: data.company?.websiteUrl || (data.domain ? `https://${data.domain}` : ''),
+                          companyDomain: data.domain || '',
                         });
                         setAddContactStep('form');
                       } catch (err: any) {
@@ -5733,21 +6038,87 @@ export function AIHomePage() {
 
                     <form className="u-add-form" onSubmit={async (e) => {
                       e.preventDefault();
+                      if (!addForm.companyDomain) {
+                        setAddContactError('Company website is required');
+                        return;
+                      }
                       setAddContactSaving(true);
                       setAddContactError(null);
                       try {
-                        await enrichmentApi.addContact({
+                        const result = await enrichmentApi.addContact({
                           email: addContactData.email,
                           name: addForm.name || undefined,
                           title: addForm.title || undefined,
                           linkedinUrl: addForm.linkedinUrl || undefined,
+                          photoUrl: addContactData.person?.photoUrl || undefined,
+                          headline: addContactData.person?.headline || undefined,
                           city: addForm.city || undefined,
                           country: addForm.country || undefined,
-                          companyName: addForm.companyName || undefined,
                           companyDomain: addForm.companyDomain || undefined,
-                          websiteUrl: addForm.websiteUrl || undefined,
                         });
-                        setInlinePanel(null);
+                        const c = result.contact;
+                        const domain = c.company?.domain || addForm.companyDomain || '';
+                        const savedContact: DisplayContact = {
+                          id: c.id,
+                          name: c.name || c.email.split('@')[0],
+                          email: c.email,
+                          title: c.title || '',
+                          company: c.company?.name || '',
+                          companyDomain: domain,
+                          lastSeenAt: c.lastSeenAt,
+                          meetingsCount: c.meetingsCount || 0,
+                          connectionStrength: 'weak' as const,
+                          linkedinUrl: c.linkedinUrl,
+                          photoUrl: c.photoUrl,
+                          headline: c.headline,
+                          city: c.city,
+                          country: c.country,
+                          meetings: [],
+                          sourceAccountEmails: [],
+                          companyData: c.company ? {
+                            id: c.company.id,
+                            employeeCount: c.company.employeeCount,
+                            foundedYear: c.company.foundedYear,
+                            annualRevenue: c.company.annualRevenue,
+                            totalFunding: c.company.totalFunding,
+                            lastFundingRound: c.company.lastFundingRound,
+                            lastFundingDate: c.company.lastFundingDate,
+                            city: c.company.city,
+                            country: c.company.country,
+                            industry: c.company.industry,
+                            description: c.company.description,
+                            linkedinUrl: c.company.linkedinUrl,
+                            enrichedAt: c.company.enrichedAt,
+                          } : undefined,
+                        };
+                        if (c.company && domain) {
+                          const savedCompany: MergedCompany = {
+                            domain,
+                            name: c.company.name || normalizeCompanyName(domain),
+                            myContacts: [savedContact],
+                            spaceContacts: [],
+                            myCount: 1, spaceCount: 0, totalCount: 1,
+                            hasStrongConnection: false, bestStrength: 'weak',
+                            source: 'mine',
+                            matchingViews: [], spaceIds: [], connectionIds: [],
+                            id: c.company.id,
+                            employeeCount: c.company.employeeCount,
+                            foundedYear: c.company.foundedYear,
+                            annualRevenue: c.company.annualRevenue,
+                            totalFunding: c.company.totalFunding,
+                            lastFundingRound: c.company.lastFundingRound,
+                            lastFundingDate: c.company.lastFundingDate,
+                            city: c.company.city,
+                            country: c.company.country,
+                            industry: c.company.industry,
+                            description: c.company.description,
+                            linkedinUrl: c.company.linkedinUrl,
+                            enrichedAt: c.company.enrichedAt,
+                          };
+                          setInlinePanel({ type: 'company', company: savedCompany });
+                        } else {
+                          setInlinePanel({ type: 'person', contact: savedContact });
+                        }
                         setIntroToast('Contact added successfully');
                         setTimeout(() => setIntroToast(null), 3000);
                         refreshData();
@@ -5757,60 +6128,75 @@ export function AIHomePage() {
                         setAddContactSaving(false);
                       }
                     }}>
-                      <div className="u-add-field">
-                        <label className="u-add-label">Email</label>
-                        <input className="u-add-input u-add-input--readonly" value={addContactData.email} readOnly />
-                      </div>
-                      <div className="u-add-row">
-                        <div className="u-add-field">
-                          <label className="u-add-label">Name</label>
-                          <input className="u-add-input" placeholder="Full name" value={addForm.name} onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))} autoFocus />
-                        </div>
-                        <div className="u-add-field">
-                          <label className="u-add-label">Title</label>
-                          <input className="u-add-input" placeholder="Job title" value={addForm.title} onChange={e => setAddForm(f => ({ ...f, title: e.target.value }))} />
-                        </div>
-                      </div>
-                      <div className="u-add-row">
-                        <div className="u-add-field">
-                          <label className="u-add-label">Company</label>
-                          <input className="u-add-input" placeholder="Company name" value={addForm.companyName} onChange={e => setAddForm(f => ({ ...f, companyName: e.target.value }))} />
-                        </div>
-                        <div className="u-add-field">
-                          <label className="u-add-label">Domain</label>
-                          <input className="u-add-input" placeholder="company.com" value={addForm.companyDomain} onChange={e => setAddForm(f => ({ ...f, companyDomain: e.target.value }))} />
-                        </div>
-                      </div>
-                      <div className="u-add-field">
-                        <label className="u-add-label">Website</label>
-                        <input className="u-add-input" placeholder="https://company.com" value={addForm.websiteUrl} onChange={e => setAddForm(f => ({ ...f, websiteUrl: e.target.value }))} />
-                      </div>
-                      <div className="u-add-row">
-                        <div className="u-add-field">
-                          <label className="u-add-label">City</label>
-                          <input className="u-add-input" placeholder="City" value={addForm.city} onChange={e => setAddForm(f => ({ ...f, city: e.target.value }))} />
-                        </div>
-                        <div className="u-add-field">
-                          <label className="u-add-label">Country</label>
-                          <input className="u-add-input" placeholder="Country" value={addForm.country} onChange={e => setAddForm(f => ({ ...f, country: e.target.value }))} />
-                        </div>
-                      </div>
-                      <div className="u-add-field">
-                        <label className="u-add-label">LinkedIn</label>
-                        <input className="u-add-input" placeholder="https://linkedin.com/in/..." value={addForm.linkedinUrl} onChange={e => setAddForm(f => ({ ...f, linkedinUrl: e.target.value }))} />
-                      </div>
-
-                      {addContactData.company?.description && (
-                        <div className="u-add-about">
-                          <span className="u-add-label">About {addForm.companyName}</span>
-                          <p>{addContactData.company.description}</p>
+                      {/* ── Company info (Apollo / shared) ── */}
+                      {addContactData.company && (
+                        <div className="u-add-section u-add-section--shared">
+                          <div className="u-add-section-header">
+                            <span className="u-add-section-label">Company · shared data</span>
+                          </div>
+                          <div className="u-add-shared-company">
+                            <CompanyLogo domain={addForm.companyDomain} name={addContactData.company.name || addForm.companyDomain} size={28} />
+                            <div>
+                              <span className="u-add-shared-name">{addContactData.company.name || addForm.companyDomain}</span>
+                              {addContactData.company.industry && <span className="u-add-shared-meta">{addContactData.company.industry}</span>}
+                            </div>
+                          </div>
+                          {addContactData.company.description && (
+                            <p className="u-add-shared-desc">{addContactData.company.description}</p>
+                          )}
+                          <div className="u-add-shared-pills">
+                            {addContactData.company.city && <span className="u-add-shared-pill">{addContactData.company.city}{addContactData.company.country ? `, ${addContactData.company.country}` : ''}</span>}
+                            {addContactData.company.employeeCount && <span className="u-add-shared-pill">{addContactData.company.employeeCount.toLocaleString()} employees</span>}
+                            {addContactData.company.websiteUrl && <span className="u-add-shared-pill">{addContactData.company.websiteUrl.replace(/^https?:\/\//, '')}</span>}
+                          </div>
                         </div>
                       )}
+
+                      {/* ── Person details (editable / your data) ── */}
+                      <div className="u-add-section u-add-section--yours">
+                        <div className="u-add-section-header">
+                          <span className="u-add-section-label">Contact · your data</span>
+                        </div>
+                        <div className="u-add-row">
+                          <div className="u-add-field">
+                            <label className="u-add-label">Email</label>
+                            <input className="u-add-input u-add-input--readonly" value={addContactData.email} readOnly />
+                          </div>
+                          <div className="u-add-field">
+                            <label className="u-add-label">Company website <span className="u-add-required">*</span></label>
+                            <input className="u-add-input" placeholder="company.com" value={addForm.companyDomain} onChange={e => setAddForm(f => ({ ...f, companyDomain: e.target.value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '') }))} />
+                          </div>
+                        </div>
+                        <div className="u-add-row">
+                          <div className="u-add-field">
+                            <label className="u-add-label">Name</label>
+                            <input className="u-add-input" placeholder="Full name" value={addForm.name} onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))} autoFocus />
+                          </div>
+                          <div className="u-add-field">
+                            <label className="u-add-label">Title</label>
+                            <input className="u-add-input" placeholder="Job title" value={addForm.title} onChange={e => setAddForm(f => ({ ...f, title: e.target.value }))} />
+                          </div>
+                        </div>
+                        <div className="u-add-row">
+                          <div className="u-add-field">
+                            <label className="u-add-label">City</label>
+                            <input className="u-add-input" placeholder="City" value={addForm.city} onChange={e => setAddForm(f => ({ ...f, city: e.target.value }))} />
+                          </div>
+                          <div className="u-add-field">
+                            <label className="u-add-label">Country</label>
+                            <input className="u-add-input" placeholder="Country" value={addForm.country} onChange={e => setAddForm(f => ({ ...f, country: e.target.value }))} />
+                          </div>
+                        </div>
+                        <div className="u-add-field">
+                          <label className="u-add-label">LinkedIn</label>
+                          <input className="u-add-input" placeholder="https://linkedin.com/in/..." value={addForm.linkedinUrl} onChange={e => setAddForm(f => ({ ...f, linkedinUrl: e.target.value }))} />
+                        </div>
+                      </div>
 
                       {addContactError && <p className="u-add-error">{addContactError}</p>}
 
                       <div className="u-add-actions">
-                        <button type="button" className="u-add-btn-back" onClick={() => setAddContactStep('email')}>← Back</button>
+                        <button type="button" className="u-add-btn-back" onClick={() => { setAddContactStep('email'); setAddContactError(null); }}>← Back</button>
                         <button type="submit" className="u-add-submit" disabled={addContactSaving}>
                           {addContactSaving ? 'Saving...' : 'Save contact'}
                         </button>

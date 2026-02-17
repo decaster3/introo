@@ -10,6 +10,7 @@ import {
   LandingPage,
   TermsPage,
   PrivacyPage,
+  DocsPage,
 } from './pages';
 import './styles.css';
 
@@ -23,6 +24,7 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/terms" element={<TermsPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/docs" element={<DocsPage />} />
           
           {/* Onboarding */}
           <Route path="/onboarding" element={<OnboardingPage />} />

@@ -54,9 +54,11 @@ function isBusinessEmail(email: string): boolean {
 }
 
 function normalizeCompanyName(domain: string): string {
-  // Remove common TLDs and format as company name
-  const name = domain
-    .replace(/\.(com|io|co|org|net|ai|app|dev|tech)$/, '')
+  // Remove everything after the last dot (any TLD)
+  const withoutTld = domain.replace(/\.[^.]+$/, '');
+  // If there's still a dot (e.g. "co.uk" → remove secondary TLD too)
+  const base = withoutTld.replace(/\.(co|com|org|net|ac|gov)$/, '');
+  const name = base
     .split('.')
     .map(part => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');

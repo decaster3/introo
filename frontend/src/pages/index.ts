@@ -4,3 +4,4 @@ export { OnboardingPage } from './OnboardingPage';
 export { LandingPage } from './LandingPage';
 export { TermsPage } from './TermsPage';
 export { PrivacyPage } from './PrivacyPage';
+export { DocsPage } from './DocsPage';

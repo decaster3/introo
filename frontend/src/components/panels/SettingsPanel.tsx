@@ -208,16 +208,39 @@ export function SettingsPanel({
         )}
       </div>
 
-      <button
-        className="u-settings-replay-tour"
-        onClick={() => { resetOnboarding(); window.location.reload(); }}
-      >
-        Replay onboarding tour
-      </button>
+      <div className="u-settings-help">
+        <span className="u-settings-help-label">Help</span>
+        <a
+          className="u-settings-help-item"
+          href="/docs"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <span className="u-settings-help-icon">📖</span>
+          <div className="u-settings-help-text">
+            <span className="u-settings-help-name">Documentation</span>
+            <span className="u-settings-help-desc">Filters, connections, spaces & more</span>
+          </div>
+          <span className="u-settings-help-arrow">→</span>
+        </a>
+        <button
+          className="u-settings-help-item"
+          onClick={() => { resetOnboarding(); window.location.reload(); }}
+        >
+          <span className="u-settings-help-icon">🎯</span>
+          <div className="u-settings-help-text">
+            <span className="u-settings-help-name">Replay product tour</span>
+            <span className="u-settings-help-desc">Step-by-step walkthrough of the app</span>
+          </div>
+          <span className="u-settings-help-arrow">→</span>
+        </button>
+      </div>
 
-      <button className="u-settings-logout-bottom" onClick={onLogout}>
-        Log out
-      </button>
+      <div className="u-settings-danger">
+        <button className="u-settings-danger-btn" onClick={onLogout}>
+          Log out
+        </button>
+      </div>
     </div>
   );
 }

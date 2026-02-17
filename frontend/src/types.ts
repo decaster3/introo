@@ -141,6 +141,8 @@ export interface DirectConnection {
   direction: 'sent' | 'received';
   createdAt: string;
   peer: { id: string; name: string; email: string; avatar: string | null };
+  peerContactCount?: number;
+  peerCompanyCount?: number;
 }
 
 export interface ConnectionCompany {
@@ -245,6 +247,8 @@ export interface ViewFilters {
   strengthFilter?: string;
   connectedYears?: string[];
   connectedMonths?: string[];
+  lastContactYears?: string[];
+  lastContactMonths?: string[];
   tagFilter?: string[];
   spaceFilter?: string;
   connectionFilter?: string;

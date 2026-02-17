@@ -36,14 +36,39 @@ router.get('/', async (req, res) => {
     });
 
     // Normalize: always return the "other" user as `peer`
+    const peerIds = connections.map(c => c.fromUserId === userId ? c.toUserId : c.fromUserId);
+
+    // Count approved contacts per peer (with a company) for reach stats
+    const peerStats = peerIds.length > 0
+      ? await prisma.contact.groupBy({
+          by: ['userId'],
+          where: { userId: { in: peerIds }, isApproved: true, companyId: { not: null } },
+          _count: { id: true },
+        })
+      : [];
+    const peerCompanyStats = peerIds.length > 0
+      ? await prisma.contact.groupBy({
+          by: ['userId', 'companyId'],
+          where: { userId: { in: peerIds }, isApproved: true, companyId: { not: null } },
+        })
+      : [];
+    const contactCountMap = new Map(peerStats.map(s => [s.userId, s._count.id]));
+    const companyCountMap = new Map<string, number>();
+    peerCompanyStats.forEach(s => {
+      companyCountMap.set(s.userId, (companyCountMap.get(s.userId) || 0) + 1);
+    });
+
     const result = connections.map(c => {
       const isFrom = c.fromUserId === userId;
+      const peerId = isFrom ? c.toUserId : c.fromUserId;
       return {
         id: c.id,
         status: c.status,
         direction: isFrom ? 'sent' : 'received',
         createdAt: c.createdAt,
         peer: isFrom ? c.toUser : c.fromUser,
+        peerContactCount: contactCountMap.get(peerId) || 0,
+        peerCompanyCount: companyCountMap.get(peerId) || 0,
       };
     });
 

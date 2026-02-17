@@ -76,6 +76,10 @@ export const relationshipsApi = {
     const query = params.toString() ? `?${params.toString()}` : '';
     return request<{ data: Contact[]; pagination: { total: number } }>(`/api/relationships/contacts${query}`);
   },
+  deleteContact: (contactId: string) =>
+    request<{ deleted: boolean }>(`/api/relationships/contacts/${contactId}`, { method: 'DELETE' }),
+  deleteContacts: (contactIds: string[]) =>
+    request<{ deleted: number }>('/api/relationships/contacts/delete-bulk', { method: 'POST', body: JSON.stringify({ contactIds }) }),
 };
 
 // Spaces
@@ -159,7 +163,7 @@ export const enrichmentApi = {
     }>('/api/enrichment/lookup-contact', { method: 'POST', body: JSON.stringify({ email }) }),
   addContact: (data: {
     email: string; name?: string; title?: string; linkedinUrl?: string; photoUrl?: string;
-    city?: string; country?: string; companyName?: string; companyDomain?: string; websiteUrl?: string;
+    headline?: string; city?: string; country?: string; companyDomain?: string;
   }) =>
     request<{ contact: any }>('/api/enrichment/add-contact', { method: 'POST', body: JSON.stringify(data) }),
 };
