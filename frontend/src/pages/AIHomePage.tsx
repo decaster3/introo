@@ -1202,13 +1202,21 @@ export function AIHomePage() {
     return people;
   }, [filteredCompanies, peopleSortBy, peopleSortDir, peopleSorts, peopleGroupByField, peopleGroupByDir, companyTags]);
 
+  const isNetworkView = useMemo(() => sourceFilter === 'spaces' || connectionFilter !== 'all' || spaceFilter !== 'all', [sourceFilter, connectionFilter, spaceFilter]);
+
+  const displayCompanies = useMemo(() => {
+    if (isNetworkView && excludeMyContacts) {
+      return filteredCompanies.filter(c => !(c.myCount > 0 && c.spaceCount === 0));
+    }
+    return filteredCompanies;
+  }, [filteredCompanies, isNetworkView, excludeMyContacts]);
+
   const totalPeopleCount = useMemo(() => {
-    const isNetworkActive = sourceFilter === 'spaces' || connectionFilter !== 'all' || spaceFilter !== 'all';
-    if (isNetworkActive && excludeMyContacts) {
+    if (isNetworkView && excludeMyContacts) {
       return flatPeople.filter(p => !p.isMyContact).length;
     }
     return flatPeople.length;
-  }, [flatPeople, sourceFilter, connectionFilter, spaceFilter, excludeMyContacts]);
+  }, [flatPeople, isNetworkView, excludeMyContacts]);
 
   // Reset page when filters change
   useEffect(() => { setGridPage(0); }, [filteredCompanies.length, excludeMyContacts, entityTab]);
@@ -2951,7 +2959,7 @@ export function AIHomePage() {
                 className={`u-entity-tab ${entityTab === 'companies' ? 'u-entity-tab--active' : ''}`}
                 onClick={() => { setEntityTab('companies'); setGridPage(0); setTagPickerDomain(null); }}
               >
-                Companies <span className="u-entity-tab-count">{filteredCompanies.length}</span>
+                Companies <span className="u-entity-tab-count">{displayCompanies.length}</span>
               </button>
               <button
                 className={`u-entity-tab ${entityTab === 'people' ? 'u-entity-tab--active' : ''}`}
@@ -3092,7 +3100,7 @@ export function AIHomePage() {
                   </>
                 )}
               </div>
-            ) : filteredCompanies.length === 0 ? (
+            ) : displayCompanies.length === 0 ? (
               <div className="u-grid-empty">
                 {activeFilterCount > 0 || searchQuery.trim() ? (
                   <>
@@ -3299,11 +3307,6 @@ export function AIHomePage() {
                   )}
                 </div>
               );
-
-              const isNetworkView = sourceFilter === 'spaces' || connectionFilter !== 'all' || spaceFilter !== 'all';
-              const displayCompanies = isNetworkView && excludeMyContacts
-                ? filteredCompanies.filter(c => !(c.myCount > 0 && c.spaceCount === 0))
-                : filteredCompanies;
 
               const pageStart = gridPage * GRID_PAGE_SIZE;
               const pageEnd = pageStart + GRID_PAGE_SIZE;
@@ -3618,8 +3621,7 @@ export function AIHomePage() {
 
           {/* ── People Table ──────────────────────────────────── */}
           {entityTab === 'people' && (() => {
-            const isPeopleNetworkView = sourceFilter === 'spaces' || connectionFilter !== 'all' || spaceFilter !== 'all';
-            const displayPeople = isPeopleNetworkView && excludeMyContacts
+            const displayPeople = isNetworkView && excludeMyContacts
               ? flatPeople.filter(p => !p.isMyContact)
               : flatPeople;
             const peoplePageStart = gridPage * GRID_PAGE_SIZE;
