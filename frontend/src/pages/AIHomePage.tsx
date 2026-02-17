@@ -5670,7 +5670,7 @@ export function AIHomePage() {
 
                 {addContactStep === 'email' && (
                   <>
-                    <p className="u-panel-subtitle" style={{ marginBottom: '1.25rem' }}>Enter an email to auto-fill from Apollo.</p>
+                    <p className="u-panel-subtitle" style={{ marginBottom: '1.25rem' }}>Enter an email to auto-fill their details.</p>
                     <form onSubmit={async (e) => {
                       e.preventDefault();
                       if (!addContactEmail.trim() || !addContactEmail.includes('@')) {
@@ -5722,7 +5722,7 @@ export function AIHomePage() {
                 {addContactStep === 'form' && addContactData && (
                   <>
                     {addContactData.source === 'apollo' && (
-                      <p className="u-add-status u-add-status--success">Auto-filled from Apollo</p>
+                      <p className="u-add-status u-add-status--success">Auto-filled — review and save</p>
                     )}
                     {addContactData.source === 'partial' && (
                       <p className="u-add-status">Company found — fill in person details</p>
