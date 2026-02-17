@@ -231,6 +231,28 @@ export const tagsApi = {
     }),
 };
 
+// Views (saved filter/sort/group presets)
+export interface SavedViewResponse {
+  id: string;
+  title: string;
+  keywords: string[];
+  filters: Record<string, unknown>;
+  sortRules: { field: string; dir: 'asc' | 'desc' }[];
+  groupBy: { field: string; dir: 'asc' | 'desc' } | null;
+  position: number;
+  createdAt: string;
+}
+
+export const viewsApi = {
+  getAll: () => request<SavedViewResponse[]>('/api/views'),
+  create: (data: { title: string; keywords?: string[]; filters?: Record<string, unknown>; sortRules?: { field: string; dir: string }[]; groupBy?: { field: string; dir: string } | null }) =>
+    request<SavedViewResponse>('/api/views', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: { title?: string; keywords?: string[]; filters?: Record<string, unknown>; sortRules?: { field: string; dir: string }[]; groupBy?: { field: string; dir: string } | null }) =>
+    request<SavedViewResponse>(`/api/views/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  delete: (id: string) =>
+    request<{ success: boolean }>(`/api/views/${id}`, { method: 'DELETE' }),
+};
+
 // Email
 export const emailApi = {
   sendIntroOffer: (data: { recipientEmail: string; recipientName: string; targetCompany: string; contactName?: string }) =>

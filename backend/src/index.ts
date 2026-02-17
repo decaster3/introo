@@ -21,6 +21,7 @@ import notificationsRoutes from './routes/notifications.js';
 import tagsRoutes from './routes/tags.js';
 import aiRoutes from './routes/ai.js';
 import emailRoutes from './routes/email.js';
+import viewsRoutes from './routes/views.js';
 import { sendWeeklyDigest } from './services/email.js';
 import prisma from './lib/prisma.js';
 
@@ -126,6 +127,7 @@ app.use('/api/notifications', notificationsRoutes);
 app.use('/api/tags', tagsRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/email', emailRoutes);
+app.use('/api/views', viewsRoutes);
 
 // Debug endpoint - development only
 if (!isProduction) {

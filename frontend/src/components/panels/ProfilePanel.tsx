@@ -35,7 +35,7 @@ export function ProfilePanel({
         myContacts: [], spaceContacts: [],
         myCount: 0, spaceCount: 0, totalCount: 0,
         hasStrongConnection: false, bestStrength: 'none',
-        source: 'mine', matchingHunts: [], spaceIds: [], connectionIds: [],
+        source: 'mine', matchingViews: [], spaceIds: [], connectionIds: [],
         employeeCount: co.employeeCount, foundedYear: co.foundedYear,
         annualRevenue: co.annualRevenue, totalFunding: co.totalFunding,
         lastFundingRound: co.lastFundingRound, lastFundingDate: co.lastFundingDate,
@@ -51,7 +51,7 @@ export function ProfilePanel({
         myContacts: [], spaceContacts: [],
         myCount: 0, spaceCount: 0, totalCount: 0,
         hasStrongConnection: false, bestStrength: 'none',
-        source: 'mine', matchingHunts: [], spaceIds: [], connectionIds: [],
+        source: 'mine', matchingViews: [], spaceIds: [], connectionIds: [],
       }});
     }
   };

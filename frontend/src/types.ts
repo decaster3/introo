@@ -208,7 +208,7 @@ export interface MergedCompany {
   hasStrongConnection: boolean;
   bestStrength: 'strong' | 'medium' | 'weak' | 'none';
   source: 'mine' | 'space' | 'both';
-  matchingHunts: string[];
+  matchingViews: string[];
   spaceIds: string[];
   connectionIds: string[];
   employeeCount?: number | null;
@@ -225,11 +225,11 @@ export interface MergedCompany {
   enrichedAt?: string | null;
 }
 
-export interface HuntFilters {
+export interface ViewFilters {
   description?: string;
   categories?: string[];
   aiKeywords?: string[];
-  excludeKeywords?: string;
+  excludeKeywords?: string[];
   employeeRanges?: string[];
   country?: string;
   city?: string;
@@ -243,15 +243,32 @@ export interface HuntFilters {
   strengthFilter?: string;
   connectedYears?: string[];
   connectedMonths?: string[];
+  tagFilter?: string[];
+  spaceFilter?: string;
+  connectionFilter?: string;
+  accountFilter?: string;
 }
 
-export interface Hunt {
+/** @deprecated Use ViewFilters instead */
+export type HuntFilters = ViewFilters;
+
+export interface ViewSortRule {
+  field: string;
+  dir: 'asc' | 'desc';
+}
+
+export interface SavedView {
   id: string;
   title: string;
   keywords: string[];
-  filters?: HuntFilters;
+  filters?: ViewFilters;
+  sortRules?: ViewSortRule[];
+  groupBy?: { field: string; dir: 'asc' | 'desc' } | null;
   isActive: boolean;
 }
+
+/** @deprecated Use SavedView instead */
+export type Hunt = SavedView;
 
 export interface InlinePanel {
   type: 'person' | 'intro-request' | 'intro-offer' | 'company' | 'space' | 'spaces-manage' | 'connection' | 'connections-manage' | 'network-manage' | 'profile' | 'settings' | 'notifications';

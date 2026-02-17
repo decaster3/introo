@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAppState, useAppActions } from '../store';
-import { API_BASE, calendarApi, requestsApi, notificationsApi, offersApi, tagsApi, emailApi, type CalendarAccountInfo } from '../lib/api';
-import { calculateStrength, type SpaceCompany, type DisplayContact, type MergedCompany, type HuntFilters, type Hunt, type InlinePanel } from '../types';
+import { API_BASE, calendarApi, requestsApi, notificationsApi, offersApi, tagsApi, emailApi, viewsApi, type CalendarAccountInfo } from '../lib/api';
+import { calculateStrength, type SpaceCompany, type DisplayContact, type MergedCompany, type ViewFilters, type SavedView, type ViewSortRule, type InlinePanel } from '../types';
 import { PersonAvatar, CompanyLogo, OnboardingTour } from '../components';
 import { ProfilePanel, SettingsPanel, NotificationsPanel } from '../components/panels';
 import { useProfile } from '../hooks/useProfile';
@@ -71,7 +71,7 @@ export function AIHomePage() {
   // UI State
   const [searchQuery, setSearchQuery] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
-  const [selectedHunt, setSelectedHunt] = useState<string | null>(null);
+  const [selectedView, setSelectedView] = useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = useState<'all' | 'mine' | 'spaces' | 'both'>('all');
   const [accountFilter, setAccountFilter] = useState<string>('all');
   const [strengthFilter, setStrengthFilter] = useState<'all' | 'strong' | 'medium' | 'weak'>('all');
@@ -80,8 +80,10 @@ export function AIHomePage() {
   const [sortBy] = useState<'relevance' | 'contacts' | 'name' | 'strength'>('relevance');
 
   // ─── Multi-sort & Group-by (Airtable-style) ────────────────────────────────
-  type SortField = 'name' | 'contacts' | 'strength' | 'employees' | 'location' | 'industry' | 'funding' | 'tags';
   type SortDir = 'asc' | 'desc';
+
+  // Company fields
+  type SortField = 'name' | 'contacts' | 'strength' | 'employees' | 'location' | 'industry' | 'funding' | 'tags';
   interface SortRule { field: SortField; dir: SortDir }
   const SORT_FIELD_LABELS: Record<SortField, string> = {
     name: 'Company', contacts: 'Contacts', strength: 'Strength',
@@ -99,6 +101,26 @@ export function AIHomePage() {
   const sortPanelRef = useRef<HTMLDivElement>(null);
   const groupPanelRef = useRef<HTMLDivElement>(null);
 
+  // People fields
+  type PeopleSortField = 'name' | 'company' | 'strength' | 'meetings' | 'lastSeen' | 'source' | 'industry' | 'location' | 'employees' | 'funding' | 'tags';
+  interface PeopleSortRule { field: PeopleSortField; dir: SortDir }
+  const PEOPLE_FIELD_LABELS: Record<PeopleSortField, string> = {
+    name: 'Person', company: 'Company', strength: 'Strength',
+    meetings: 'Meetings', lastSeen: 'Last met', source: 'Source',
+    industry: 'Industry', location: 'Location', employees: 'Employees',
+    funding: 'Funding', tags: 'Tags',
+  };
+  const ALL_PEOPLE_FIELDS: PeopleSortField[] = ['name', 'company', 'strength', 'meetings', 'lastSeen', 'source', 'industry', 'location', 'employees', 'funding', 'tags'];
+
+  const [peopleSorts, setPeopleSorts] = useState<PeopleSortRule[]>([]);
+  const [peopleGroupByField, setPeopleGroupByField] = useState<PeopleSortField | null>(null);
+  const [peopleGroupByDir, setPeopleGroupByDir] = useState<SortDir>('asc');
+  const [peopleCollapsedGroups, setPeopleCollapsedGroups] = useState<Set<string>>(new Set());
+  const [showPeopleSortPanel, setShowPeopleSortPanel] = useState(false);
+  const [showPeopleGroupPanel, setShowPeopleGroupPanel] = useState(false);
+  const peopleSortPanelRef = useRef<HTMLDivElement>(null);
+  const peopleGroupPanelRef = useRef<HTMLDivElement>(null);
+
   const [viewMode, setViewMode] = useState<'grid' | 'table'>(() => {
     try { const v = localStorage.getItem('introo_view_mode'); return v === 'table' ? 'table' : 'grid'; } catch { return 'grid'; }
   });
@@ -112,6 +134,9 @@ export function AIHomePage() {
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [inlinePanel, setInlinePanel] = useState<InlinePanel | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 768);
+  const [sidebarTab, setSidebarTab] = useState<'filters' | 'views'>('filters');
+  const [editingViewId, setEditingViewId] = useState<string | null>(null);
+  const [editingViewName, setEditingViewName] = useState('');
   const [introRequestText, setIntroRequestText] = useState('');
   const [introRequestSending, setIntroRequestSending] = useState(false);
   const [introRequestSent, setIntroRequestSent] = useState(false);
@@ -139,8 +164,8 @@ export function AIHomePage() {
   const [networkSplashData, setNetworkSplashData] = useState<{ contacts: number; companies: number; strong: number; topIndustry: string } | null>(null);
   const [, setCompanyPanelViewCount] = useState(0);
   const [showTagTip, setShowTagTip] = useState(false);
-  const [showHuntPrompt, setShowHuntPrompt] = useState(false);
-  const [huntPromptDismissed, setHuntPromptDismissed] = useState(() => !!localStorage.getItem('introo_hunt_prompt_dismissed'));
+  const [showViewPrompt, setShowViewPrompt] = useState(false);
+  const [viewPromptDismissed, setViewPromptDismissed] = useState(() => !!localStorage.getItem('introo_view_prompt_dismissed'));
   const [newSpaceCompanies, setNewSpaceCompanies] = useState<Set<string>>(new Set());
   const prevSpaceCompanyDomainsRef = useRef<Set<string>>(new Set());
 
@@ -193,9 +218,13 @@ export function AIHomePage() {
 
   // Sidebar filter section open/closed state
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+    'sort-group': false,
     source: true,
+    network: false,
+    tags: false,
     strength: false,
     description: false,
+    'connected-time': false,
     employees: false,
     location: false,
     funding: false,
@@ -275,7 +304,7 @@ export function AIHomePage() {
 
   // Data
   const [spaceCompanies, setSpaceCompanies] = useState<SpaceCompany[]>([]);
-  const [hunts, setHunts] = useState<Hunt[]>([]);
+  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
 
   // ─── Company tags (Airtable-style, persisted to localStorage) ──────────────
   const TAG_COLORS = [
@@ -329,6 +358,22 @@ export function AIHomePage() {
     }).catch(() => setTagsLoadedFromServer(true));
   }, [currentUser]);
 
+  // Load saved views from server on mount
+  useEffect(() => {
+    if (!currentUser) return;
+    viewsApi.getAll().then(views => {
+      setSavedViews(views.map(v => ({
+        id: v.id,
+        title: v.title,
+        keywords: v.keywords as string[],
+        filters: v.filters as ViewFilters,
+        sortRules: v.sortRules as ViewSortRule[],
+        groupBy: v.groupBy as { field: string; dir: 'asc' | 'desc' } | null,
+        isActive: false,
+      })));
+    }).catch(err => console.error('Failed to load views:', err));
+  }, [currentUser]);
+
   // Close picker on outside click
   useEffect(() => {
     if (!tagPickerDomain) return;
@@ -356,6 +401,21 @@ export function AIHomePage() {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [showSortPanel, showGroupPanel]);
+
+  // Close people sort/group panels on outside click
+  useEffect(() => {
+    if (!showPeopleSortPanel && !showPeopleGroupPanel) return;
+    const handler = (e: MouseEvent) => {
+      if (showPeopleSortPanel && peopleSortPanelRef.current && !peopleSortPanelRef.current.contains(e.target as Node)) {
+        setShowPeopleSortPanel(false);
+      }
+      if (showPeopleGroupPanel && peopleGroupPanelRef.current && !peopleGroupPanelRef.current.contains(e.target as Node)) {
+        setShowPeopleGroupPanel(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showPeopleSortPanel, showPeopleGroupPanel]);
 
   const persistTagDefs = useCallback((defs: { name: string; colorIdx: number }[]) => {
     setTagDefs(defs);
@@ -419,6 +479,37 @@ export function AIHomePage() {
 
   const [tagFilter, setTagFilter] = useState<string[]>([]);
 
+  // Auto-expand sidebar sections that have active filters; auto-collapse when cleared
+  const prevActiveSectionsRef = useRef<Set<string>>(new Set(['source']));
+  useEffect(() => {
+    const active = new Set<string>();
+    active.add('source');
+    if (tagFilter.length > 0) active.add('tags');
+    if (strengthFilter !== 'all') active.add('strength');
+    if (sidebarFilters.aiKeywords.length > 0 || sidebarFilters.excludeKeywords.length > 0 || sidebarFilters.description) active.add('description');
+    if (sidebarFilters.connectedYears.length > 0 || sidebarFilters.connectedMonths.length > 0) active.add('connected-time');
+    if (sidebarFilters.employeeRanges.length > 0) active.add('employees');
+    if (sidebarFilters.country || sidebarFilters.city) active.add('location');
+    if (sidebarFilters.fundingRounds.length > 0 || sidebarFilters.fundingRecency !== 'any') active.add('funding');
+    if (sidebarFilters.foundedFrom || sidebarFilters.foundedTo) active.add('founded');
+    if (sidebarFilters.revenueRanges.length > 0) active.add('revenue');
+    if (sidebarFilters.technologies.length > 0) active.add('technologies');
+    const prev = prevActiveSectionsRef.current;
+    const toOpen = new Set<string>();
+    const toClose = new Set<string>();
+    active.forEach(s => { if (!prev.has(s)) toOpen.add(s); });
+    prev.forEach(s => { if (!active.has(s) && s !== 'source') toClose.add(s); });
+    if (toOpen.size > 0 || toClose.size > 0) {
+      setOpenSections(p => {
+        const next = { ...p };
+        toOpen.forEach(s => { next[s] = true; });
+        toClose.forEach(s => { next[s] = false; });
+        return next;
+      });
+    }
+    prevActiveSectionsRef.current = active;
+  }, [strengthFilter, tagFilter, sidebarFilters]);
+
   // ─── Data transforms ────────────────────────────────────────────────────────
 
   const contacts: DisplayContact[] = useMemo(() => {
@@ -474,7 +565,7 @@ export function AIHomePage() {
           myContacts: [], spaceContacts: [],
           myCount: 0, spaceCount: 0, totalCount: 0,
           hasStrongConnection: false, bestStrength: 'none',
-          source: 'mine', matchingHunts: [], spaceIds: [], connectionIds: [],
+          source: 'mine', matchingViews: [], spaceIds: [], connectionIds: [],
         });
       }
       const co = map.get(d)!;
@@ -511,7 +602,7 @@ export function AIHomePage() {
           myContacts: [], spaceContacts: [],
           myCount: 0, spaceCount: 0, totalCount: 0,
           hasStrongConnection: false, bestStrength: 'none',
-          source: 'space', matchingHunts: [], spaceIds: [], connectionIds: [],
+          source: 'space', matchingViews: [], spaceIds: [], connectionIds: [],
         });
       }
       const co = map.get(sc.domain)!;
@@ -553,7 +644,7 @@ export function AIHomePage() {
           myContacts: [], spaceContacts: [],
           myCount: 0, spaceCount: 0, totalCount: 0,
           hasStrongConnection: false, bestStrength: 'none',
-          source: 'space', matchingHunts: [], spaceIds: [], connectionIds: [],
+          source: 'space', matchingViews: [], spaceIds: [], connectionIds: [],
         });
       }
       const co = map.get(cc.domain)!;
@@ -616,18 +707,25 @@ export function AIHomePage() {
       }
     });
 
-    // Match hunts (keywords + saved filters)
+    // Match savedViews (keywords + saved filters)
     const parseRevM = (rev: string | null | undefined): number => {
       if (!rev) return 0;
       const m = rev.match(/([\d.]+)/);
       return m ? parseFloat(m[1]) : 0;
     };
     companies.forEach(co => {
-      hunts.forEach(hunt => {
+      savedViews.forEach(sv => {
         let matches = false;
 
+        // Layout-only views (no keywords, no filters) match all companies
+        const hasKeywords = sv.keywords && sv.keywords.length > 0;
+        const hasFilters = sv.filters && Object.keys(sv.filters).length > 0;
+        if (!hasKeywords && !hasFilters) {
+          matches = true;
+        }
+
         // Keyword matching
-        if (hunt.keywords.length > 0) {
+        if (!matches && hasKeywords) {
           const allText = [
             co.name, co.domain,
             co.description || '', co.industry || '',
@@ -636,18 +734,40 @@ export function AIHomePage() {
             ...co.myContacts.map(c => `${c.title} ${c.name}`),
             ...co.spaceContacts.map(c => `${c.title || ''} ${c.name}`),
           ].join(' ').toLowerCase();
-          if (hunt.keywords.some(k => allText.includes(k))) {
+          if (sv.keywords.some(k => allText.includes(k))) {
             matches = true;
           }
         }
 
         // Saved filter matching
-        if (!matches && hunt.filters) {
-          const hf = hunt.filters;
+        if (!matches && sv.filters) {
+          const hf = sv.filters;
           let filterMatch = true;
           let hasAnyFilter = false;
 
-          if (hf.employeeRanges && hf.employeeRanges.length > 0) {
+          if (hf.sourceFilter && hf.sourceFilter !== 'all' && filterMatch) {
+            hasAnyFilter = true;
+            if (hf.sourceFilter === 'mine' && co.myCount === 0) filterMatch = false;
+            else if (hf.sourceFilter === 'spaces' && co.spaceCount === 0) filterMatch = false;
+            else if (hf.sourceFilter === 'both' && co.source !== 'both') filterMatch = false;
+          }
+          if (hf.strengthFilter && hf.strengthFilter !== 'all' && filterMatch) {
+            hasAnyFilter = true;
+            if (co.bestStrength !== hf.strengthFilter) filterMatch = false;
+          }
+          if (hf.spaceFilter && hf.spaceFilter !== 'all' && filterMatch) {
+            hasAnyFilter = true;
+            if (!co.spaceIds.includes(hf.spaceFilter)) filterMatch = false;
+          }
+          if (hf.connectionFilter && hf.connectionFilter !== 'all' && filterMatch) {
+            hasAnyFilter = true;
+            if (!co.connectionIds.includes(hf.connectionFilter)) filterMatch = false;
+          }
+          if (hf.accountFilter && hf.accountFilter !== 'all' && filterMatch) {
+            hasAnyFilter = true;
+            if (!co.myContacts.some(mc => mc.sourceAccountEmails?.includes(hf.accountFilter!))) filterMatch = false;
+          }
+          if (hf.employeeRanges && hf.employeeRanges.length > 0 && filterMatch) {
             hasAnyFilter = true;
             const emp = co.employeeCount || 0;
             const inRange = hf.employeeRanges.some(r => {
@@ -673,6 +793,12 @@ export function AIHomePage() {
             hasAnyFilter = true;
             if (!hf.fundingRounds.some(r => matchesFundingFilter(co.lastFundingRound, co.totalFunding, r))) filterMatch = false;
           }
+          if (hf.fundingRecency && hf.fundingRecency !== 'any' && filterMatch) {
+            hasAnyFilter = true;
+            const now = Date.now();
+            const cutoff = hf.fundingRecency === '6m' ? now - 6 * 30 * 24 * 60 * 60 * 1000 : now - 365 * 24 * 60 * 60 * 1000;
+            if (!co.lastFundingDate || new Date(co.lastFundingDate).getTime() < cutoff) filterMatch = false;
+          }
           if (hf.foundedFrom && filterMatch) {
             hasAnyFilter = true;
             if (!co.foundedYear || co.foundedYear < parseInt(hf.foundedFrom)) filterMatch = false;
@@ -694,6 +820,26 @@ export function AIHomePage() {
             });
             if (!inRange) filterMatch = false;
           }
+          if (hf.technologies && hf.technologies.length > 0 && filterMatch) {
+            hasAnyFilter = true;
+            const text = (co.description || '').toLowerCase();
+            if (!hf.technologies.some(tech => text.includes(tech.toLowerCase()))) filterMatch = false;
+          }
+          if (hf.aiKeywords && hf.aiKeywords.length > 0 && filterMatch) {
+            hasAnyFilter = true;
+            const allText = [co.name, co.domain, co.description, co.industry, co.city, co.country].filter(Boolean).join(' ').toLowerCase();
+            if (!hf.aiKeywords.some(kw => allText.includes(kw))) filterMatch = false;
+          }
+          if (hf.excludeKeywords && hf.excludeKeywords.length > 0 && filterMatch) {
+            hasAnyFilter = true;
+            const text = [co.description, co.industry, co.name].filter(Boolean).join(' ').toLowerCase();
+            if (hf.excludeKeywords.some(ex => text.includes(ex))) filterMatch = false;
+          }
+          if (hf.tagFilter && hf.tagFilter.length > 0 && filterMatch) {
+            hasAnyFilter = true;
+            const tags = companyTags[co.domain] || [];
+            if (!hf.tagFilter.every(t => tags.includes(t))) filterMatch = false;
+          }
           if (hf.connectedYears && hf.connectedYears.length > 0 && filterMatch) {
             hasAnyFilter = true;
             const hasMatchingContact = co.myContacts.some(c => {
@@ -714,7 +860,7 @@ export function AIHomePage() {
           if (hasAnyFilter && filterMatch) matches = true;
         }
 
-        if (matches) co.matchingHunts.push(hunt.id);
+        if (matches) co.matchingViews.push(sv.id);
       });
     });
 
@@ -725,9 +871,9 @@ export function AIHomePage() {
       if (a.hasStrongConnection !== b.hasStrongConnection) return a.hasStrongConnection ? -1 : 1;
       return b.totalCount - a.totalCount;
     });
-  }, [contacts, spaceCompanies, connectionCompanies, hunts]);
+  }, [contacts, spaceCompanies, connectionCompanies, savedViews, companyTags]);
 
-  // Filter by search + active hunt + source + strength + space + sort
+  // Filter by search + active view + source + strength + space + sort
   const filteredCompanies = useMemo(() => {
     let result = mergedCompanies;
     const sf = sidebarFilters;
@@ -785,7 +931,7 @@ export function AIHomePage() {
       result = result.filter(c => c.connectionIds.includes(connectionFilter));
     }
 
-    // Hunt selected → don't filter, just sort matches to top (done after all filters)
+    // View selected → don't filter, just sort matches to top (done after all filters)
 
     // Instant keyword filter (as you type)
     if (searchQuery.trim()) {
@@ -815,12 +961,10 @@ export function AIHomePage() {
       });
     }
     if (sf.excludeKeywords.length > 0) {
-      {
-        result = result.filter(c => {
-          const text = [c.description, c.industry, c.name].filter(Boolean).join(' ').toLowerCase();
-          return !sf.excludeKeywords.some(ex => text.includes(ex));
-        });
-      }
+      result = result.filter(c => {
+        const text = [c.description, c.industry, c.name].filter(Boolean).join(' ').toLowerCase();
+        return !sf.excludeKeywords.some(ex => text.includes(ex));
+      });
     }
 
     // ── Employee count ──
@@ -937,13 +1081,13 @@ export function AIHomePage() {
       });
     }
 
-    // When a hunt is selected, filter to only matching companies
-    if (selectedHunt) {
-      result = result.filter(c => c.matchingHunts.includes(selectedHunt));
+    // When a view is selected, filter to only matching companies
+    if (selectedView) {
+      result = result.filter(c => c.matchingViews.includes(selectedView));
     }
 
     return result;
-  }, [mergedCompanies, selectedHunt, searchQuery, sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, sortBy, sidebarFilters, tagFilter, companyTags, tableSorts, groupByField, groupByDir]);
+  }, [mergedCompanies, selectedView, searchQuery, sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, sortBy, sidebarFilters, tagFilter, companyTags, tableSorts, groupByField, groupByDir]);
 
   // Flatten filteredCompanies into a deduplicated people array
   interface FlatPerson {
@@ -996,21 +1140,50 @@ export function AIHomePage() {
       }
     }
 
-    const strengthVal = { strong: 0, medium: 1, weak: 2, none: 3 };
-    people.sort((a, b) => {
-      let cmp = 0;
-      switch (peopleSortBy) {
-        case 'name': cmp = a.name.localeCompare(b.name); break;
-        case 'company': cmp = a.companyName.localeCompare(b.companyName); break;
-        case 'strength': cmp = strengthVal[a.strength] - strengthVal[b.strength]; break;
-        case 'meetings': cmp = b.meetings - a.meetings; break;
-        case 'lastSeen': cmp = (b.lastSeen || '').localeCompare(a.lastSeen || ''); break;
+    const strengthVal: Record<string, number> = { strong: 0, medium: 1, weak: 2, none: 3 };
+    const getPeopleSortVal = (p: FlatPerson, field: PeopleSortField): string | number => {
+      switch (field) {
+        case 'name': return p.name.toLowerCase();
+        case 'company': return p.companyName.toLowerCase();
+        case 'strength': return strengthVal[p.strength] ?? 3;
+        case 'meetings': return p.meetings;
+        case 'lastSeen': return p.lastSeen || '';
+        case 'source': return p.source.toLowerCase();
+        case 'industry': return (p.company.industry || '').toLowerCase();
+        case 'location': return [p.company.city, p.company.country].filter(Boolean).join(', ').toLowerCase();
+        case 'employees': return p.company.employeeCount ?? 0;
+        case 'funding': return (p.company.lastFundingRound || '').toLowerCase();
+        case 'tags': return (companyTags[p.companyDomain] || []).join(',').toLowerCase();
+        default: return 0;
       }
-      return peopleSortDir === 'asc' ? cmp : (peopleSortBy === 'meetings' || peopleSortBy === 'lastSeen') ? cmp : -cmp;
+    };
+
+    // Build effective sort rules: legacy header-click sort, then toolbar multi-sorts
+    const effectiveSorts: PeopleSortRule[] = peopleSorts.length > 0
+      ? peopleSorts
+      : [{ field: peopleSortBy, dir: peopleSortDir }];
+
+    people.sort((a, b) => {
+      // Group-by field sorts first
+      if (peopleGroupByField) {
+        const ga = getPeopleSortVal(a, peopleGroupByField);
+        const gb = getPeopleSortVal(b, peopleGroupByField);
+        const cmp = typeof ga === 'number' && typeof gb === 'number' ? ga - gb : String(ga).localeCompare(String(gb));
+        const grouped = peopleGroupByDir === 'desc' ? -cmp : cmp;
+        if (grouped !== 0) return grouped;
+      }
+      for (const rule of effectiveSorts) {
+        const va = getPeopleSortVal(a, rule.field);
+        const vb = getPeopleSortVal(b, rule.field);
+        const cmp = typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb));
+        const directed = rule.dir === 'desc' ? -cmp : cmp;
+        if (directed !== 0) return directed;
+      }
+      return 0;
     });
 
     return people;
-  }, [filteredCompanies, peopleSortBy, peopleSortDir]);
+  }, [filteredCompanies, peopleSortBy, peopleSortDir, peopleSorts, peopleGroupByField, peopleGroupByDir, companyTags]);
 
   const totalPeopleCount = useMemo(() => {
     const seen = new Set<string>();
@@ -1027,7 +1200,7 @@ export function AIHomePage() {
   // Reset history expand when switching companies
   useEffect(() => { setHistoryExpanded(false); }, [inlinePanel]);
 
-  // Hunt match counts
+  // View match counts
   // Dynamic country list from enriched data
   const availableCountries = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -1087,13 +1260,13 @@ export function AIHomePage() {
     return counts;
   }, [mergedCompanies]);
 
-  const huntMatchCounts = useMemo(() => {
+  const viewMatchCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    hunts.forEach(h => {
-      counts[h.id] = mergedCompanies.filter(c => c.matchingHunts.includes(h.id)).length;
+    savedViews.forEach(h => {
+      counts[h.id] = mergedCompanies.filter(c => c.matchingViews.includes(h.id)).length;
     });
     return counts;
-  }, [hunts, mergedCompanies]);
+  }, [savedViews, mergedCompanies]);
 
   // Count active filters
   const activeFilterCount = useMemo(() => {
@@ -1104,6 +1277,7 @@ export function AIHomePage() {
     if (spaceFilter !== 'all') n++;
     if (connectionFilter !== 'all') n++;
     const sf = sidebarFilters;
+    if (sf.description) n++;
     if (sf.categories.length > 0) n++;
     if (sf.aiKeywords.length > 0) n++;
     if (sf.excludeKeywords.length > 0) n++;
@@ -1119,8 +1293,9 @@ export function AIHomePage() {
     if (sf.connectedYears.length > 0 || sf.connectedMonths.length > 0) n++;
     if (tagFilter.length > 0) n++;
     return n;
-  }, [sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, selectedHunt, sidebarFilters, tagFilter]);
+  }, [sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, sidebarFilters, tagFilter]);
 
+  // Build removable pills for every active filter
   // Compute year/month counts from contacts for "Connected since" filter
   const timeFilterStats = useMemo(() => {
     const yearCounts: Record<string, number> = {};
@@ -1136,13 +1311,41 @@ export function AIHomePage() {
     return { yearCounts, monthCounts, years };
   }, [contacts]);
 
+  // Build a complete ViewFilters snapshot from current filter state
+  const buildViewFilters = useCallback((): ViewFilters => {
+    const sf = sidebarFilters;
+    const filters: ViewFilters = {};
+    if (sf.description) filters.description = sf.description;
+    if (sf.categories.length > 0) filters.categories = [...sf.categories];
+    if (sf.aiKeywords.length > 0) filters.aiKeywords = [...sf.aiKeywords];
+    if (sf.excludeKeywords.length > 0) filters.excludeKeywords = [...sf.excludeKeywords];
+    if (sf.employeeRanges.length > 0) filters.employeeRanges = [...sf.employeeRanges];
+    if (sf.country) filters.country = sf.country;
+    if (sf.city) filters.city = sf.city;
+    if (sf.fundingRounds.length > 0) filters.fundingRounds = [...sf.fundingRounds];
+    if (sf.fundingRecency !== 'any') filters.fundingRecency = sf.fundingRecency;
+    if (sf.foundedFrom) filters.foundedFrom = sf.foundedFrom;
+    if (sf.foundedTo) filters.foundedTo = sf.foundedTo;
+    if (sf.revenueRanges.length > 0) filters.revenueRanges = [...sf.revenueRanges];
+    if (sf.technologies.length > 0) filters.technologies = [...sf.technologies];
+    if (sf.connectedYears.length > 0) filters.connectedYears = [...sf.connectedYears];
+    if (sf.connectedMonths.length > 0) filters.connectedMonths = [...sf.connectedMonths];
+    if (sourceFilter !== 'all') filters.sourceFilter = sourceFilter;
+    if (strengthFilter !== 'all') filters.strengthFilter = strengthFilter;
+    if (tagFilter.length > 0) filters.tagFilter = [...tagFilter];
+    if (spaceFilter !== 'all') filters.spaceFilter = spaceFilter;
+    if (connectionFilter !== 'all') filters.connectionFilter = connectionFilter;
+    if (accountFilter !== 'all') filters.accountFilter = accountFilter;
+    return filters;
+  }, [sidebarFilters, sourceFilter, strengthFilter, tagFilter, spaceFilter, connectionFilter, accountFilter]);
+
   const clearAllFilters = useCallback(() => {
     setSourceFilter('all');
     setAccountFilter('all');
     setStrengthFilter('all');
     setSpaceFilter('all');
     setConnectionFilter('all');
-    setSelectedHunt(null);
+    setSelectedView(null);
     setGridPage(0);
     setAiExplanation(null);
     setLastAiQuery(null);
@@ -1273,12 +1476,12 @@ export function AIHomePage() {
     }
   }, [inlinePanel]);
 
-  // #7 Hunt prompt: show after meaningful filters are applied (if no hunts yet)
+  // #7 View prompt: show after meaningful filters are applied (if no savedViews yet)
   // Only triggers when at least one "specific" sidebar filter is set (industry, size, keywords, funding, location, tags, etc.)
   // Simple top-level toggles (source, strength, connection) alone are not enough.
   useEffect(() => {
-    if (huntPromptDismissed || hunts.length > 0 || showHuntPrompt || selectedHunt) return;
-    if (localStorage.getItem('introo_hunt_prompt_dismissed')) return;
+    if (viewPromptDismissed || savedViews.length > 0 || showViewPrompt || selectedView) return;
+    if (localStorage.getItem('introo_view_prompt_dismissed')) return;
     const sf = sidebarFilters;
     const specificFilterCount =
       (sf.aiKeywords.length > 0 ? 1 : 0) +
@@ -1295,10 +1498,10 @@ export function AIHomePage() {
       (sf.foundedTo ? 1 : 0);
     const shouldShow = specificFilterCount >= 2 || (specificFilterCount >= 1 && activeFilterCount >= 3);
     if (shouldShow) {
-      const t = setTimeout(() => setShowHuntPrompt(true), 1500);
+      const t = setTimeout(() => setShowViewPrompt(true), 1500);
       return () => clearTimeout(t);
     }
-  }, [activeFilterCount, huntPromptDismissed, hunts.length, selectedHunt, showHuntPrompt, sidebarFilters, tagFilter]);
+  }, [activeFilterCount, viewPromptDismissed, savedViews.length, selectedView, showViewPrompt, sidebarFilters, tagFilter]);
 
   // #8 Detect new Space companies appearing
   useEffect(() => {
@@ -1326,7 +1529,7 @@ export function AIHomePage() {
         searchRef.current?.focus();
       }
       if (e.key === 'Escape') {
-        // Close innermost layer first: tag picker → panel → search → hunt
+        // Close innermost layer first: tag picker → panel → search → view
         if (tagPickerDomain) {
           setTagPickerDomain(null);
           setTagPickerSearch('');
@@ -1334,21 +1537,96 @@ export function AIHomePage() {
           setInlinePanel(null);
         } else if (searchQuery) {
           setSearchQuery('');
-        } else if (selectedHunt) {
-          setSelectedHunt(null);
+        } else if (selectedView) {
+          setSelectedView(null);
         }
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [tagPickerDomain, inlinePanel, searchQuery, selectedHunt]);
+  }, [tagPickerDomain, inlinePanel, searchQuery, selectedView]);
 
   // ─── Actions ────────────────────────────────────────────────────────────────
 
-  const toggleHunt = useCallback((huntId: string) => {
-    setSelectedHunt(prev => prev === huntId ? null : huntId);
+  const toggleView = useCallback((viewId: string) => {
+    setSelectedView(prev => {
+      if (prev === viewId) {
+        // Deactivating view — reset all filters to defaults
+        setSidebarFilters({
+          description: '',
+          categories: [],
+          excludeKeywords: [],
+          aiKeywords: [],
+          employeeRanges: [],
+          country: '',
+          city: '',
+          fundingRounds: [],
+          fundingRecency: 'any',
+          foundedFrom: '',
+          foundedTo: '',
+          revenueRanges: [],
+          isHiring: false,
+          technologies: [],
+          connectedYears: [],
+          connectedMonths: [],
+        });
+        setSourceFilter('all');
+        setStrengthFilter('all');
+        setTagFilter([]);
+        setSpaceFilter('all');
+        setConnectionFilter('all');
+        setAccountFilter('all');
+        setTableSorts([]);
+        setGroupByField(null);
+        return null;
+      }
+      // Restore full state from the saved view
+      const view = savedViews.find(v => v.id === viewId);
+      if (view) {
+        // Sort & group
+        if (view.sortRules && view.sortRules.length > 0) {
+          setTableSorts(view.sortRules as SortRule[]);
+        } else {
+          setTableSorts([]);
+        }
+        if (view.groupBy) {
+          setGroupByField(view.groupBy.field as SortField);
+          setGroupByDir(view.groupBy.dir);
+        } else {
+          setGroupByField(null);
+        }
+        // Restore sidebar filters
+        const f = view.filters || {};
+        setSidebarFilters({
+          description: f.description || '',
+          categories: f.categories || [],
+          excludeKeywords: Array.isArray(f.excludeKeywords) ? f.excludeKeywords : [],
+          aiKeywords: f.aiKeywords || [],
+          employeeRanges: f.employeeRanges || [],
+          country: f.country || '',
+          city: f.city || '',
+          fundingRounds: f.fundingRounds || [],
+          fundingRecency: (f.fundingRecency as 'any' | '6m' | '1y') || 'any',
+          foundedFrom: f.foundedFrom || '',
+          foundedTo: f.foundedTo || '',
+          revenueRanges: f.revenueRanges || [],
+          isHiring: false,
+          technologies: f.technologies || [],
+          connectedYears: f.connectedYears || [],
+          connectedMonths: f.connectedMonths || [],
+        });
+        setSourceFilter((f.sourceFilter as 'all' | 'mine' | 'spaces' | 'both') || 'all');
+        setStrengthFilter((f.strengthFilter as 'all' | 'strong' | 'medium' | 'weak') || 'all');
+        setTagFilter(f.tagFilter || []);
+        setSpaceFilter((f.spaceFilter as string) || 'all');
+        setConnectionFilter((f.connectionFilter as string) || 'all');
+        setAccountFilter((f.accountFilter as string) || 'all');
+      }
+      return viewId;
+    });
     setExpandedDomain(null);
-  }, []);
+    setGridPage(0);
+  }, [savedViews]);
 
   // AI-powered search: parse natural language and directly fill sidebar filters
   const aiSearch = useCallback(async (query: string) => {
@@ -1373,7 +1651,7 @@ export function AIHomePage() {
 
       // Directly apply to sidebar filters
       setConnectionFilter('all');
-      setSelectedHunt(null);
+      setSelectedView(null);
       setGridPage(0);
 
       setSourceFilter(filters.sourceFilter && filters.sourceFilter !== 'all' ? filters.sourceFilter : 'all');
@@ -1462,28 +1740,44 @@ export function AIHomePage() {
     }
   }, [availableCountries, spaces]);
 
-  // Save current AI search as a pinned hunt
-  const saveAsHunt = useCallback(() => {
+  // Save current AI search as a pinned view
+  const saveAsView = useCallback(async () => {
     if (!lastAiQuery) return;
     const { query, keywords } = lastAiQuery;
     if (keywords.length > 0) {
-      const huntId = Date.now().toString();
-      setHunts(prev => [...prev, {
-        id: huntId,
-        title: query,
-        keywords,
-        isActive: true,
-      }]);
-      setSelectedHunt(huntId);
+      const sortRules: ViewSortRule[] = tableSorts.map(s => ({ field: s.field, dir: s.dir }));
+      const groupBy = groupByField ? { field: groupByField, dir: groupByDir } : null;
+      const savedFilters = buildViewFilters();
+      try {
+        const created = await viewsApi.create({ title: query, keywords, filters: savedFilters as Record<string, unknown>, sortRules, groupBy });
+        setSavedViews(prev => [...prev, {
+          id: created.id,
+          title: created.title,
+          keywords: created.keywords as string[],
+          filters: created.filters as ViewFilters,
+          sortRules: created.sortRules as ViewSortRule[],
+          groupBy: created.groupBy as { field: string; dir: 'asc' | 'desc' } | null,
+          isActive: true,
+        }]);
+        setSelectedView(created.id);
+        setSidebarTab('views');
+      } catch (err) {
+        console.error('Failed to save view:', err);
+      }
     }
     setLastAiQuery(null);
     setAiExplanation(null);
-  }, [lastAiQuery]);
+  }, [lastAiQuery, tableSorts, groupByField, groupByDir, buildViewFilters]);
 
-  const removeHunt = useCallback((id: string) => {
-    setHunts(prev => prev.filter(h => h.id !== id));
-    if (selectedHunt === id) setSelectedHunt(null);
-  }, [selectedHunt]);
+  const removeView = useCallback((id: string) => {
+    const prevViews = savedViews;
+    setSavedViews(prev => prev.filter(h => h.id !== id));
+    if (selectedView === id) setSelectedView(null);
+    viewsApi.delete(id).catch(err => {
+      console.error('Failed to delete view:', err);
+      setSavedViews(prevViews);
+    });
+  }, [selectedView, savedViews]);
 
   const openIntroPanel = useCallback((company: MergedCompany, overrideSourceFilter?: string, overrideSpaceFilter?: string) => {
     setIntroSelectedThrough(null);
@@ -1614,6 +1908,23 @@ export function AIHomePage() {
     }
   }, [refreshCalendarAccounts]);
 
+  // ─── Active-sections set (for indicator dots) ──────────────────────────────
+  const activeSectionIds = useMemo(() => {
+    const s = new Set<string>();
+    if (tagFilter.length > 0) s.add('tags');
+    if (strengthFilter !== 'all') s.add('strength');
+    if (sidebarFilters.aiKeywords.length > 0 || sidebarFilters.excludeKeywords.length > 0 || sidebarFilters.description) s.add('description');
+    if (sidebarFilters.connectedYears.length > 0 || sidebarFilters.connectedMonths.length > 0) s.add('connected-time');
+    if (sidebarFilters.employeeRanges.length > 0) s.add('employees');
+    if (sidebarFilters.country || sidebarFilters.city) s.add('location');
+    if (sidebarFilters.fundingRounds.length > 0 || sidebarFilters.fundingRecency !== 'any') s.add('funding');
+    if (sidebarFilters.foundedFrom || sidebarFilters.foundedTo) s.add('founded');
+    if (sidebarFilters.revenueRanges.length > 0) s.add('revenue');
+    if (sidebarFilters.technologies.length > 0) s.add('technologies');
+    if (groupByField || tableSorts.length > 0 || peopleGroupByField || peopleSorts.length > 0) s.add('sort-group');
+    return s;
+  }, [strengthFilter, tagFilter, sidebarFilters, groupByField, tableSorts, peopleGroupByField, peopleSorts]);
+
   // ─── Sidebar section helper ────────────────────────────────────────────────
 
   const SidebarSection = useCallback(({ id, icon, title, children }: {
@@ -1623,13 +1934,16 @@ export function AIHomePage() {
       <button className="sb-section-header" onClick={() => toggleSection(id)}>
         <span className="sb-section-icon">{icon}</span>
         <span className="sb-section-title">{title}</span>
+        {!openSections[id] && activeSectionIds.has(id) && (
+          <span className="sb-section-active-dot" />
+        )}
         <svg className="sb-section-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="m6 9 6 6 6-6" />
         </svg>
       </button>
       {openSections[id] && <div className="sb-section-body">{children}</div>}
     </div>
-  ), [openSections, toggleSection]);
+  ), [openSections, toggleSection, activeSectionIds]);
 
   // ─── Render ─────────────────────────────────────────────────────────────────
 
@@ -1690,22 +2004,169 @@ export function AIHomePage() {
         {/* ═══════ LEFT SIDEBAR ═══════ */}
         <aside className={`sb ${sidebarOpen ? 'open' : 'closed'}`}>
           <div className="sb-header">
-            <span className="sb-header-title">Filters</span>
-            {activeFilterCount > 0 && (
-              <button className="sb-clear" onClick={clearAllFilters}>
-                Clear all ({activeFilterCount})
+            <div className="sb-tabs">
+              <button className={`sb-tab ${sidebarTab === 'filters' ? 'sb-tab--active' : ''}`} onClick={() => setSidebarTab('filters')}>
+                Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
               </button>
-            )}
+              <button className={`sb-tab ${sidebarTab === 'views' ? 'sb-tab--active' : ''}`} onClick={() => setSidebarTab('views')}>
+                Views{savedViews.length > 0 ? ` (${savedViews.length})` : ''}
+              </button>
+            </div>
             <button className="sb-toggle" onClick={() => setSidebarOpen(!sidebarOpen)}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d={sidebarOpen ? 'm15 18-6-6 6-6' : 'm9 18 6-6-6-6'} />
               </svg>
             </button>
           </div>
+          {/* Active filter pills removed — count shown in tab label instead */}
+          {/* ═══ Views Tab ═══ */}
+          {sidebarTab === 'views' && (
+            <div className="sb-scroll">
+              <div className="sb-views-list">
+                {savedViews.length === 0 ? (
+                  <div className="sb-views-empty">
+                    <span className="sb-views-empty-icon">📑</span>
+                    <p className="sb-views-empty-title">No saved views yet</p>
+                    <p className="sb-views-empty-desc">Apply filters, sorts, or groups on the Filters tab, then save them as a reusable view.</p>
+                  </div>
+                ) : (
+                  savedViews.map(v => (
+                    <div key={v.id} className={`sb-view-card ${selectedView === v.id ? 'sb-view-card--active' : ''}`} onClick={() => toggleView(v.id)}>
+                      <div className="sb-view-card-row">
+                        {editingViewId === v.id ? (
+                          <input
+                            className="sb-view-card-input"
+                            autoFocus
+                            value={editingViewName}
+                            onClick={e => e.stopPropagation()}
+                            onChange={e => setEditingViewName(e.target.value)}
+                            onBlur={() => { if (editingViewName.trim()) { const newTitle = editingViewName.trim(); setSavedViews(prev => prev.map(sv => sv.id === v.id ? { ...sv, title: newTitle } : sv)); viewsApi.update(v.id, { title: newTitle }).catch(err => console.error('Failed to rename view:', err)); } setEditingViewId(null); }}
+                            onKeyDown={e => { if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); } if (e.key === 'Escape') { setEditingViewId(null); } }}
+                          />
+                        ) : (
+                          <span className="sb-view-card-name">
+                            {v.title}
+                            <svg className="sb-view-card-pencil" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" onClick={e => { e.stopPropagation(); setEditingViewId(v.id); setEditingViewName(v.title); }}><path d="M17 3a2.85 2.85 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+                          </span>
+                        )}
+                        <span className="sb-view-card-count">{viewMatchCounts[v.id] || 0}</span>
+                        <button className="sb-view-card-x" onClick={e => { e.stopPropagation(); removeView(v.id); }} title="Delete view">×</button>
+                      </div>
+                      {(v.keywords && v.keywords.length > 0 || v.sortRules && v.sortRules.length > 0 || v.groupBy) && (
+                        <div className="sb-view-card-meta">
+                          {v.keywords && v.keywords.length > 0 && (
+                            <span className="sb-view-card-tags">{v.keywords.slice(0, 3).join(', ')}{v.keywords.length > 3 ? ` +${v.keywords.length - 3}` : ''}</span>
+                          )}
+                          {v.sortRules && v.sortRules.length > 0 && (
+                            <span className="sb-view-card-detail">Sort: {v.sortRules.map(s => s.field).join(', ')}</span>
+                          )}
+                          {v.groupBy && (
+                            <span className="sb-view-card-detail">Group: {v.groupBy.field}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ═══ Filters Tab ═══ */}
+          {sidebarTab === 'filters' && <>
           <div className="sb-scroll">
-            {/* ── Spaces ── */}
+
+            {/* ── Sort & Group (collapsible section) ── */}
+            <SidebarSection id="sort-group" icon="⇅" title="Sort & Group">
+              <div className="sb-sg-body">
+                {/* Group */}
+                <div className="sb-sg-inline">
+                  <span className="sb-sg-tag">Group by</span>
+                  {entityTab === 'companies' ? (
+                    groupByField ? (
+                      <div className="sb-sg-rule">
+                        <select className="sb-sg-sel" value={groupByField} onChange={e => { setGroupByField(e.target.value as SortField); setCollapsedGroups(new Set()); setGridPage(0); }}>
+                          {ALL_SORT_FIELDS.map(f => <option key={f} value={f}>{SORT_FIELD_LABELS[f]}</option>)}
+                        </select>
+                        <select className="sb-sg-sel sb-sg-sel--dir" value={groupByDir} onChange={e => { const dir = e.target.value as SortDir; setGroupByDir(dir); setTableSorts(prev => prev.map(s => s.field === groupByField ? { ...s, dir } : s)); setGridPage(0); }}>
+                          <option value="asc">A → Z</option>
+                          <option value="desc">Z → A</option>
+                        </select>
+                        <button className="sb-sg-x" onClick={() => { setGroupByField(null); setCollapsedGroups(new Set()); setGridPage(0); }}>×</button>
+                      </div>
+                    ) : (
+                      <select className="sb-sg-sel sb-sg-sel--placeholder" value="" onChange={e => { if (e.target.value) { setGroupByField(e.target.value as SortField); setGroupByDir('asc'); setCollapsedGroups(new Set()); setGridPage(0); } }}>
+                        <option value="" disabled>Choose a field...</option>
+                        {ALL_SORT_FIELDS.map(f => <option key={f} value={f}>{SORT_FIELD_LABELS[f]}</option>)}
+                      </select>
+                    )
+                  ) : (
+                    peopleGroupByField ? (
+                      <div className="sb-sg-rule">
+                        <select className="sb-sg-sel" value={peopleGroupByField} onChange={e => { setPeopleGroupByField(e.target.value as PeopleSortField); setPeopleCollapsedGroups(new Set()); setGridPage(0); }}>
+                          {ALL_PEOPLE_FIELDS.map(f => <option key={f} value={f}>{PEOPLE_FIELD_LABELS[f]}</option>)}
+                        </select>
+                        <select className="sb-sg-sel sb-sg-sel--dir" value={peopleGroupByDir} onChange={e => { const dir = e.target.value as SortDir; setPeopleGroupByDir(dir); setPeopleSorts(prev => prev.map(s => s.field === peopleGroupByField ? { ...s, dir } : s)); setGridPage(0); }}>
+                          <option value="asc">A → Z</option>
+                          <option value="desc">Z → A</option>
+                        </select>
+                        <button className="sb-sg-x" onClick={() => { setPeopleGroupByField(null); setPeopleCollapsedGroups(new Set()); setGridPage(0); }}>×</button>
+                      </div>
+                    ) : (
+                      <select className="sb-sg-sel sb-sg-sel--placeholder" value="" onChange={e => { if (e.target.value) { setPeopleGroupByField(e.target.value as PeopleSortField); setPeopleGroupByDir('asc'); setPeopleCollapsedGroups(new Set()); setGridPage(0); } }}>
+                        <option value="" disabled>Choose a field...</option>
+                        {ALL_PEOPLE_FIELDS.map(f => <option key={f} value={f}>{PEOPLE_FIELD_LABELS[f]}</option>)}
+                      </select>
+                    )
+                  )}
+                </div>
+
+                {/* Sort */}
+                <div className="sb-sg-inline">
+                  <span className="sb-sg-tag">Sort by</span>
+                  {entityTab === 'companies' ? (
+                    <>
+                      {tableSorts.map((rule, idx) => (
+                        <div key={idx} className="sb-sg-rule">
+                          <select className="sb-sg-sel" value={rule.field} onChange={e => { const next = [...tableSorts]; next[idx] = { ...next[idx], field: e.target.value as SortField }; setTableSorts(next); setGridPage(0); }}>
+                            {ALL_SORT_FIELDS.map(f => <option key={f} value={f}>{SORT_FIELD_LABELS[f]}</option>)}
+                          </select>
+                          <select className="sb-sg-sel sb-sg-sel--dir" value={rule.dir} onChange={e => { const dir = e.target.value as SortDir; const next = [...tableSorts]; next[idx] = { ...next[idx], dir }; setTableSorts(next); if (rule.field === groupByField) setGroupByDir(dir); setGridPage(0); }}>
+                            <option value="asc">A → Z</option>
+                            <option value="desc">Z → A</option>
+                          </select>
+                          <button className="sb-sg-x" onClick={() => { setTableSorts(tableSorts.filter((_, i) => i !== idx)); setGridPage(0); }}>×</button>
+                        </div>
+                      ))}
+                      <button className="sb-sg-plus" onClick={() => { const used = new Set(tableSorts.map(s => s.field)); const next = ALL_SORT_FIELDS.find(f => !used.has(f)) || 'name'; setTableSorts([...tableSorts, { field: next, dir: 'asc' }]); }}>
+                        + Add a sort
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      {peopleSorts.map((rule, idx) => (
+                        <div key={idx} className="sb-sg-rule">
+                          <select className="sb-sg-sel" value={rule.field} onChange={e => { const next = [...peopleSorts]; next[idx] = { ...next[idx], field: e.target.value as PeopleSortField }; setPeopleSorts(next); setGridPage(0); }}>
+                            {ALL_PEOPLE_FIELDS.map(f => <option key={f} value={f}>{PEOPLE_FIELD_LABELS[f]}</option>)}
+                          </select>
+                          <select className="sb-sg-sel sb-sg-sel--dir" value={rule.dir} onChange={e => { const dir = e.target.value as SortDir; const next = [...peopleSorts]; next[idx] = { ...next[idx], dir }; setPeopleSorts(next); if (rule.field === peopleGroupByField) setPeopleGroupByDir(dir); setGridPage(0); }}>
+                            <option value="asc">A → Z</option>
+                            <option value="desc">Z → A</option>
+                          </select>
+                          <button className="sb-sg-x" onClick={() => { setPeopleSorts(peopleSorts.filter((_, i) => i !== idx)); setGridPage(0); }}>×</button>
+                        </div>
+                      ))}
+                      <button className="sb-sg-plus" onClick={() => { const used = new Set(peopleSorts.map(s => s.field)); const next = ALL_PEOPLE_FIELDS.find(f => !used.has(f)) || 'name'; setPeopleSorts([...peopleSorts, { field: next, dir: 'asc' }]); }}>
+                        + Add a sort
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            </SidebarSection>
+
+            {/* ── Source ── */}
             <SidebarSection id="source" icon="📂" title="Source">
-              {/* All / Mine / Network / Overlap chips */}
               <div className="sb-chips">
                 {([
                   { key: 'all', label: 'All', count: stats.total },
@@ -1744,10 +2205,14 @@ export function AIHomePage() {
                   })}
                 </div>
               )}
+            </SidebarSection>
 
-              {/* Per-space filter pills */}
+            {/* ── My Network (spaces + connections) ── */}
+            <SidebarSection id="network" icon="🌐" title="My Network">
+              {/* Spaces */}
               {spaces.length > 0 && (
-                <div className="sb-spaces-list" style={{ marginTop: '0.5rem' }}>
+                <div className="sb-spaces-list">
+                  <span className="sb-chips-label">Spaces</span>
                   {spaces.map(s => (
                     <button
                       key={s.id}
@@ -1764,9 +2229,10 @@ export function AIHomePage() {
                 </div>
               )}
 
-              {/* Connections pills */}
+              {/* Connections */}
               {connections.filter(c => c.status === 'accepted').length > 0 && (
                 <div className="sb-spaces-list" style={{ marginTop: '0.35rem' }}>
+                  <span className="sb-chips-label">Connections</span>
                   {connections.filter(c => c.status === 'accepted').map(c => (
                     <button
                       key={c.id}
@@ -1785,6 +2251,7 @@ export function AIHomePage() {
               {/* Pending incoming connection requests */}
               {connections.filter(c => c.status === 'pending' && c.direction === 'received').length > 0 && (
                 <div className="sb-spaces-list" style={{ marginTop: '0.35rem' }}>
+                  <span className="sb-chips-label">Pending</span>
                   {connections.filter(c => c.status === 'pending' && c.direction === 'received').map(c => (
                     <div key={c.id} className="sb-conn-pending">
                       <PersonAvatar email={c.peer.email} name={c.peer.name} avatarUrl={c.peer.avatar} size={20} />
@@ -1796,7 +2263,9 @@ export function AIHomePage() {
                 </div>
               )}
 
-
+              {spaces.length === 0 && connections.filter(c => c.status === 'accepted').length === 0 && (
+                <p className="sb-empty-hint">No spaces or connections yet.</p>
+              )}
             </SidebarSection>
 
             {/* ── Tags filter ── */}
@@ -2071,40 +2540,42 @@ export function AIHomePage() {
             {/* ── Funding ── */}
             <SidebarSection id="funding" icon="💰" title="Funding">
               <label className="sb-field-label">Last round</label>
-              <div className="sb-checkboxes">
+              <div className="sb-chips">
                 {[
                   { key: 'no-funding', label: 'No funding' },
                   { key: 'pre-seed', label: 'Pre-Seed / Seed' },
                   { key: 'series-a', label: 'Series A' },
                   { key: 'series-b', label: 'Series B+' },
                   { key: 'vc-backed', label: 'VC Backed' },
-                ].map(r => (
-                  <label key={r.key} className="sb-checkbox">
+                ].map(r => {
+                  const cnt = fundingRoundCounts[r.key] || 0;
+                  return (
+                  <label key={r.key} className={`sb-chip ${sidebarFilters.fundingRounds.includes(r.key) ? 'active' : ''} ${cnt === 0 ? 'sb-chip--empty' : ''}`}>
                     <input
                       type="checkbox"
                       checked={sidebarFilters.fundingRounds.includes(r.key)}
                       onChange={() => toggleFundingRound(r.key)}
+                      style={{ display: 'none' }}
                     />
-                    <span>{r.label} <span className="sb-chip-count">{fundingRoundCounts[r.key] || 0}</span></span>
+                    {r.label} <span className="sb-chip-count">{cnt}</span>
                   </label>
-                ))}
+                  );
+                })}
               </div>
-              <label className="sb-field-label">Last round date</label>
-              <div className="sb-radios">
+              <label className="sb-field-label" style={{ marginTop: '0.5rem' }}>Last round date</label>
+              <div className="sb-chips">
                 {[
                   { key: 'any', label: 'Any time' },
-                  { key: '6m', label: '< 6 months ago' },
-                  { key: '1y', label: '< 1 year ago' },
+                  { key: '6m', label: '< 6 months' },
+                  { key: '1y', label: '< 1 year' },
                 ].map(r => (
-                  <label key={r.key} className="sb-radio">
-                    <input
-                      type="radio"
-                      name="funding-recency"
-                      checked={sidebarFilters.fundingRecency === r.key}
-                      onChange={() => setSidebarFilters(p => ({ ...p, fundingRecency: r.key as typeof p.fundingRecency }))}
-                    />
-                    <span>{r.label}</span>
-                  </label>
+                  <button
+                    key={r.key}
+                    className={`sb-chip ${sidebarFilters.fundingRecency === r.key ? 'active' : ''}`}
+                    onClick={() => setSidebarFilters(p => ({ ...p, fundingRecency: r.key as typeof p.fundingRecency }))}
+                  >
+                    {r.label}
+                  </button>
                 ))}
               </div>
             </SidebarSection>
@@ -2210,35 +2681,19 @@ export function AIHomePage() {
               )}
             </SidebarSection>
           </div>
-          {/* Save search button at bottom of sidebar — only for substantive filters, not source/strength */}
-          {(sidebarFilters.aiKeywords.length > 0 || sidebarFilters.excludeKeywords.length > 0 || sidebarFilters.categories.length > 0 || sidebarFilters.employeeRanges.length > 0 || sidebarFilters.country || sidebarFilters.city || sidebarFilters.fundingRounds.length > 0 || sidebarFilters.fundingRecency !== 'any' || sidebarFilters.foundedFrom || sidebarFilters.foundedTo || sidebarFilters.revenueRanges.length > 0 || sidebarFilters.technologies.length > 0 || sidebarFilters.connectedYears.length > 0 || sidebarFilters.connectedMonths.length > 0) && (
-            <div className="sb-save-search">
+          {/* Bottom actions — Save as View + Clear all */}
+          {(activeFilterCount > 0 || groupByField || tableSorts.length > 0) && (
+            <div className="sb-bottom-actions">
               <button className="sb-save-search-btn" onClick={() => {
-                // Build keywords from text-based filters
+                const sf = sidebarFilters;
                 const keywords = [
-                  ...sidebarFilters.aiKeywords,
-                  ...sidebarFilters.categories.map(c => c.toLowerCase()),
-                  ...(sidebarFilters.description ? sidebarFilters.description.toLowerCase().split(/\s+/).filter(w => w.length > 1) : []),
+                  ...sf.aiKeywords,
+                  ...sf.categories.map(c => c.toLowerCase()),
+                  ...(sf.description ? sf.description.toLowerCase().split(/\s+/).filter(w => w.length > 1) : []),
                 ].filter((k, i, arr) => k && arr.indexOf(k) === i);
 
-                // Capture all structural filters
-                const sf = sidebarFilters;
-                const savedFilters: HuntFilters = {};
-                if (sf.employeeRanges.length > 0) savedFilters.employeeRanges = [...sf.employeeRanges];
-                if (sf.country) savedFilters.country = sf.country;
-                if (sf.city) savedFilters.city = sf.city;
-                if (sf.fundingRounds.length > 0) savedFilters.fundingRounds = [...sf.fundingRounds];
-                if (sf.fundingRecency !== 'any') savedFilters.fundingRecency = sf.fundingRecency;
-                if (sf.foundedFrom) savedFilters.foundedFrom = sf.foundedFrom;
-                if (sf.foundedTo) savedFilters.foundedTo = sf.foundedTo;
-                if (sf.revenueRanges.length > 0) savedFilters.revenueRanges = [...sf.revenueRanges];
-                if (sf.technologies.length > 0) savedFilters.technologies = [...sf.technologies];
-                if (sf.connectedYears.length > 0) savedFilters.connectedYears = [...sf.connectedYears];
-                if (sf.connectedMonths.length > 0) savedFilters.connectedMonths = [...sf.connectedMonths];
-                if (sourceFilter !== 'all') savedFilters.sourceFilter = sourceFilter;
-                if (strengthFilter !== 'all') savedFilters.strengthFilter = strengthFilter;
+                const savedFilters = buildViewFilters();
 
-                // Build a readable title
                 const titleParts: string[] = [];
                 if (sf.description) titleParts.push(sf.description);
                 else if (sf.aiKeywords.length > 0) titleParts.push(sf.aiKeywords.slice(0, 3).join(', '));
@@ -2247,49 +2702,50 @@ export function AIHomePage() {
                 if (sf.country) titleParts.push(sf.country);
                 if (sf.city) titleParts.push(sf.city);
                 if (sf.fundingRounds.length > 0) {
-                  const fundingLabels: Record<string, string> = {
-                    'no-funding': 'No funding',
-                    'pre-seed': 'Pre-Seed/Seed',
-                    'series-a': 'Series A',
-                    'series-b': 'Series B+',
-                    'vc-backed': 'VC Backed',
-                  };
-                  titleParts.push(sf.fundingRounds.map(r => fundingLabels[r] || r).join(', '));
+                  const fl: Record<string, string> = { 'no-funding': 'No funding', 'pre-seed': 'Pre-Seed/Seed', 'series-a': 'Series A', 'series-b': 'Series B+', 'vc-backed': 'VC Backed' };
+                  titleParts.push(sf.fundingRounds.map(r => fl[r] || r).join(', '));
                 }
-                if (sf.fundingRecency !== 'any') {
-                  titleParts.push(sf.fundingRecency === '6m' ? 'Funded < 6mo' : 'Funded < 1yr');
-                }
-                if (sf.foundedFrom || sf.foundedTo) {
-                  titleParts.push(`Founded ${sf.foundedFrom || '…'}–${sf.foundedTo || '…'}`);
-                }
+                if (sf.fundingRecency !== 'any') titleParts.push(sf.fundingRecency === '6m' ? 'Funded < 6mo' : 'Funded < 1yr');
+                if (sf.foundedFrom || sf.foundedTo) titleParts.push(`Founded ${sf.foundedFrom || '...'}–${sf.foundedTo || '...'}`);
                 if (sf.revenueRanges.length > 0) titleParts.push('Revenue: ' + sf.revenueRanges.join(', '));
                 if (sf.connectedYears.length > 0 || sf.connectedMonths.length > 0) {
                   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-                  const parts = [
-                    ...sf.connectedYears,
-                    ...sf.connectedMonths.map(m => months[parseInt(m) - 1] || m),
-                  ];
+                  const parts = [...sf.connectedYears, ...sf.connectedMonths.map(m => months[parseInt(m) - 1] || m)];
                   titleParts.push('Connected ' + parts.join(', '));
                 }
+                if (strengthFilter !== 'all') titleParts.push(`Strength: ${strengthFilter}`);
+                if (tagFilter.length > 0) titleParts.push(`Tags: ${tagFilter.join(', ')}`);
+                if (groupByField) titleParts.push(`Grouped: ${SORT_FIELD_LABELS[groupByField]}`);
+                if (tableSorts.length > 0) titleParts.push(`Sorted: ${tableSorts.map(s => SORT_FIELD_LABELS[s.field]).join(', ')}`);
 
-                const title = titleParts.join(' · ') || 'Saved search';
-                const huntId = Date.now().toString();
-                setHunts(prev => [...prev, { id: huntId, title, keywords, filters: savedFilters, isActive: true }]);
-                setSelectedHunt(huntId);
+                const title = titleParts.join(' · ') || 'Saved view';
+                const sortRules: ViewSortRule[] = tableSorts.map(s => ({ field: s.field, dir: s.dir }));
+                const groupBy = groupByField ? { field: groupByField, dir: groupByDir } : null;
+                viewsApi.create({ title, keywords, filters: savedFilters as Record<string, unknown>, sortRules, groupBy }).then(created => {
+                  setSavedViews(prev => [...prev, { id: created.id, title: created.title, keywords: created.keywords as string[], filters: created.filters as ViewFilters, sortRules: created.sortRules as ViewSortRule[], groupBy: created.groupBy as { field: string; dir: 'asc' | 'desc' } | null, isActive: true }]);
+                  setSelectedView(created.id);
+                  setSidebarTab('views');
+                }).catch(err => console.error('Failed to save view:', err));
               }}>
-                Save search
+                Save as View
               </button>
+              {activeFilterCount > 0 && (
+                <button className="sb-clear-all-btn" onClick={clearAllFilters}>
+                  Clear all filters ({activeFilterCount})
+                </button>
+              )}
             </div>
           )}
+          </>}
         </aside>
 
         {/* Sidebar reopen strip (always rendered when closed) */}
         {!sidebarOpen && (
-          <button className="sb-reopen" onClick={() => setSidebarOpen(true)} title="Show filters">
+          <button className="sb-reopen" onClick={() => setSidebarOpen(true)} title="Show sidebar">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="m9 18 6-6-6-6" />
             </svg>
-            <span className="sb-reopen-label">Filters</span>
+            <span className="sb-reopen-label">Filters & Views</span>
           </button>
         )}
 
@@ -2297,7 +2753,7 @@ export function AIHomePage() {
         {!sidebarOpen && (
           <button className="sb-mobile-toggle" onClick={() => setSidebarOpen(true)}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 12h10M4 18h6" /></svg>
-            Filters
+            Filters & Views
             {activeFilterCount > 0 && <span className="sb-mobile-badge">{activeFilterCount}</span>}
           </button>
         )}
@@ -2313,21 +2769,6 @@ export function AIHomePage() {
               <span className="u-logo-mark">introo</span>
             </a>
             <div className={`u-omni ${searchFocused ? 'focused' : ''}`}>
-              <div className="u-omni-pills">
-                {hunts.map(h => (
-                  <button
-                    key={h.id}
-                    className={`u-hunt-pill ${selectedHunt === h.id ? 'active' : ''} ${(huntMatchCounts[h.id] || 0) > 0 ? 'has-matches' : ''}`}
-                    onClick={() => toggleHunt(h.id)}
-                  >
-                    <span className="u-hunt-pill-text">{h.title}</span>
-                    {(huntMatchCounts[h.id] || 0) > 0 && (
-                      <span className="u-hunt-pill-count">{huntMatchCounts[h.id]}</span>
-                    )}
-                    <button className="u-hunt-pill-x" onClick={(e) => { e.stopPropagation(); removeHunt(h.id); }}>×</button>
-                  </button>
-                ))}
-              </div>
               <div className="u-omni-input-row">
                 <svg className="u-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                   <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
@@ -2434,7 +2875,7 @@ export function AIHomePage() {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M4 6h16M4 12h10M4 18h6" />
                 </svg>
-                Filters
+                Filters & Views
                 {activeFilterCount > 0 && <span className="u-filter-toggle-badge">{activeFilterCount}</span>}
               </button>
             )}
@@ -2464,7 +2905,7 @@ export function AIHomePage() {
               <span className="u-ai-banner-icon">AI</span>
               <span className="u-ai-banner-text">{aiExplanation}</span>
               {lastAiQuery && (
-                <button className="u-ai-banner-save" onClick={saveAsHunt}>Save as Hunt</button>
+                <button className="u-ai-banner-save" onClick={saveAsView}>Save as View</button>
               )}
               <button className="u-ai-banner-dismiss" onClick={() => { setAiExplanation(null); setLastAiQuery(null); }}>×</button>
             </div>
@@ -2492,141 +2933,14 @@ export function AIHomePage() {
               </button>
             )}
             <div className="u-results-right">
-              {entityTab === 'companies' && (
-                <>
-                  {/* Group button + panel */}
-                  <div className="u-toolbar-item" ref={groupPanelRef}>
-                    <button
-                      className={`u-toolbar-btn ${groupByField ? 'u-toolbar-btn--active' : ''}`}
-                      onClick={() => { setShowGroupPanel(!showGroupPanel); setShowSortPanel(false); }}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
-                      </svg>
-                      {groupByField ? `Grouped by ${SORT_FIELD_LABELS[groupByField]}` : 'Group'}
-                    </button>
-                    {showGroupPanel && (
-                      <div className="u-toolbar-panel">
-                        <div className="u-toolbar-panel-header">
-                          <span>Group by</span>
-                          {groupByField && (
-                            <div className="u-toolbar-panel-actions">
-                              <button className="u-toolbar-panel-collapse" onClick={() => { setCollapsedGroups(prev => { const next = new Set(prev); if (next.size > 0) { next.clear(); } else { /* collapse all will be handled per render */ } return next; }); }}>
-                                Collapse all
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                        {groupByField ? (
-                          <div className="u-toolbar-rule">
-                            <select
-                              className="u-toolbar-select"
-                              value={groupByField}
-                              onChange={e => { setGroupByField(e.target.value as SortField); setCollapsedGroups(new Set()); setGridPage(0); }}
-                            >
-                              {ALL_SORT_FIELDS.map(f => (
-                                <option key={f} value={f}>{SORT_FIELD_LABELS[f]}</option>
-                              ))}
-                            </select>
-                            <select
-                              className="u-toolbar-select u-toolbar-select--dir"
-                              value={groupByDir}
-                              onChange={e => { setGroupByDir(e.target.value as SortDir); setGridPage(0); }}
-                            >
-                              <option value="asc">A → Z</option>
-                              <option value="desc">Z → A</option>
-                            </select>
-                            <button className="u-toolbar-rule-del" onClick={() => { setGroupByField(null); setCollapsedGroups(new Set()); setGridPage(0); }} title="Remove grouping">
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="u-toolbar-pick-field">
-                            {ALL_SORT_FIELDS.map(f => (
-                              <button key={f} className="u-toolbar-pick-btn" onClick={() => { setGroupByField(f); setGroupByDir('asc'); setCollapsedGroups(new Set()); setGridPage(0); }}>
-                                {SORT_FIELD_LABELS[f]}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Sort button + panel */}
-                  <div className="u-toolbar-item" ref={sortPanelRef}>
-                    <button
-                      className={`u-toolbar-btn ${tableSorts.length > 0 ? 'u-toolbar-btn--active' : ''}`}
-                      onClick={() => { setShowSortPanel(!showSortPanel); setShowGroupPanel(false); }}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M11 5h10M11 9h7M11 13h4M3 17l4 4 4-4M7 3v18"/>
-                      </svg>
-                      {tableSorts.length > 0 ? `Sorted by ${tableSorts.length} field${tableSorts.length > 1 ? 's' : ''}` : 'Sort'}
-                    </button>
-                    {showSortPanel && (
-                      <div className="u-toolbar-panel">
-                        <div className="u-toolbar-panel-header">
-                          <span>{groupByField ? 'Sort within groups by' : 'Sort by'}</span>
-                        </div>
-                        {tableSorts.map((rule, idx) => (
-                          <div key={idx} className="u-toolbar-rule">
-                            <select
-                              className="u-toolbar-select"
-                              value={rule.field}
-                              onChange={e => {
-                                const next = [...tableSorts];
-                                next[idx] = { ...next[idx], field: e.target.value as SortField };
-                                setTableSorts(next);
-                                setGridPage(0);
-                              }}
-                            >
-                              {ALL_SORT_FIELDS.map(f => (
-                                <option key={f} value={f}>{SORT_FIELD_LABELS[f]}</option>
-                              ))}
-                            </select>
-                            <select
-                              className="u-toolbar-select u-toolbar-select--dir"
-                              value={rule.dir}
-                              onChange={e => {
-                                const next = [...tableSorts];
-                                next[idx] = { ...next[idx], dir: e.target.value as SortDir };
-                                setTableSorts(next);
-                                setGridPage(0);
-                              }}
-                            >
-                              <option value="asc">A → Z</option>
-                              <option value="desc">Z → A</option>
-                            </select>
-                            <button className="u-toolbar-rule-del" onClick={() => { setTableSorts(tableSorts.filter((_, i) => i !== idx)); setGridPage(0); }} title="Remove sort">
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-                            </button>
-                          </div>
-                        ))}
-                        <button
-                          className="u-toolbar-add-rule"
-                          onClick={() => {
-                            const used = new Set(tableSorts.map(s => s.field));
-                            const next = ALL_SORT_FIELDS.find(f => !used.has(f)) || 'name';
-                            setTableSorts([...tableSorts, { field: next, dir: 'asc' }]);
-                          }}
-                        >
-                          + Add {tableSorts.length > 0 ? 'another' : 'a'} sort
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="u-view-toggle">
-                    <button className={`u-view-btn ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => { setViewMode('grid'); localStorage.setItem('introo_view_mode', 'grid'); }} title="Grid view">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-                    </button>
-                    <button className={`u-view-btn ${viewMode === 'table' ? 'active' : ''}`} onClick={() => { setViewMode('table'); localStorage.setItem('introo_view_mode', 'table'); }} title="Table view">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-                    </button>
-                  </div>
-                </>
-              )}
+              <div className="u-view-toggle">
+                <button className={`u-view-btn ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => { setViewMode('grid'); localStorage.setItem('introo_view_mode', 'grid'); }} title="Card view">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                </button>
+                <button className={`u-view-btn ${viewMode === 'table' ? 'active' : ''}`} onClick={() => { setViewMode('table'); localStorage.setItem('introo_view_mode', 'table'); }} title="Table view">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -2674,35 +2988,31 @@ export function AIHomePage() {
             </div>
           )}
 
-          {/* #7 Hunt prompt — nudge to save filters as a hunt */}
-          {showHuntPrompt && activeFilterCount > 0 && (
+          {/* #7 View prompt — nudge to save filters as a view */}
+          {showViewPrompt && activeFilterCount > 0 && (
             <div className="ob-hunt-prompt">
               <span className="ob-hunt-prompt-icon">🎯</span>
-              <span className="ob-hunt-prompt-text">You've set filters. <strong>Save as a Hunt</strong> to track matching companies over time.</span>
+              <span className="ob-hunt-prompt-text">You've set filters. <strong>Save as a View</strong> to track matching companies over time.</span>
               <button className="ob-hunt-prompt-btn" onClick={() => {
-                const huntId = Date.now().toString();
                 const sf = sidebarFilters;
-                const savedFilters: HuntFilters = {};
-                if (sf.aiKeywords.length > 0) savedFilters.aiKeywords = [...sf.aiKeywords];
-                if (sf.employeeRanges.length > 0) savedFilters.employeeRanges = [...sf.employeeRanges];
-                if (sf.country) savedFilters.country = sf.country;
-                if (sf.city) savedFilters.city = sf.city;
-                if (sf.fundingRounds.length > 0) savedFilters.fundingRounds = [...sf.fundingRounds];
-                if (sf.revenueRanges.length > 0) savedFilters.revenueRanges = [...sf.revenueRanges];
-                if (sf.technologies.length > 0) savedFilters.technologies = [...sf.technologies];
-                if (sf.connectedYears.length > 0) savedFilters.connectedYears = [...sf.connectedYears];
-                if (sf.connectedMonths.length > 0) savedFilters.connectedMonths = [...sf.connectedMonths];
-                setHunts(prev => [...prev, { id: huntId, title: 'My first hunt', keywords: sf.aiKeywords.length > 0 ? sf.aiKeywords : ['custom'], filters: savedFilters, isActive: true }]);
-                setSelectedHunt(huntId);
-                setShowHuntPrompt(false);
-                setHuntPromptDismissed(true);
-                localStorage.setItem('introo_hunt_prompt_dismissed', 'true');
-              }}>Save as Hunt</button>
+                const savedFilters = buildViewFilters();
+                const sortRules: ViewSortRule[] = tableSorts.map(s => ({ field: s.field, dir: s.dir }));
+                const groupBy = groupByField ? { field: groupByField, dir: groupByDir } : null;
+                const keywords = sf.aiKeywords.length > 0 ? sf.aiKeywords : ['custom'];
+                viewsApi.create({ title: 'My first view', keywords, filters: savedFilters as Record<string, unknown>, sortRules, groupBy }).then(created => {
+                  setSavedViews(prev => [...prev, { id: created.id, title: created.title, keywords: created.keywords as string[], filters: created.filters as ViewFilters, sortRules: created.sortRules as ViewSortRule[], groupBy: created.groupBy as { field: string; dir: 'asc' | 'desc' } | null, isActive: true }]);
+                  setSelectedView(created.id);
+                  setSidebarTab('views');
+                }).catch(err => console.error('Failed to save view:', err));
+                setShowViewPrompt(false);
+                setViewPromptDismissed(true);
+                localStorage.setItem('introo_view_prompt_dismissed', 'true');
+              }}>Save as View</button>
               <button className="ob-hunt-prompt-dismiss" onClick={() => {
-                setShowHuntPrompt(false);
-                setHuntPromptDismissed(true);
-                localStorage.setItem('introo_hunt_prompt_dismissed', 'true');
-              }}>×</button>
+                setShowViewPrompt(false);
+                setViewPromptDismissed(true);
+                localStorage.setItem('introo_view_prompt_dismissed', 'true');
+              }}>x</button>
             </div>
           )}
 
@@ -2777,18 +3087,9 @@ export function AIHomePage() {
                   className={[
                     'u-tile',
                     expandedDomain === company.domain ? 'expanded' : '',
-                    company.matchingHunts.length > 0 ? 'u-tile--hunt-match' : '',
                     newSpaceCompanies.has(company.domain) ? 'u-tile--space-new' : '',
                   ].filter(Boolean).join(' ')}
                 >
-                  {company.matchingHunts.length > 0 && (
-                    <div className="u-tile-hunt-tags">
-                      {company.matchingHunts.map(hId => {
-                        const h = hunts.find(x => x.id === hId);
-                        return h ? <span key={hId} className="u-tile-hunt-tag">{h.title} ⚡</span> : null;
-                      })}
-                    </div>
-                  )}
                   {/* User tags (hidden when grouped by tags — redundant with group header) */}
                   {groupByField !== 'tags' && ((companyTags[company.domain] && companyTags[company.domain].length > 0) || tagPickerDomain === company.domain) && (
                     <div className="u-tile-tags" onClick={e => e.stopPropagation()}>
@@ -3109,7 +3410,7 @@ export function AIHomePage() {
                               return (
                                 <tr
                                   key={company.domain}
-                                  className={`u-tr ${company.matchingHunts.length > 0 ? 'u-tr--hunt' : ''} ${newSpaceCompanies.has(company.domain) ? 'u-tr--space-new' : ''}`}
+                                  className={`u-tr ${newSpaceCompanies.has(company.domain) ? 'u-tr--space-new' : ''}`}
                                   onClick={() => setInlinePanel({ type: 'company', company })}
                                 >
                                   <td className="u-td-company">
@@ -3294,77 +3595,261 @@ export function AIHomePage() {
             const sortIcon = (col: typeof peopleSortBy) =>
               peopleSortBy === col ? (peopleSortDir === 'asc' ? ' ↑' : ' ↓') : '';
 
-            return (
-              <div className="u-grid u-grid--table">
-                <div className="u-table-wrap">
-                  <table className="u-table u-table--people">
-                    <thead>
-                      <tr>
-                        <th className="u-th-person" onClick={() => handlePeopleSort('name')} style={{ cursor: 'pointer' }}>Person{sortIcon('name')}</th>
-                        <th className="u-th-pcompany" onClick={() => handlePeopleSort('company')} style={{ cursor: 'pointer' }}>Company{sortIcon('company')}</th>
-                        <th className="u-th-pstrength" onClick={() => handlePeopleSort('strength')} style={{ cursor: 'pointer' }}>Strength{sortIcon('strength')}</th>
-                        <th className="u-th-pmeetings" onClick={() => handlePeopleSort('meetings')} style={{ cursor: 'pointer' }}>Meetings{sortIcon('meetings')}</th>
-                        <th className="u-th-plastseen" onClick={() => handlePeopleSort('lastSeen')} style={{ cursor: 'pointer' }}>Last met{sortIcon('lastSeen')}</th>
-                        <th className="u-th-psource">Source</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {flatPeople.slice(peoplePageStart, peoplePageEnd).map(person => (
-                        <tr
-                          key={person.email}
-                          className="u-tr u-tr--person"
-                          onClick={() => {
-                            const contact = person.displayContact || { id: person.id, name: person.name, email: person.email, title: person.title, userName: person.source };
-                            setInlinePanel({ type: 'person', contact, company: person.company, fromPeopleTab: true });
-                          }}
-                        >
-                          <td className="u-td-person">
-                            <div className="u-td-person-inner">
-                              <PersonAvatar email={person.email} name={person.name} avatarUrl={person.photoUrl} size={28} />
-                              <div className="u-td-person-info">
-                                <span className="u-td-person-name">{person.name}</span>
-                                {person.title && <span className="u-td-person-title">{person.title}</span>}
-                              </div>
-                            </div>
-                          </td>
-                          <td className="u-td-pcompany">
-                            <div className="u-td-company-inner">
-                              <CompanyLogo domain={person.companyDomain} name={person.companyName} size={20} />
-                              <span className="u-td-company-name">{person.companyName}</span>
-                            </div>
-                          </td>
-                          <td className="u-td-pstrength">
-                            {person.strength !== 'none' && (
-                              <span className={`u-td-strength-pill u-td-strength--${person.strength}`}>
-                                {person.strength}
-                              </span>
-                            )}
-                          </td>
-                          <td className="u-td-pmeetings">
-                            {person.meetings > 0 ? <span className="u-td-num">{person.meetings}</span> : <span className="u-td-muted">—</span>}
-                          </td>
-                          <td className="u-td-plastseen">
-                            {person.lastSeen ? <span className="u-td-muted">{getTimeAgo(person.lastSeen)}</span> : <span className="u-td-muted">—</span>}
-                          </td>
-                          <td className="u-td-psource">
-                            <span className={`u-td-source-badge ${person.source === 'you' ? 'u-td-source--you' : 'u-td-source--network'}`}>
-                              {person.source === 'you' ? 'You' : person.source}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+            // People group-by logic
+            const peopleGroupLabel = (p: FlatPerson): string => {
+              if (!peopleGroupByField) return '';
+              switch (peopleGroupByField) {
+                case 'name': return p.name.charAt(0).toUpperCase();
+                case 'company': return p.companyName || 'Unknown';
+                case 'strength': return p.strength === 'none' ? 'None' : p.strength.charAt(0).toUpperCase() + p.strength.slice(1);
+                case 'meetings': {
+                  const m = p.meetings;
+                  if (m >= 10) return '10+';
+                  if (m >= 5) return '5–9';
+                  if (m >= 1) return '1–4';
+                  return '0';
+                }
+                case 'lastSeen': {
+                  if (!p.lastSeen) return 'Never';
+                  const days = Math.floor((Date.now() - new Date(p.lastSeen).getTime()) / (1000 * 60 * 60 * 24));
+                  if (days <= 7) return 'This week';
+                  if (days <= 30) return 'This month';
+                  if (days <= 90) return 'Last 3 months';
+                  if (days <= 365) return 'This year';
+                  return 'Over a year ago';
+                }
+                case 'source': return p.source === 'you' ? 'You' : p.source;
+                case 'industry': return p.company.industry || 'Unknown';
+                case 'location': return [p.company.city, p.company.country].filter(Boolean).join(', ') || 'Unknown';
+                case 'employees': {
+                  const e = p.company.employeeCount;
+                  if (!e) return 'Unknown';
+                  if (e >= 1000) return '1000+';
+                  if (e >= 100) return '100–999';
+                  if (e >= 10) return '10–99';
+                  return '1–9';
+                }
+                case 'funding': return p.company.lastFundingRound ? (formatFundingRound(p.company.lastFundingRound) || p.company.lastFundingRound) : 'None';
+                case 'tags': return '';
+                default: return '';
+              }
+            };
+            type PeopleGroupedSection = { label: string; people: FlatPerson[] };
+            const peopleGroupedSections: PeopleGroupedSection[] = (() => {
+              if (!peopleGroupByField) return [{ label: '', people: flatPeople }];
+              const map = new Map<string, FlatPerson[]>();
+              if (peopleGroupByField === 'tags') {
+                for (const p of flatPeople) {
+                  const tags = companyTags[p.companyDomain] || [];
+                  if (tags.length === 0) {
+                    if (!map.has('No tags')) map.set('No tags', []);
+                    map.get('No tags')!.push(p);
+                  } else {
+                    for (const t of tags) {
+                      if (!map.has(t)) map.set(t, []);
+                      map.get(t)!.push(p);
+                    }
+                  }
+                }
+              } else {
+                for (const p of flatPeople) {
+                  const label = peopleGroupLabel(p);
+                  if (!map.has(label)) map.set(label, []);
+                  map.get(label)!.push(p);
+                }
+              }
+              return Array.from(map.entries()).map(([label, people]) => ({ label, people }));
+            })();
 
-                {peopleTotalPages > 1 && (
+            const colCount = 6;
+            const renderPersonRow = (person: FlatPerson) => (
+              <tr
+                key={person.email}
+                className="u-tr u-tr--person"
+                onClick={() => {
+                  const contact = person.displayContact || { id: person.id, name: person.name, email: person.email, title: person.title, userName: person.source };
+                  setInlinePanel({ type: 'person', contact, company: person.company, fromPeopleTab: true });
+                }}
+              >
+                <td className="u-td-person">
+                  <div className="u-td-person-inner">
+                    <PersonAvatar email={person.email} name={person.name} avatarUrl={person.photoUrl} size={28} />
+                    <div className="u-td-person-info">
+                      <span className="u-td-person-name">{person.name}</span>
+                      {person.title && <span className="u-td-person-title">{person.title}</span>}
+                    </div>
+                  </div>
+                </td>
+                <td className="u-td-pcompany">
+                  <div className="u-td-company-inner">
+                    <CompanyLogo domain={person.companyDomain} name={person.companyName} size={20} />
+                    <span className="u-td-company-name">{person.companyName}</span>
+                  </div>
+                </td>
+                <td className="u-td-pstrength">
+                  {person.strength !== 'none' && (
+                    <span className={`u-td-strength-pill u-td-strength--${person.strength}`}>
+                      {person.strength}
+                    </span>
+                  )}
+                </td>
+                <td className="u-td-pmeetings">
+                  {person.meetings > 0 ? <span className="u-td-num">{person.meetings}</span> : <span className="u-td-muted">—</span>}
+                </td>
+                <td className="u-td-plastseen">
+                  {person.lastSeen ? <span className="u-td-muted">{getTimeAgo(person.lastSeen)}</span> : <span className="u-td-muted">—</span>}
+                </td>
+                <td className="u-td-psource">
+                  <span className={`u-td-source-badge ${person.source === 'you' ? 'u-td-source--you' : 'u-td-source--network'}`}>
+                    {person.source === 'you' ? 'You' : person.source}
+                  </span>
+                </td>
+              </tr>
+            );
+
+            const renderPersonCard = (person: FlatPerson) => (
+              <div
+                key={person.email}
+                className="u-person-card"
+                onClick={() => {
+                  const contact = person.displayContact || { id: person.id, name: person.name, email: person.email, title: person.title, userName: person.source };
+                  setInlinePanel({ type: 'person', contact, company: person.company, fromPeopleTab: true });
+                }}
+              >
+                <div className="u-person-card-top">
+                  <PersonAvatar email={person.email} name={person.name} avatarUrl={person.photoUrl} size={40} />
+                  <div className="u-person-card-info">
+                    <span className="u-person-card-name">{person.name}</span>
+                    {person.title && <span className="u-person-card-title">{person.title}</span>}
+                  </div>
+                </div>
+                <div className="u-person-card-company">
+                  <CompanyLogo domain={person.companyDomain} name={person.companyName} size={16} />
+                  <span>{person.companyName}</span>
+                </div>
+                <div className="u-person-card-meta">
+                  {person.strength !== 'none' && (
+                    <span className={`u-person-card-badge u-td-strength--${person.strength}`}>{person.strength}</span>
+                  )}
+                  {person.meetings > 0 && (
+                    <span className="u-person-card-badge">{person.meetings} meeting{person.meetings !== 1 ? 's' : ''}</span>
+                  )}
+                  {person.lastSeen && (
+                    <span className="u-person-card-badge u-person-card-badge--muted">{getTimeAgo(person.lastSeen)}</span>
+                  )}
+                </div>
+                <div className="u-person-card-source">
+                  <span className={`u-td-source-badge ${person.source === 'you' ? 'u-td-source--you' : 'u-td-source--network'}`}>
+                    {person.source === 'you' ? 'You' : person.source}
+                  </span>
+                </div>
+              </div>
+            );
+
+            const renderPeopleGroupPill = (label: string) => {
+              if (peopleGroupByField === 'strength') {
+                return <span className={`u-group-pill u-group-pill--strength u-group-pill--${label.toLowerCase()}`}>{label}</span>;
+              }
+              if (peopleGroupByField === 'tags') {
+                if (label === 'No tags') return <span className="u-group-pill u-group-pill--empty">{label}</span>;
+                const color = getTagColor(label);
+                return <span className="u-group-pill" style={{ background: color.bg, color: color.text, borderColor: color.border }}>{label}</span>;
+              }
+              return <span className="u-group-pill u-group-pill--default">{label}</span>;
+            };
+
+            return (
+              <>
+                {/* ── Card view ── */}
+                {viewMode === 'grid' && !peopleGroupByField && (
+                  <div className="u-grid u-grid--people-cards">
+                    {flatPeople.slice(peoplePageStart, peoplePageEnd).map(renderPersonCard)}
+                  </div>
+                )}
+                {viewMode === 'grid' && peopleGroupByField && peopleGroupedSections.map(section => {
+                  const isCollapsed = peopleCollapsedGroups.has(section.label);
+                  return (
+                    <div key={section.label} className="u-grid-group">
+                      <div
+                        className="u-grid-group-header"
+                        onClick={() => setPeopleCollapsedGroups(prev => {
+                          const next = new Set(prev);
+                          if (next.has(section.label)) next.delete(section.label);
+                          else next.add(section.label);
+                          return next;
+                        })}
+                      >
+                        <span className={`u-group-chevron ${isCollapsed ? 'u-group-chevron--collapsed' : ''}`}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                        </span>
+                        {renderPeopleGroupPill(section.label)}
+                        <span className="u-group-count">{section.people.length}</span>
+                      </div>
+                      {!isCollapsed && (
+                        <div className="u-grid u-grid--people-cards">
+                          {section.people.map(renderPersonCard)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* ── Table view ── */}
+                {viewMode === 'table' && (
+                  <div className="u-grid u-grid--table">
+                    <div className="u-table-wrap">
+                      <table className="u-table u-table--people">
+                        <thead>
+                          <tr>
+                            <th className="u-th-person" onClick={() => handlePeopleSort('name')} style={{ cursor: 'pointer' }}>Person{sortIcon('name')}</th>
+                            <th className="u-th-pcompany" onClick={() => handlePeopleSort('company')} style={{ cursor: 'pointer' }}>Company{sortIcon('company')}</th>
+                            <th className="u-th-pstrength" onClick={() => handlePeopleSort('strength')} style={{ cursor: 'pointer' }}>Strength{sortIcon('strength')}</th>
+                            <th className="u-th-pmeetings" onClick={() => handlePeopleSort('meetings')} style={{ cursor: 'pointer' }}>Meetings{sortIcon('meetings')}</th>
+                            <th className="u-th-plastseen" onClick={() => handlePeopleSort('lastSeen')} style={{ cursor: 'pointer' }}>Last met{sortIcon('lastSeen')}</th>
+                            <th className="u-th-psource">Source</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {!peopleGroupByField && flatPeople.slice(peoplePageStart, peoplePageEnd).map(renderPersonRow)}
+                          {peopleGroupByField && peopleGroupedSections.map(section => {
+                            const isCollapsed = peopleCollapsedGroups.has(section.label);
+                            return (
+                              <React.Fragment key={section.label}>
+                                <tr
+                                  className="u-tr-group-header"
+                                  onClick={() => setPeopleCollapsedGroups(prev => {
+                                    const next = new Set(prev);
+                                    if (next.has(section.label)) next.delete(section.label);
+                                    else next.add(section.label);
+                                    return next;
+                                  })}
+                                >
+                                  <td colSpan={colCount} className="u-td-group-header">
+                                    <span className={`u-group-chevron ${isCollapsed ? 'u-group-chevron--collapsed' : ''}`}>
+                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                                    </span>
+                                    {renderPeopleGroupPill(section.label)}
+                                    <span className="u-group-count">{section.people.length}</span>
+                                  </td>
+                                </tr>
+                                {!isCollapsed && section.people.map(renderPersonRow)}
+                              </React.Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {!peopleGroupByField && peopleTotalPages > 1 && (
                   <div className="u-grid-pagination">
                     <button className="u-grid-page-btn" disabled={gridPage === 0} onClick={() => setGridPage(gridPage - 1)}>← Prev</button>
                     <span className="u-grid-page-info">{gridPage + 1} / {peopleTotalPages}</span>
                     <button className="u-grid-page-btn" disabled={gridPage >= peopleTotalPages - 1} onClick={() => setGridPage(gridPage + 1)}>Next →</button>
                   </div>
                 )}
-              </div>
+              </>
             );
           })()}
 
