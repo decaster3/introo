@@ -4167,9 +4167,9 @@ export function AIHomePage() {
                         </span>
                       );
                     })}
-                    <div className="u-tag-picker-wrap" ref={tagPickerDomain === co.domain ? tagPickerRef : undefined}>
-                      <button className="u-panel-tag-add" onClick={() => { setTagPickerDomain(tagPickerDomain === co.domain ? null : co.domain); setTagPickerSearch(''); }}>+ Add tag</button>
-                      {tagPickerDomain === co.domain && (
+                    <div className="u-tag-picker-wrap" ref={tagPickerDomain === 'panel:' + co.domain ? tagPickerRef : undefined}>
+                      <button className="u-panel-tag-add" onClick={() => { setTagPickerDomain(tagPickerDomain === 'panel:' + co.domain ? null : 'panel:' + co.domain); setTagPickerSearch(''); }}>+ Add tag</button>
+                      {tagPickerDomain === 'panel:' + co.domain && (
                         <div className="u-tag-picker u-tag-picker--panel">
                           <input
                             className="u-tag-picker-input"
