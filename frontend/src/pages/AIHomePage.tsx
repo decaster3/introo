@@ -83,14 +83,14 @@ export function AIHomePage() {
   type SortDir = 'asc' | 'desc';
 
   // Company fields
-  type SortField = 'name' | 'contacts' | 'strength' | 'employees' | 'location' | 'industry' | 'funding' | 'tags';
+  type SortField = 'name' | 'contacts' | 'strength' | 'employees' | 'location' | 'industry' | 'funding' | 'tags' | 'connectedSince';
   interface SortRule { field: SortField; dir: SortDir }
   const SORT_FIELD_LABELS: Record<SortField, string> = {
     name: 'Company', contacts: 'Contacts', strength: 'Strength',
     employees: 'Employees', location: 'Location', industry: 'Industry',
-    funding: 'Funding', tags: 'Tags',
+    funding: 'Funding', tags: 'Tags', connectedSince: 'Connected Since',
   };
-  const ALL_SORT_FIELDS: SortField[] = ['name', 'contacts', 'strength', 'employees', 'location', 'industry', 'funding', 'tags'];
+  const ALL_SORT_FIELDS: SortField[] = ['name', 'contacts', 'strength', 'employees', 'location', 'industry', 'funding', 'tags', 'connectedSince'];
 
   const [tableSorts, setTableSorts] = useState<SortRule[]>([]);
   const [groupByField, setGroupByField] = useState<SortField | null>(null);
@@ -102,15 +102,15 @@ export function AIHomePage() {
   const groupPanelRef = useRef<HTMLDivElement>(null);
 
   // People fields
-  type PeopleSortField = 'name' | 'company' | 'strength' | 'meetings' | 'lastSeen' | 'source' | 'industry' | 'location' | 'employees' | 'funding' | 'tags';
+  type PeopleSortField = 'name' | 'company' | 'strength' | 'meetings' | 'lastSeen' | 'source' | 'industry' | 'location' | 'employees' | 'funding' | 'tags' | 'connectedSince';
   interface PeopleSortRule { field: PeopleSortField; dir: SortDir }
   const PEOPLE_FIELD_LABELS: Record<PeopleSortField, string> = {
     name: 'Person', company: 'Company', strength: 'Strength',
     meetings: 'Meetings', lastSeen: 'Last met', source: 'Source',
     industry: 'Industry', location: 'Location', employees: 'Employees',
-    funding: 'Funding', tags: 'Tags',
+    funding: 'Funding', tags: 'Tags', connectedSince: 'Connected Since',
   };
-  const ALL_PEOPLE_FIELDS: PeopleSortField[] = ['name', 'company', 'strength', 'meetings', 'lastSeen', 'source', 'industry', 'location', 'employees', 'funding', 'tags'];
+  const ALL_PEOPLE_FIELDS: PeopleSortField[] = ['name', 'company', 'strength', 'meetings', 'lastSeen', 'source', 'industry', 'location', 'employees', 'funding', 'tags', 'connectedSince'];
 
   const [peopleSorts, setPeopleSorts] = useState<PeopleSortRule[]>([]);
   const [peopleGroupByField, setPeopleGroupByField] = useState<PeopleSortField | null>(null);
@@ -1054,6 +1054,11 @@ export function AIHomePage() {
         case 'industry': return (c.industry || '').toLowerCase();
         case 'funding': return (c.lastFundingRound || '').toLowerCase();
         case 'tags': return (companyTags[c.domain] || []).join(',').toLowerCase();
+        case 'connectedSince': {
+          const dates = c.myContacts.map(ct => ct.firstSeenAt).filter(Boolean);
+          if (dates.length === 0) return '';
+          return dates.sort()[0];
+        }
         default: return 0;
       }
     };
@@ -1095,6 +1100,7 @@ export function AIHomePage() {
     companyName: string; companyDomain: string;
     strength: 'strong' | 'medium' | 'weak' | 'none';
     meetings: number; lastSeen: string;
+    firstSeenAt?: string;
     source: 'you' | string;
     photoUrl?: string | null;
     company: MergedCompany;
@@ -1116,6 +1122,7 @@ export function AIHomePage() {
           strength: c.connectionStrength || 'none',
           meetings: c.meetingsCount || 0,
           lastSeen: c.lastSeenAt || '',
+          firstSeenAt: c.firstSeenAt || '',
           source: 'you',
           photoUrl: c.photoUrl,
           company: co,
@@ -1154,6 +1161,7 @@ export function AIHomePage() {
         case 'employees': return p.company.employeeCount ?? 0;
         case 'funding': return (p.company.lastFundingRound || '').toLowerCase();
         case 'tags': return (companyTags[p.companyDomain] || []).join(',').toLowerCase();
+        case 'connectedSince': return p.firstSeenAt || '';
         default: return 0;
       }
     };
@@ -3278,6 +3286,7 @@ export function AIHomePage() {
               const totalPages = Math.ceil(displayCompanies.length / GRID_PAGE_SIZE);
 
               // Group-by logic
+              const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
               const groupLabel = (c: MergedCompany): string => {
                 if (!groupByField) return '';
                 switch (groupByField) {
@@ -3302,6 +3311,12 @@ export function AIHomePage() {
                   case 'industry': return c.industry || 'Unknown';
                   case 'funding': return c.lastFundingRound ? formatFundingRound(c.lastFundingRound) || c.lastFundingRound : 'None';
                   case 'tags': return '';
+                  case 'connectedSince': {
+                    const dates = c.myContacts.map(ct => ct.firstSeenAt).filter(Boolean);
+                    if (dates.length === 0) return 'Unknown';
+                    const earliest = new Date(dates.sort()[0]);
+                    return `${MONTH_NAMES[earliest.getMonth()]} ${earliest.getFullYear()}`;
+                  }
                   default: return '';
                 }
               };
@@ -3596,6 +3611,7 @@ export function AIHomePage() {
               peopleSortBy === col ? (peopleSortDir === 'asc' ? ' ↑' : ' ↓') : '';
 
             // People group-by logic
+            const PEOPLE_MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
             const peopleGroupLabel = (p: FlatPerson): string => {
               if (!peopleGroupByField) return '';
               switch (peopleGroupByField) {
@@ -3631,6 +3647,11 @@ export function AIHomePage() {
                 }
                 case 'funding': return p.company.lastFundingRound ? (formatFundingRound(p.company.lastFundingRound) || p.company.lastFundingRound) : 'None';
                 case 'tags': return '';
+                case 'connectedSince': {
+                  if (!p.firstSeenAt) return 'Unknown';
+                  const d = new Date(p.firstSeenAt);
+                  return `${PEOPLE_MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
+                }
                 default: return '';
               }
             };
