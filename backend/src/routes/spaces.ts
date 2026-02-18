@@ -5,11 +5,8 @@ import prisma from '../lib/prisma.js';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function maskEmail(email: string): string {
-  const [local, domain] = email.split('@');
-  if (!domain) return '***';
-  const maskedLocal = local.length <= 2 ? '*'.repeat(local.length) : local[0] + '*'.repeat(local.length - 2) + local[local.length - 1];
-  return `${maskedLocal}@${domain}`;
+function maskEmail(): string {
+  return '••••••';
 }
 
 const router = Router();
@@ -1030,16 +1027,15 @@ router.get('/:id/reach', async (req, res) => {
       const contactInfo = {
         id: contact.id,
         name: contact.name || contact.email.split('@')[0],
-        email: isOwnContact ? contact.email : maskEmail(contact.email),
+        email: isOwnContact ? contact.email : maskEmail(),
         title: contact.title,
         userId: contact.userId,
         userName: contact.user.name,
       };
 
       if (existing) {
-        // Avoid duplicates (same contact from same user)
-        const dedupEmail = maskEmail(contact.email);
-        if (!existing.contacts.some(c => c.email === contact.email || c.email === dedupEmail)) {
+        // Avoid duplicates (same contact from same user — compare by id)
+        if (!existing.contacts.some(c => c.id === contact.id)) {
           existing.contacts.push(contactInfo);
         }
       } else {

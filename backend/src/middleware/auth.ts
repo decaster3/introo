@@ -103,6 +103,17 @@ export function configurePassport() {
             return done(new Error('No email found in Google profile'));
           }
 
+          // Invite-only gate: new users must have a pending invite
+          const existingUser = await prisma.user.findUnique({ where: { email } });
+          if (!existingUser) {
+            const pendingInvite = await prisma.pendingInvite.findFirst({
+              where: { email: email.toLowerCase(), status: 'pending' },
+            });
+            if (!pendingInvite) {
+              return done(new Error('INVITE_REQUIRED'));
+            }
+          }
+
           // Encrypt tokens before storing
           const encryptedAccessToken = encryptToken(accessToken);
           const encryptedRefreshToken = refreshToken ? encryptToken(refreshToken) : undefined;

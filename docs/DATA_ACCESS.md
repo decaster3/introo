@@ -71,7 +71,7 @@ Internal documentation for how Introo controls data access across users, spaces,
 | Company funding, revenue   | **Yes**      | From Apollo enrichment                                 |
 | Contact name               | **Yes**      | First + last name visible                              |
 | Contact job title          | **Yes**      | Visible to help identify the right person              |
-| Contact email              | **Masked**   | `j***n@company.com` — domain visible, local part hidden|
+| Contact email              | **Hidden**   | Completely hidden — never shown to other members       |
 | Who knows the contact      | **Hidden**   | UI shows Space name, not the member's name             |
 | Meeting history            | **No**       | Event titles, dates, frequency — never shared          |
 | Connection strength        | **No**       | Strong/medium/weak is private to the contact owner     |
@@ -88,7 +88,7 @@ Internal documentation for how Introo controls data access across users, spaces,
 | Company industry, size     | **Yes**      | From Apollo enrichment                                 |
 | Contact name               | **Yes**      | First + last name visible                              |
 | Contact job title          | **Yes**      | Visible                                                |
-| Contact email              | **Masked**   | `j***n@company.com` — always masked for peer's contacts|
+| Contact email              | **Hidden**   | Completely hidden — never shown to the peer            |
 | Meeting history            | **No**       | Never shared                                           |
 | Connection strength        | **No**       | Private to the contact owner                           |
 | Tags                       | **No**       | Private                                                |
@@ -127,7 +127,7 @@ Internal documentation for how Introo controls data access across users, spaces,
 **Access control (backend):**
 - `GET /api/spaces/:id/reach` — verifies user is owner or approved member
 - Contacts query: `userId: { in: memberUserIds }, isApproved: true`
-- Email masking: `isOwnContact ? contact.email : maskEmail(contact.email)`
+- Email hiding: `isOwnContact ? contact.email : '••••••'`
 - Intro requests: filtered per-member (only see own + those you can help with)
 
 ### 1:1 Connections
@@ -143,32 +143,24 @@ Internal documentation for how Introo controls data access across users, spaces,
          └─────────┘    (masked)        └─────────┘
 
    Mutual: both see each other's companies + contacts.
-   Emails always masked. Meeting data never shared.
+   Emails completely hidden. Meeting data never shared.
 ```
 
 **Access control (backend):**
 - `GET /api/connections/:id/reach` — verifies connection is `accepted` and user is one of the two parties
-- All peer contact emails are masked: `maskEmail(contact.email)`
+- All peer contact emails are hidden: returns `'••••••'` instead of real email
 - No meeting data included in the response
 
 ---
 
-## Email Masking
+## Email Hiding
 
-Emails are masked using this function:
+Contact email addresses are **completely hidden** from other users. The backend returns a placeholder string (`••••••`) instead of any part of the real email.
 
-```
-j***n@company.com    (from: john@company.com)
-a*e@startup.io       (from: ace@startup.io)
-**@gmail.com         (from: ab@gmail.com)
-```
-
-**Rule:** First character + asterisks + last character of local part. Domain is always visible. For local parts ≤ 2 characters, the entire local part is replaced with asterisks.
-
-**Where masking applies:**
-- Space reach endpoint — other members' contact emails
-- Connection reach endpoint — all peer contact emails
-- Never on your own contacts — you always see full emails
+**Where hiding applies:**
+- Space reach endpoint — other members' contact emails are replaced entirely
+- Connection reach endpoint — all peer contact emails are replaced entirely
+- Your own contacts — you always see your own full emails
 
 ---
 
@@ -218,6 +210,8 @@ Notifications are always scoped to `userId`. A user can only read/delete their o
 ---
 
 ## Authentication & Authorization
+
+**Invite-only sign-up:** New users must have a `PendingInvite` record before they can sign up. The Passport OAuth callback checks if the user already exists OR has a pending invite — if neither, sign-up is rejected with `INVITE_REQUIRED`.
 
 All API routes use `authMiddleware` which:
 1. Checks for a valid session cookie (Passport.js + Google OAuth)
@@ -272,7 +266,7 @@ All API routes use `authMiddleware` which:
 
 | Data                                | Shared?       |
 |-------------------------------------|---------------|
-| Full contact email addresses        | **Never** (masked in spaces & connections) |
+| Full contact email addresses        | **Never** (completely hidden in spaces & connections) |
 | Meeting titles / calendar events    | **Never**     |
 | Meeting dates / frequency           | **Never**     |
 | Connection strength (strong/medium/weak) | **Never** |

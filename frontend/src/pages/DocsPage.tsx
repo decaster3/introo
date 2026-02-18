@@ -27,8 +27,8 @@ function GettingStartedArticle({ onNavigate }: { onNavigate: (id: ArticleId) => 
           <div className="docs-step">
             <span className="docs-step-num">1</span>
             <div>
-              <strong>Connect your Google Calendar</strong>
-              <p>Sign in with Google and Introo scans the past 5 years of your meetings. It extracts every person you've met with from calendar event attendees — automatically.</p>
+              <strong>Get an invite</strong>
+              <p>Introo is invite-only. An existing user sends an invite to your email — either as a 1:1 Connection or to join their Space. Once invited, sign in with Google and your calendar syncs automatically.</p>
             </div>
           </div>
           <div className="docs-step">
@@ -63,11 +63,11 @@ function GettingStartedArticle({ onNavigate }: { onNavigate: (id: ArticleId) => 
         <div className="docs-grid">
           <div className="docs-card">
             <h4>Your contacts are private</h4>
-            <p>Nobody can see your contacts, emails, or meeting history unless you explicitly share through a Connection or Space.</p>
+            <p>Nobody can see your contacts or meeting history unless you explicitly share through a Connection or Space.</p>
           </div>
           <div className="docs-card">
-            <h4>Emails are always masked</h4>
-            <p>When you do share, contact emails are partially hidden (e.g. j***n@company.com). Full emails are never exposed to others.</p>
+            <h4>Emails are never shown</h4>
+            <p>When you share your network, contact email addresses are completely hidden from others. Only names and job titles are visible.</p>
           </div>
           <div className="docs-card">
             <h4>Meetings are never shared</h4>
@@ -415,8 +415,8 @@ function ConnectionsArticle() {
           </div>
           <div className="docs-share-row">
             <span>Contact emails</span>
-            <span className="docs-share-no">Masked</span>
-            <span>Emails are partially hidden (e.g. r***@company.com) — never shown in full</span>
+            <span className="docs-share-no">Hidden</span>
+            <span>Email addresses are completely hidden — never shown to your connection</span>
           </div>
           <div className="docs-share-row">
             <span>Meeting details</span>
@@ -513,7 +513,7 @@ function SpacesArticle() {
           <div className="docs-share-row">
             <span>Who knows who</span>
             <span className="docs-share-partial">Partial</span>
-            <span>Members see job titles at each company, but not full names or emails of other members' contacts</span>
+            <span>Members see names and job titles at each company, but emails are completely hidden</span>
           </div>
           <div className="docs-share-row">
             <span>Your own contacts</span>

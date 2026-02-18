@@ -180,6 +180,11 @@ router.get('/google/callback', async (req, res, next) => {
   // ── Normal login flow (via Passport) ──
   console.log('OAuth callback received, redirecting to:', frontendUrl);
   passport.authenticate('google', { session: false, failureRedirect: '/auth/failure' }, (err: Error | null, user: any) => {
+    if (err?.message === 'INVITE_REQUIRED') {
+      console.log('[auth] Sign-up blocked — no invite found');
+      res.redirect(`${frontendUrl}/login?error=invite_required`);
+      return;
+    }
     if (err || !user) {
       console.error('Auth failed:', err);
       res.redirect(`${frontendUrl}/login?error=auth_failed`);

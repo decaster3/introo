@@ -42,16 +42,20 @@ Introo turns your Google Calendar into a searchable map of your professional net
 
 ## User Journey
 
-### Step 1: Sign Up (Google OAuth)
+### Step 1: Get Invited & Sign Up (Google OAuth)
 
-User signs in with Google. The OAuth scope includes `calendar.readonly`, which grants access to meeting data.
+Introo is invite-only. A new user must have a `PendingInvite` record (created when an existing user invites them by email) before they can sign up. If no invite exists, the OAuth callback rejects with `INVITE_REQUIRED`.
 
 ```
-Browser → Google OAuth → Backend creates/updates User record
+Browser → Google OAuth → Backend checks:
+                           1. User already exists? → Allow (returning user)
+                           2. PendingInvite exists for this email? → Allow (new invited user)
+                           3. Neither? → REJECT (redirect to /login?error=invite_required)
+                         → Creates/updates User record
                          → Encrypts OAuth tokens (AES-256-GCM)
                          → Issues JWT cookie (7-day expiry)
-                         → Converts any pending invites into connections/space memberships
-                         → Redirects to /onboarding
+                         → Converts pending invites into connections/space memberships
+                         → Redirects to /home
 ```
 
 **Details:** [Security & Authentication](./DATA_ACCESS.md#7-security--authentication)
@@ -156,7 +160,7 @@ Alice invites Bob (by email)
 ```
 
 **What's shared:** Company names, contact names, job titles
-**What's masked:** Contact emails (`j***n@company.com`)
+**What's hidden:** Contact emails (completely hidden, not even partially shown)
 **What's NEVER shared:** Meeting data, strength scores, tags, views
 
 **Details:** [Data Access — 1:1 Connections](./DATA_ACCESS.md#what-a-11-connection-sees-about-the-peers-contacts)
@@ -171,7 +175,7 @@ Owner creates Space "Sales Team"
      │
      └── All approved members contribute their contacts
          → Combined reach view: every company any member knows
-         → Emails masked, meeting data hidden
+         → Emails hidden, meeting data hidden
          → UI shows "from Sales Team" not "from Bob"
 ```
 
@@ -395,7 +399,7 @@ The entire authenticated experience lives in `/home` — a single-page app with 
 | Authentication         | Google OAuth 2.0 → JWT in httpOnly cookie (7-day expiry) |
 | Token storage          | AES-256-GCM encryption at rest                           |
 | Data isolation         | Every query scoped by `userId` from JWT                  |
-| Shared data masking    | Contact emails masked in spaces & connections            |
+| Email hiding           | Contact emails completely hidden in spaces & connections  |
 | CSRF                   | SameSite=lax cookies (same-domain deployment)            |
 | XSS                    | CSP headers, httpOnly cookies, HTML escaping in emails   |
 | Rate limiting          | Global (1k/15min), auth (50/15min), email (20/hr/user)  |

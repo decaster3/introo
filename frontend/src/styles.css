@@ -242,6 +242,38 @@ body {
   font-size: 0.9rem;
 }
 
+.login-invite-required {
+  background: rgba(251, 191, 36, 0.06);
+  border: 1px solid rgba(251, 191, 36, 0.18);
+  border-radius: var(--radius-md);
+  padding: 1.1rem 1.25rem;
+  margin-bottom: 1.5rem;
+  text-align: left;
+}
+
+.login-invite-icon {
+  font-size: 1.3rem;
+  margin-bottom: 0.4rem;
+}
+
+.login-invite-required strong {
+  display: block;
+  font-size: 0.9rem;
+  color: rgba(255,255,255,0.85);
+  margin-bottom: 0.4rem;
+}
+
+.login-invite-required p {
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: rgba(255,255,255,0.45);
+  margin: 0 0 0.35rem;
+}
+
+.login-invite-required p:last-child {
+  margin-bottom: 0;
+}
+
 .google-login-btn {
   display: flex;
   align-items: center;
@@ -887,6 +919,69 @@ body {
   letter-spacing: 0.02em;
 }
 
+/* Invite-only box */
+.lp-invite-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+  padding: 1.1rem 1.35rem;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  max-width: 420px;
+  text-align: left;
+}
+
+.lp-invite-icon {
+  flex-shrink: 0;
+  color: rgba(255,255,255,0.35);
+  margin-top: 0.1rem;
+}
+
+.lp-invite-text strong {
+  display: block;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: rgba(255,255,255,0.88);
+  margin-bottom: 0.3rem;
+}
+
+.lp-invite-text p {
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: rgba(255,255,255,0.4);
+  margin: 0;
+}
+
+/* Secondary button (sign in) */
+.lp-btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.4rem;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  color: rgba(255,255,255,0.6);
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-decoration: none;
+  letter-spacing: -0.01em;
+}
+
+.lp-btn-secondary:hover {
+  background: rgba(255,255,255,0.05);
+  border-color: rgba(255,255,255,0.2);
+  color: rgba(255,255,255,0.8);
+}
+
+.lp-btn-secondary--lg {
+  padding: 0.75rem 1.8rem;
+  font-size: 0.88rem;
+}
+
 /* Primary CTA button */
 .lp-btn-primary {
   display: inline-flex;
@@ -1096,7 +1191,15 @@ body {
   line-height: 1.3;
   margin-bottom: 2rem;
 }
-.lp-cta .lp-btn-primary {
+.lp-cta-sub {
+  font-size: 0.85rem;
+  color: rgba(255,255,255,0.35);
+  margin: 0.75rem auto 1.5rem;
+  max-width: 480px;
+  line-height: 1.55;
+}
+
+.lp-cta .lp-btn-secondary {
   margin: 0 auto;
 }
 

@@ -35,11 +35,18 @@ export function LoginPage() {
         </div>
         <p className="login-tagline">Your professional network, supercharged</p>
         
-        {error && (
+        {error === 'invite_required' ? (
+          <div className="login-invite-required">
+            <div className="login-invite-icon">🔒</div>
+            <strong>Invite required</strong>
+            <p>Introo is invite-only. You need an invite from someone already on the platform before you can sign up.</p>
+            <p>Ask a colleague or friend to send you an invite from their Introo account.</p>
+          </div>
+        ) : error ? (
           <div className="login-error">
             Authentication failed. Please try again.
           </div>
-        )}
+        ) : null}
 
         <button className="google-login-btn" onClick={login}>
           <svg viewBox="0 0 24 24" className="google-icon">
@@ -52,7 +59,9 @@ export function LoginPage() {
         </button>
 
         <p className="login-note">
-          We'll connect to your Google Calendar to discover your professional network
+          {error === 'invite_required'
+            ? 'Already received an invite? Sign in with the same email it was sent to.'
+            : 'Invite-only — sign in if you\'ve received an invite from an existing user.'}
         </p>
 
         <div className="login-legal">
