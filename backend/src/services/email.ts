@@ -34,6 +34,7 @@ export type EmailPreferences = {
   intros?: boolean;
   notifications?: boolean;
   digests?: boolean;
+  briefings?: boolean;
 };
 
 // ─── Base layout ─────────────────────────────────────────────────────────────
@@ -513,6 +514,230 @@ export async function sendWeeklyDigest(
   return send({
     to: email,
     subject: `${firstName}, your week: ${stats.newContacts} new contacts & ${stats.newMeetings} meetings`,
+    html,
+  });
+}
+
+/** Daily morning briefing — today's meetings with enriched attendee data */
+export interface BriefingAttendee {
+  name: string;
+  title?: string | null;
+  linkedinUrl?: string | null;
+  companyName?: string | null;
+  companyDomain?: string | null;
+  companyIndustry?: string | null;
+  companyEmployees?: number | null;
+  companyFunding?: string | null;
+  companyLinkedinUrl?: string | null;
+  meetingsCount: number;
+  strength: 'strong' | 'medium' | 'weak' | 'none';
+  isInternal: boolean;
+}
+
+export interface BriefingMeeting {
+  title: string;
+  startTime: string;
+  endTime: string;
+  duration: number;
+  attendees: BriefingAttendee[];
+}
+
+function cleanCompanyName(name: string): string {
+  return name.split(/\s[-–—|·]\s/)[0].trim();
+}
+
+function formatEmployees(count: number): string {
+  if (count >= 1000000) return `${(count / 1000000).toFixed(1).replace(/\.0$/, '')}M`;
+  if (count >= 1000) return `${(count / 1000).toFixed(1).replace(/\.0$/, '')}K`;
+  return count.toString();
+}
+
+const STRENGTH_COLORS: Record<string, string> = {
+  strong: '#22c55e',
+  medium: '#eab308',
+  weak: '#a1a1aa',
+  none: '#d4d4d8',
+};
+
+const TAG_STYLE = 'display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 4px; margin-right: 4px; margin-bottom: 4px;';
+const TAG_MUTED = `${TAG_STYLE} background: #f4f4f5; color: #52525b;`;
+const TAG_ACCENT = `${TAG_STYLE} background: #eef2ff; color: #4f46e5;`;
+
+export async function sendDailyBriefing(
+  userId: string,
+  meetings: BriefingMeeting[],
+  timezone: string,
+): Promise<EmailResult> {
+  const prefs = await getUserEmailPrefs(userId);
+  if (prefs.briefings === false) {
+    return { success: true, id: 'skipped-prefs' };
+  }
+
+  const email = await getUserEmail(userId);
+  if (!email) return { success: false, error: 'User email not found' };
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { name: true },
+  });
+  const firstName = user?.name?.split(' ')[0] || 'there';
+
+  const dateLabel = new Date().toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    timeZone: timezone,
+  });
+
+  const formatTime = (iso: string) => new Date(iso).toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: timezone,
+  });
+
+  const formatDuration = (min: number) => min >= 60
+    ? `${Math.floor(min / 60)}h${min % 60 ? ` ${min % 60}m` : ''}`
+    : `${min} min`;
+
+  // Count new faces across all meetings (deduplicated by name)
+  const externalCompanies = new Set<string>();
+  const seenNewFaces = new Set<string>();
+  meetings.forEach(m => m.attendees.forEach(a => {
+    if (!a.isInternal && a.companyDomain) externalCompanies.add(a.companyDomain);
+    if (!a.isInternal && a.meetingsCount === 0) seenNewFaces.add(a.name);
+  }));
+  const newFaces = seenNewFaces.size;
+
+  const meetingsHtml = meetings.map(m => {
+    const external = m.attendees.filter(a => !a.isInternal);
+    const internal = m.attendees.filter(a => a.isInternal);
+    const allInternal = external.length === 0;
+
+    // Deduplicate company info — show company card once per unique external company
+    const externalCompanyMap = new Map<string, { attendees: BriefingAttendee[]; industry?: string | null; employees?: number | null; funding?: string | null; linkedinUrl?: string | null }>();
+    for (const a of external) {
+      const key = a.companyDomain || a.name;
+      const entry = externalCompanyMap.get(key);
+      if (entry) {
+        entry.attendees.push(a);
+      } else {
+        externalCompanyMap.set(key, {
+          attendees: [a],
+          industry: a.companyIndustry,
+          employees: a.companyEmployees,
+          funding: a.companyFunding,
+          linkedinUrl: a.companyLinkedinUrl,
+        });
+      }
+    }
+
+    const renderAttendee = (a: BriefingAttendee) => {
+      const dotColor = STRENGTH_COLORS[a.strength];
+      const safeName = escapeHtml(a.name);
+
+      const nameHtml = a.linkedinUrl
+        ? `<a href="${a.linkedinUrl}" style="color: #18181b; text-decoration: none; font-size: 14px; font-weight: 600;">${safeName}</a> <a href="${a.linkedinUrl}" style="color: #0a66c2; text-decoration: none; font-size: 11px; font-weight: 500;">LinkedIn</a>`
+        : `<span style="font-size: 14px; font-weight: 600; color: #18181b;">${safeName}</span>`;
+
+      const detailParts: string[] = [];
+      if (a.title) detailParts.push(escapeHtml(a.title));
+
+      if (a.meetingsCount === 0) {
+        detailParts.push(`<span style="color: #6366f1; font-weight: 600;">First meeting</span>`);
+      } else {
+        detailParts.push(`Met ${a.meetingsCount}x`);
+      }
+
+      return `<div style="display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px;">
+        <div style="width: 8px; height: 8px; border-radius: 50%; background: ${dotColor}; flex-shrink: 0; margin-top: 6px;"></div>
+        <div style="min-width: 0;">
+          <div>${nameHtml}</div>
+          <div style="font-size: 12px; color: #71717a; margin-top: 2px;">${detailParts.join(' &middot; ')}</div>
+        </div>
+      </div>`;
+    };
+
+    // Build external section — grouped by company with data tags
+    let externalHtml = '';
+    for (const [companyKey, group] of externalCompanyMap) {
+      const companyName = group.attendees[0].companyName ? cleanCompanyName(group.attendees[0].companyName) : companyKey;
+      const companyDomain = group.attendees[0].companyDomain;
+
+      const companyLink = companyDomain
+        ? `<a href="${FRONTEND_URL}/home?company=${encodeURIComponent(companyDomain)}" style="color: #18181b; text-decoration: none; font-weight: 700; font-size: 13px;">${escapeHtml(companyName)}</a>`
+        : `<span style="font-weight: 700; font-size: 13px; color: #18181b;">${escapeHtml(companyName)}</span>`;
+
+      const tags: string[] = [];
+      if (group.industry) tags.push(`<span style="${TAG_MUTED}">${escapeHtml(group.industry)}</span>`);
+      if (group.employees) tags.push(`<span style="${TAG_MUTED}">${formatEmployees(group.employees)} employees</span>`);
+      if (group.funding) tags.push(`<span style="${TAG_ACCENT}">${escapeHtml(group.funding)}</span>`);
+      if (group.linkedinUrl) tags.push(`<a href="${group.linkedinUrl}" style="${TAG_MUTED} text-decoration: none; color: #0a66c2;">LinkedIn</a>`);
+
+      const tagsHtml = tags.length > 0
+        ? `<div style="margin-top: 4px; margin-bottom: 8px;">${tags.join('')}</div>`
+        : '';
+
+      const viewLink = companyDomain
+        ? `<div style="margin-top: 6px;"><a href="${FRONTEND_URL}/home?company=${encodeURIComponent(companyDomain)}" style="font-size: 12px; color: #6366f1; text-decoration: none; font-weight: 500;">Full profile, history &amp; LinkedIn &rarr;</a></div>`
+        : '';
+
+      externalHtml += `<div style="background: #ffffff; border: 1px solid #f0f0f0; border-radius: 10px; padding: 14px 16px; margin-bottom: 10px;">
+        ${companyLink}
+        ${tagsHtml}
+        <div style="margin-top: 8px;">${group.attendees.map(renderAttendee).join('')}</div>
+        ${viewLink}
+      </div>`;
+    }
+
+    // Internal attendees — collapsed or compact list
+    let internalHtml = '';
+    if (internal.length > 0) {
+      if (allInternal) {
+        const names = internal.map(a => escapeHtml(a.name)).join(', ');
+        internalHtml = `<div style="font-size: 13px; color: #71717a; margin-top: 4px;">${names}</div>`;
+      } else {
+        internalHtml = `<div style="margin-top: 6px;">
+          <div style="font-size: 12px; color: #a1a1aa;">+ ${internal.length} from your team</div>
+        </div>`;
+      }
+    }
+
+    return `<div style="background: #fafafa; border-radius: 12px; padding: 18px 20px; margin-bottom: 12px;">
+      <div style="font-size: 11px; color: #a1a1aa; letter-spacing: 0.3px; font-weight: 600; margin-bottom: 6px;">${formatTime(m.startTime)} &middot; ${formatDuration(m.duration)}</div>
+      <div style="font-size: 16px; font-weight: 700; color: #18181b; margin-bottom: 14px; line-height: 1.3;">${escapeHtml(m.title)}</div>
+      ${externalHtml}${internalHtml}
+    </div>`;
+  }).join('');
+
+  // Summary line
+  const summaryParts: string[] = [`${meetings.length} meeting${meetings.length !== 1 ? 's' : ''}`];
+  if (newFaces > 0) summaryParts.push(`${newFaces} new face${newFaces !== 1 ? 's' : ''}`);
+  if (externalCompanies.size > 0) summaryParts.push(`${externalCompanies.size} ${externalCompanies.size !== 1 ? 'companies' : 'company'}`);
+
+  // New contacts saved message
+  const savedHtml = newFaces > 0
+    ? `<div style="background: #eef2ff; border-radius: 10px; padding: 14px 18px; margin-top: 16px; font-size: 13px; color: #4338ca; line-height: 1.5;">
+        ${newFaces} new contact${newFaces !== 1 ? 's' : ''} saved to your network. <a href="${FRONTEND_URL}/home" style="color: #4338ca; font-weight: 600;">View all contacts &rarr;</a>
+      </div>`
+    : '';
+
+  const html = baseLayout(`
+    <h1>Your day ahead</h1>
+    <p style="color: #71717a; margin-bottom: 24px;">${dateLabel} &mdash; ${summaryParts.join(' &middot; ')}</p>
+
+    ${meetingsHtml}
+    ${savedHtml}
+
+    <div style="margin-top: 24px;">
+      <a href="${FRONTEND_URL}/home" class="btn">Open ${APP_NAME}</a>
+    </div>
+
+    <p class="muted">This is your daily briefing from ${APP_NAME}. You can turn it off in <a href="${FRONTEND_URL}/home?panel=settings" style="color: #71717a;">Settings</a>.</p>
+  `, { preheader: `${summaryParts.join(' · ')} today — here's who you're meeting.` });
+
+  return send({
+    to: email,
+    subject: `${firstName}, ${meetings.length} meeting${meetings.length !== 1 ? 's' : ''} today — your briefing`,
     html,
   });
 }

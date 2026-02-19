@@ -1,4 +1,5 @@
-import { calendarApi, type CalendarAccountInfo } from '../../lib/api';
+import { useState } from 'react';
+import { calendarApi, authApi, type CalendarAccountInfo } from '../../lib/api';
 import { PersonAvatar } from '../../components';
 import { resetOnboarding } from '../../components/OnboardingTour';
 import type { User } from '../../types';
@@ -208,6 +209,15 @@ export function SettingsPanel({
         )}
       </div>
 
+      {/* Daily Briefing */}
+      <div className="u-panel-section">
+        <h4 className="u-panel-section-h">Daily Briefing</h4>
+        <span className="u-settings-meta" style={{ marginBottom: '0.4rem' }}>
+          Get a morning email at 9 AM with today's meetings and attendee info.
+        </span>
+        <TimezoneSelector currentUser={currentUser} />
+      </div>
+
       <div className="u-settings-help">
         <span className="u-settings-help-label">Help</span>
         <a
@@ -241,6 +251,61 @@ export function SettingsPanel({
           Log out
         </button>
       </div>
+    </div>
+  );
+}
+
+function TimezoneSelector({ currentUser }: { currentUser: User | null }) {
+  const detectedTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const [tz, setTz] = useState(currentUser?.timezone || detectedTz || 'UTC');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const timezones = [
+    ...new Set([
+      detectedTz,
+      currentUser?.timezone,
+      'UTC',
+      'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+      'America/Sao_Paulo', 'America/Toronto',
+      'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Moscow',
+      'Europe/Istanbul', 'Europe/Warsaw', 'Europe/Lisbon',
+      'Asia/Dubai', 'Asia/Kolkata', 'Asia/Singapore', 'Asia/Tokyo',
+      'Asia/Shanghai', 'Asia/Seoul', 'Asia/Hong_Kong',
+      'Australia/Sydney', 'Pacific/Auckland',
+      'Africa/Cairo', 'Africa/Johannesburg',
+    ].filter(Boolean)),
+  ].sort() as string[];
+
+  const handleChange = async (newTz: string) => {
+    setTz(newTz);
+    setSaving(true);
+    setSaved(false);
+    try {
+      await authApi.updateProfile({ timezone: newTz });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch { /* ignore */ }
+    setSaving(false);
+  };
+
+  return (
+    <div className="u-settings-row">
+      <div className="u-settings-row-info">
+        <span className="u-settings-row-label">Timezone</span>
+        <span className="u-settings-row-status">
+          {saving ? 'Saving...' : saved ? 'Saved' : 'For 9 AM daily email'}
+        </span>
+      </div>
+      <select
+        className="u-settings-tz-select"
+        value={tz}
+        onChange={e => handleChange(e.target.value)}
+      >
+        {timezones.map(t => (
+          <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>
+        ))}
+      </select>
     </div>
   );
 }

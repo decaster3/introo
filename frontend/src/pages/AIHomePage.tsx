@@ -139,6 +139,45 @@ export function AIHomePage() {
   const [viewMode, setViewMode] = useState<'grid' | 'table'>(() => {
     try { const v = localStorage.getItem('introo_view_mode'); return v === 'table' ? 'table' : 'grid'; } catch { return 'grid'; }
   });
+
+  // ─── Draggable table columns ────────────────────────────────────────────────
+  type ColId = 'contacts' | 'strength' | 'employees' | 'location' | 'industry' | 'funding' | 'tags';
+  const DEFAULT_COL_ORDER: ColId[] = ['contacts', 'strength', 'employees', 'location', 'industry', 'funding', 'tags'];
+  const COL_LABELS: Record<ColId, string> = { contacts: 'Contacts', strength: 'Strength', employees: 'Employees', location: 'Location', industry: 'Industry', funding: 'Funding', tags: 'Tags' };
+  const COL_TH_CLASS: Record<ColId, string> = { contacts: 'u-th-contacts', strength: 'u-th-strength', employees: 'u-th-employees', location: 'u-th-location', industry: 'u-th-industry', funding: 'u-th-funding', tags: 'u-th-tags' };
+
+  const [tableColOrder, setTableColOrder] = useState<ColId[]>(() => {
+    try {
+      const saved = localStorage.getItem('introo_table_col_order');
+      if (saved) {
+        const parsed = JSON.parse(saved) as ColId[];
+        if (Array.isArray(parsed) && parsed.length === DEFAULT_COL_ORDER.length && parsed.every(c => DEFAULT_COL_ORDER.includes(c))) return parsed;
+      }
+    } catch { /* noop */ }
+    return DEFAULT_COL_ORDER;
+  });
+  const dragColRef = useRef<ColId | null>(null);
+  const [dragOverCol, setDragOverCol] = useState<ColId | null>(null);
+
+  const handleColDragStart = (col: ColId) => { dragColRef.current = col; };
+  const handleColDragOver = (e: React.DragEvent, col: ColId) => { e.preventDefault(); if (dragColRef.current && dragColRef.current !== col) setDragOverCol(col); };
+  const handleColDrop = (col: ColId) => {
+    const from = dragColRef.current;
+    if (!from || from === col) { dragColRef.current = null; setDragOverCol(null); return; }
+    setTableColOrder(prev => {
+      const next = [...prev];
+      const fromIdx = next.indexOf(from);
+      const toIdx = next.indexOf(col);
+      next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, from);
+      localStorage.setItem('introo_table_col_order', JSON.stringify(next));
+      return next;
+    });
+    dragColRef.current = null;
+    setDragOverCol(null);
+  };
+  const handleColDragEnd = () => { dragColRef.current = null; setDragOverCol(null); };
+
   const [entityTab, setEntityTab] = useState<'companies' | 'people'>('companies');
   const [peopleSortBy, setPeopleSortBy] = useState<'name' | 'company' | 'strength' | 'meetings' | 'lastSeen'>('meetings');
   const [peopleSortDir, setPeopleSortDir] = useState<'asc' | 'desc'>('desc');
@@ -147,6 +186,7 @@ export function AIHomePage() {
   const [excludeMyContacts, setExcludeMyContacts] = useState(false);
   const [expandedDomain, setExpandedDomain] = useState<string | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [expandedMeetingIdx, setExpandedMeetingIdx] = useState<number | null>(null);
   const [contactsExpanded, setContactsExpanded] = useState(false);
   const [aboutExpanded, setAboutExpanded] = useState(false);
   const [inlinePanel, setInlinePanel] = useState<InlinePanel | null>(null);
@@ -1306,7 +1346,7 @@ export function AIHomePage() {
   useEffect(() => { setGridPage(0); }, [filteredCompanies.length, excludeMyContacts, entityTab]);
 
   // Reset expand / menu states when switching panels
-  useEffect(() => { setHistoryExpanded(false); setContactsExpanded(false); setAboutExpanded(false); setDeleteConfirmId(null); setDeletingId(null); }, [inlinePanel]);
+  useEffect(() => { setHistoryExpanded(false); setExpandedMeetingIdx(null); setContactsExpanded(false); setAboutExpanded(false); setDeleteConfirmId(null); setDeletingId(null); }, [inlinePanel]);
 
   // View match counts
   // Dynamic country list from enriched data
@@ -1997,7 +2037,7 @@ export function AIHomePage() {
   useEffect(() => {
     refreshCalendarAccounts();
 
-    // Auto-open settings if redirected from add-account callback
+    // Handle URL params: panel=settings, company=domain
     const params = new URLSearchParams(window.location.search);
     if (params.get('panel') === 'settings') {
       setInlinePanel({ type: 'settings' });
@@ -2010,10 +2050,26 @@ export function AIHomePage() {
         alert('This is already your main account.');
       }
 
-      // Clean up URL
       window.history.replaceState({}, '', window.location.pathname);
     }
+
   }, [refreshCalendarAccounts]);
+
+  // Deep link: ?company=domain opens the company panel once data is loaded
+  const deepLinkHandled = useRef(false);
+  useEffect(() => {
+    if (deepLinkHandled.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const companyDomain = params.get('company');
+    if (companyDomain && mergedCompanies.length > 0) {
+      deepLinkHandled.current = true;
+      const match = mergedCompanies.find(c => c.domain === companyDomain);
+      if (match) {
+        setInlinePanel({ type: 'company', company: match });
+      }
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, [mergedCompanies]);
 
   // Auto-sync calendars every 2 hours while the app is open
   useEffect(() => {
@@ -3627,63 +3683,64 @@ export function AIHomePage() {
                         <thead>
                           <tr>
                             <th className="u-th-company">Company</th>
-                            <th className="u-th-contacts">Contacts</th>
-                            <th className="u-th-strength">Strength</th>
-                            <th className="u-th-employees">Employees</th>
-                            <th className="u-th-location">Location</th>
-                            <th className="u-th-industry">Industry</th>
-                            <th className="u-th-funding">Funding</th>
-                            <th className="u-th-tags">Tags</th>
+                            {tableColOrder.map(col => (
+                              <th
+                                key={col}
+                                className={`${COL_TH_CLASS[col]} ${dragOverCol === col ? 'u-th-drag-over' : ''}`}
+                                draggable
+                                onDragStart={() => handleColDragStart(col)}
+                                onDragOver={e => handleColDragOver(e, col)}
+                                onDrop={() => handleColDrop(col)}
+                                onDragEnd={handleColDragEnd}
+                              >
+                                {COL_LABELS[col]}
+                              </th>
+                            ))}
                             <th className="u-th-actions"></th>
                           </tr>
                         </thead>
                         <tbody>
                           {(() => {
-                            const colCount = 9;
-                            const renderRow = (company: MergedCompany) => {
-                              const tags = companyTags[company.domain] || [];
-                              const totalMeetings = company.myContacts.reduce((sum, c) => sum + (c.meetingsCount || 0), 0);
-                              return (
-                                <tr
-                                  key={company.domain}
-                                  className="u-tr"
-                                  onClick={() => setInlinePanel({ type: 'company', company })}
-                                >
-                                  <td className="u-td-company">
-                                    <div className="u-td-company-inner">
-                                      <CompanyLogo domain={company.domain} name={company.name} size={22} />
-                                      <div className="u-td-company-info">
-                                        <span className="u-td-company-name">{company.name}</span>
-                                        <span className="u-td-company-domain">{company.domain}</span>
-                                      </div>
-                                    </div>
-                                  </td>
-                                  <td className="u-td-contacts">
+                            const colCount = 2 + tableColOrder.length; // company + dynamic cols + actions
+                            const renderColCell = (col: ColId, company: MergedCompany, tags: string[], totalMeetings: number) => {
+                              switch (col) {
+                                case 'contacts': return (
+                                  <td key={col} className="u-td-contacts">
                                     <span className="u-td-num">{company.totalCount}</span>
                                     {totalMeetings > 0 && <span className="u-td-meetings">{totalMeetings} mtg</span>}
                                   </td>
-                                  <td className="u-td-strength">
+                                );
+                                case 'strength': return (
+                                  <td key={col} className="u-td-strength">
                                     {company.bestStrength !== 'none' && (
-                                      <span className={`u-td-strength-pill u-td-strength--${company.bestStrength}`}>
-                                        {company.bestStrength}
-                                      </span>
+                                      <span className={`u-td-strength-pill u-td-strength--${company.bestStrength}`}>{company.bestStrength}</span>
                                     )}
                                   </td>
-                                  <td className="u-td-employees">
+                                );
+                                case 'employees': return (
+                                  <td key={col} className="u-td-employees">
                                     {company.employeeCount ? company.employeeCount.toLocaleString() : enriching && !company.enrichedAt ? <span className="u-td-shimmer" /> : '—'}
                                   </td>
-                                  <td className="u-td-location">
+                                );
+                                case 'location': return (
+                                  <td key={col} className="u-td-location">
                                     {company.city || company.country
                                       ? [company.city, company.country].filter(Boolean).join(', ')
                                       : enriching && !company.enrichedAt ? <span className="u-td-shimmer" /> : '—'}
                                   </td>
-                                  <td className="u-td-industry">
+                                );
+                                case 'industry': return (
+                                  <td key={col} className="u-td-industry">
                                     {company.industry || (enriching && !company.enrichedAt ? <span className="u-td-shimmer" /> : '—')}
                                   </td>
-                                  <td className="u-td-funding">
+                                );
+                                case 'funding': return (
+                                  <td key={col} className="u-td-funding">
                                     {company.lastFundingRound ? formatFundingRound(company.lastFundingRound) : enriching && !company.enrichedAt ? <span className="u-td-shimmer" /> : '—'}
                                   </td>
-                                  <td className="u-td-tags" onClick={e => e.stopPropagation()}>
+                                );
+                                case 'tags': return (
+                                  <td key={col} className="u-td-tags" onClick={e => e.stopPropagation()}>
                                     <div className="u-td-tags-inner">
                                       {tags.map(t => {
                                         const color = getTagColor(t);
@@ -3744,6 +3801,30 @@ export function AIHomePage() {
                                       </div>
                                     </div>
                                   </td>
+                                );
+                                default: return null;
+                              }
+                            };
+
+                            const renderRow = (company: MergedCompany) => {
+                              const tags = companyTags[company.domain] || [];
+                              const totalMeetings = company.myContacts.reduce((sum, c) => sum + (c.meetingsCount || 0), 0);
+                              return (
+                                <tr
+                                  key={company.domain}
+                                  className="u-tr"
+                                  onClick={() => setInlinePanel({ type: 'company', company })}
+                                >
+                                  <td className="u-td-company">
+                                    <div className="u-td-company-inner">
+                                      <CompanyLogo domain={company.domain} name={company.name} size={22} />
+                                      <div className="u-td-company-info">
+                                        <span className="u-td-company-name">{company.name}</span>
+                                        <span className="u-td-company-domain">{company.domain}</span>
+                                      </div>
+                                    </div>
+                                  </td>
+                                  {tableColOrder.map(col => renderColCell(col, company, tags, totalMeetings))}
                                   <td className="u-td-actions" onClick={e => e.stopPropagation()}>
                                     {company.spaceCount > 0 && (
                                       <button className="u-td-intro-btn" onClick={() => openIntroPanel(company)}>Intro</button>
@@ -4507,23 +4588,24 @@ export function AIHomePage() {
 
                 {/* Meeting history */}
                 {(() => {
-                  const allMeetings: { title: string; date: string; contactName: string }[] = [];
+                  const allMeetings: { title: string; date: string; duration?: number; attendees: string[] }[] = [];
                   co.myContacts.forEach(c => {
                     if (c.meetings && c.meetings.length > 0) {
-                      c.meetings.forEach(m => allMeetings.push({ title: m.title, date: m.date, contactName: c.name }));
+                      c.meetings.forEach(m => {
+                        const key = `${m.title}|${m.date}`;
+                        const existing = allMeetings.find(e => `${e.title}|${e.date}` === key);
+                        if (existing) {
+                          if (!existing.attendees.includes(c.name)) existing.attendees.push(c.name);
+                        } else {
+                          allMeetings.push({ title: m.title, date: m.date, duration: m.duration, attendees: [c.name] });
+                        }
+                      });
                     }
                   });
-                  const seen = new Set<string>();
-                  const unique = allMeetings.filter(m => {
-                    const key = `${m.title}|${m.date}`;
-                    if (seen.has(key)) return false;
-                    seen.add(key);
-                    return true;
-                  });
-                  unique.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-                  if (unique.length === 0) return null;
-                  const visible = historyExpanded ? unique : unique.slice(0, 5);
-                  const hasMore = unique.length > 5;
+                  allMeetings.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                  if (allMeetings.length === 0) return null;
+                  const visible = historyExpanded ? allMeetings : allMeetings.slice(0, 5);
+                  const hasMore = allMeetings.length > 5;
                   return (
                     <div className="u-panel-section">
                       <h4 className="u-panel-section-h">History</h4>
@@ -4531,12 +4613,33 @@ export function AIHomePage() {
                         {visible.map((m, i) => {
                           const d = new Date(m.date);
                           const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                          const timeStr = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+                          const durationStr = m.duration ? (m.duration >= 60 ? `${Math.floor(m.duration / 60)}h${m.duration % 60 ? ` ${m.duration % 60}m` : ''}` : `${m.duration}m`) : null;
+                          const isOpen = expandedMeetingIdx === i;
                           return (
-                            <div key={i} className="u-panel-history-item">
+                            <div key={i} className={`u-panel-history-item ${isOpen ? 'u-panel-history-item--open' : ''}`} onClick={() => setExpandedMeetingIdx(isOpen ? null : i)} style={{ cursor: 'pointer' }}>
                               <div className="u-panel-history-dot" />
                               <div className="u-panel-history-content">
                                 <span className="u-panel-history-title">{m.title}</span>
                                 <span className="u-panel-history-meta">{dateStr}</span>
+                                {isOpen && (
+                                  <div className="u-panel-history-details">
+                                    <div className="u-panel-history-detail-row">
+                                      <span className="u-panel-history-detail-label">Time</span>
+                                      <span>{timeStr}</span>
+                                    </div>
+                                    {durationStr && (
+                                      <div className="u-panel-history-detail-row">
+                                        <span className="u-panel-history-detail-label">Duration</span>
+                                        <span>{durationStr}</span>
+                                      </div>
+                                    )}
+                                    <div className="u-panel-history-detail-row">
+                                      <span className="u-panel-history-detail-label">With</span>
+                                      <span>{m.attendees.join(', ')}</span>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           );
@@ -4544,7 +4647,7 @@ export function AIHomePage() {
                       </div>
                       {hasMore && (
                         <button className="u-panel-history-toggle" onClick={() => setHistoryExpanded(!historyExpanded)}>
-                          {historyExpanded ? 'Show less' : `Show all ${unique.length} meetings`}
+                          {historyExpanded ? 'Show less' : `Show all ${allMeetings.length} meetings`}
                         </button>
                       )}
                     </div>

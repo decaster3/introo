@@ -6,7 +6,7 @@ import rateLimit from 'express-rate-limit';
 
 import { configurePassport } from './middleware/auth.js';
 import { securityHeaders, httpsRedirect } from './middleware/security.js';
-import { syncCalendarForUser, syncCalendarAccount } from './services/calendar.js';
+import { syncCalendarForUser, syncCalendarAccount, getTodayEvents, ensureContactsForBriefing } from './services/calendar.js';
 import authRoutes from './routes/auth.js';
 import calendarRoutes from './routes/calendar.js';
 import usersRoutes from './routes/users.js';
@@ -22,7 +22,8 @@ import tagsRoutes from './routes/tags.js';
 import aiRoutes from './routes/ai.js';
 import emailRoutes from './routes/email.js';
 import viewsRoutes from './routes/views.js';
-import { sendWeeklyDigest } from './services/email.js';
+import { sendWeeklyDigest, sendDailyBriefing } from './services/email.js';
+import type { BriefingMeeting, BriefingAttendee } from './services/email.js';
 import prisma from './lib/prisma.js';
 
 const app = express();
@@ -361,6 +362,102 @@ async function backgroundWeeklyDigest() {
   }
 }
 
+// ─── Daily morning briefing (9 AM per user timezone) ─────────────────────────
+
+const BRIEFING_CHECK_INTERVAL_MS = 15 * 60 * 1000; // check every 15 minutes
+
+let briefingRunning = false;
+
+async function dailyMorningBriefing() {
+  if (briefingRunning) {
+    console.log('[cron] Skipping briefing check — previous run still in progress');
+    return;
+  }
+  briefingRunning = true;
+  console.log('[cron] Checking daily briefing eligibility...');
+  try {
+    const users = await prisma.user.findMany({
+      where: { googleAccessToken: { not: null } },
+      select: { id: true, email: true, timezone: true, lastBriefingDate: true },
+    });
+
+    for (const user of users) {
+      try {
+        const tz = user.timezone || 'UTC';
+        const now = new Date();
+        const parts = new Intl.DateTimeFormat('en-US', {
+          timeZone: tz,
+          year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: 'numeric', hour12: false, weekday: 'short',
+        }).formatToParts(now);
+        const get = (type: string) => parts.find(p => p.type === type)?.value || '';
+        const hour = parseInt(get('hour'), 10);
+        const dayName = get('weekday');
+        const todayStr = `${get('year')}-${get('month')}-${get('day')}`; // YYYY-MM-DD
+        const dayOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(dayName);
+
+        // Skip weekends
+        if (dayOfWeek === 0 || dayOfWeek === 6) continue;
+
+        // Only send between 9:00–9:14 (within the 15-min check window)
+        if (hour !== 9) continue;
+
+        // Already sent today
+        if (user.lastBriefingDate === todayStr) continue;
+
+        console.log(`[cron] Generating briefing for ${user.email} (tz: ${tz})`);
+
+        const events = await getTodayEvents(user.id, tz);
+        if (events.length === 0) {
+          // No meetings — mark as sent so we don't re-check
+          await prisma.user.update({ where: { id: user.id }, data: { lastBriefingDate: todayStr } });
+          console.log(`[cron] No meetings today for ${user.email}, skipping email`);
+          continue;
+        }
+
+        // Ensure contacts exist for all attendees
+        const allEmails = events.flatMap(e => e.attendees.map(a => a.email));
+        const attendeeInfo = await ensureContactsForBriefing(user.id, allEmails);
+
+        // Build briefing meetings with enriched attendee data
+        const briefingMeetings: BriefingMeeting[] = events.map(e => ({
+          title: e.title,
+          startTime: e.startTime,
+          endTime: e.endTime,
+          duration: e.duration,
+          attendees: e.attendees.map(a => {
+            const info = attendeeInfo.get(a.email);
+            return {
+              name: info?.name || a.name || a.email.split('@')[0],
+              title: info?.title || null,
+              linkedinUrl: info?.linkedinUrl || null,
+              companyName: info?.companyName || null,
+              companyDomain: info?.companyDomain || null,
+              companyIndustry: info?.companyIndustry || null,
+              companyEmployees: info?.companyEmployees || null,
+              companyFunding: info?.companyFunding || null,
+              companyLinkedinUrl: info?.companyLinkedinUrl || null,
+              meetingsCount: info?.meetingsCount || 0,
+              strength: info?.strength || 'none',
+              isInternal: info?.isInternal || false,
+            } satisfies BriefingAttendee;
+          }),
+        }));
+
+        await sendDailyBriefing(user.id, briefingMeetings, tz);
+        await prisma.user.update({ where: { id: user.id }, data: { lastBriefingDate: todayStr } });
+        console.log(`[cron] Sent daily briefing to ${user.email} (${events.length} meetings)`);
+      } catch (err) {
+        console.error(`[cron] Failed briefing for ${user.email}:`, (err as Error).message);
+      }
+    }
+  } catch (err) {
+    console.error('[cron] Daily briefing error:', err);
+  } finally {
+    briefingRunning = false;
+  }
+}
+
 // Start server
 verifyDatabaseConnection().then(() => {
   server = app.listen(Number(PORT), '0.0.0.0', () => {
@@ -373,5 +470,9 @@ verifyDatabaseConnection().then(() => {
 
     setInterval(backgroundWeeklyDigest, DIGEST_INTERVAL_MS);
     console.log(`[cron] Weekly digest email scheduled every 7 days`);
+
+    setTimeout(dailyMorningBriefing, 60 * 1000); // initial check 1 min after startup
+    setInterval(dailyMorningBriefing, BRIEFING_CHECK_INTERVAL_MS);
+    console.log(`[cron] Daily briefing check scheduled every 15 minutes (initial run in 60s)`);
   });
 });

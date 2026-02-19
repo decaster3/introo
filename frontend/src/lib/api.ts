@@ -40,7 +40,7 @@ async function request<T>(
 export const authApi = {
   getStatus: () => request<{ authenticated: boolean }>('/auth/status'),
   getMe: () => request<{ user: User }>('/auth/me'),
-  updateProfile: (data: { name?: string; title?: string; companyDomain?: string; linkedinUrl?: string; headline?: string; city?: string; country?: string }) =>
+  updateProfile: (data: { name?: string; title?: string; companyDomain?: string; linkedinUrl?: string; headline?: string; city?: string; country?: string; timezone?: string }) =>
     request<{ user: User }>('/auth/me', { method: 'PATCH', body: JSON.stringify(data) }),
   logout: () => request<{ success: boolean }>('/auth/logout', { method: 'POST' }),
   getGoogleAuthUrl: () => `${API_BASE}/auth/google`,

@@ -230,10 +230,10 @@ router.get('/me', authMiddleware, (req, res) => {
 router.patch('/me', authMiddleware, async (req, res) => {
   try {
     const userId = (req as AuthenticatedRequest).user!.id;
-    const { name, title, companyDomain, linkedinUrl, headline, city, country } = req.body;
+    const { name, title, companyDomain, linkedinUrl, headline, city, country, timezone } = req.body;
 
     // Validate field types and lengths
-    const stringFields = { name, title, linkedinUrl, headline, city, country, companyDomain };
+    const stringFields = { name, title, linkedinUrl, headline, city, country, companyDomain, timezone };
     for (const [key, val] of Object.entries(stringFields)) {
       if (val !== undefined && typeof val !== 'string') {
         res.status(400).json({ error: `${key} must be a string` });
@@ -261,6 +261,7 @@ router.patch('/me', authMiddleware, async (req, res) => {
     if (headline !== undefined) updateData.headline = headline.trim() || null;
     if (city !== undefined) updateData.city = city.trim() || null;
     if (country !== undefined) updateData.country = country.trim() || null;
+    if (timezone !== undefined) updateData.timezone = timezone.trim() || null;
 
     // Company website → match to existing Company by domain
     if (companyDomain !== undefined) {
@@ -287,7 +288,7 @@ router.patch('/me', authMiddleware, async (req, res) => {
     const user = await prisma.user.update({
       where: { id: userId },
       data: updateData,
-      select: { id: true, email: true, name: true, avatar: true, title: true, company: true, companyDomain: true, linkedinUrl: true, headline: true, city: true, country: true },
+      select: { id: true, email: true, name: true, avatar: true, title: true, company: true, companyDomain: true, linkedinUrl: true, headline: true, city: true, country: true, timezone: true },
     });
 
     invalidateUserCache(userId);

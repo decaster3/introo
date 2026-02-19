@@ -72,6 +72,7 @@ export interface AuthUser {
   headline?: string | null;
   city?: string | null;
   country?: string | null;
+  timezone?: string | null;
 }
 
 export interface AuthenticatedRequest extends Request {
@@ -275,7 +276,7 @@ export function invalidateUserCache(userId: string) {
   USER_CACHE.delete(userId);
 }
 
-const USER_SELECT = { id: true, email: true, name: true, avatar: true, title: true, company: true, companyDomain: true, linkedinUrl: true, headline: true, city: true, country: true } as const;
+const USER_SELECT = { id: true, email: true, name: true, avatar: true, title: true, company: true, companyDomain: true, linkedinUrl: true, headline: true, city: true, country: true, timezone: true } as const;
 
 export const authMiddleware: RequestHandler = async (req, res, next) => {
   const token = req.cookies?.token || req.headers.authorization?.replace('Bearer ', '');
@@ -334,7 +335,7 @@ export const optionalAuthMiddleware: RequestHandler = async (req, res, next) => 
       try {
         const user = await prisma.user.findUnique({
           where: { id: payload.userId },
-          select: { id: true, email: true, name: true, avatar: true, title: true, company: true, companyDomain: true, linkedinUrl: true, headline: true, city: true, country: true },
+          select: { id: true, email: true, name: true, avatar: true, title: true, company: true, companyDomain: true, linkedinUrl: true, headline: true, city: true, country: true, timezone: true },
         });
         if (user) {
           (req as AuthenticatedRequest).user = user;

@@ -58,6 +58,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
             payload: { isAuthenticated: true, user },
           });
 
+          // Auto-detect timezone on first load if not yet saved
+          if (!user.timezone) {
+            try {
+              const detectedTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+              if (detectedTz) {
+                authApi.updateProfile({ timezone: detectedTz }).catch(() => {});
+              }
+            } catch {}
+          }
+
           // Load essential data in parallel
           const [contactsResponse, companies, calendarStatus] = await Promise.all([
             relationshipsApi.getContacts({ limit: 50000 }).catch(() => ({ data: [] })),

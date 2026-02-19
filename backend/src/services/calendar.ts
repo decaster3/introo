@@ -151,6 +151,17 @@ export async function syncCalendarForUser(userId: string): Promise<{
 
   const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
+  // Auto-detect user timezone from Google Calendar settings
+  try {
+    const tzSetting = await calendar.settings.get({ setting: 'timezone' });
+    const tz = tzSetting.data.value;
+    if (tz) {
+      await prisma.user.update({ where: { id: userId }, data: { timezone: tz } });
+    }
+  } catch {
+    // Non-critical — timezone detection failure shouldn't block sync
+  }
+
   // Fetch events from the past 5 years
   const now = new Date();
   const fiveYearsAgo = new Date(now.getTime() - 5 * 365 * 24 * 60 * 60 * 1000);
@@ -635,4 +646,260 @@ export async function syncCalendarAccount(userId: string, accountId: string): Pr
     contactsFound: contacts.length,
     companiesFound: domainsSet.size,
   };
+}
+
+// ─── Daily Briefing helpers ──────────────────────────────────────────────────
+
+export interface BriefingEvent {
+  title: string;
+  startTime: string;
+  endTime: string;
+  duration: number;
+  attendees: { email: string; name?: string }[];
+}
+
+export interface BriefingAttendeeInfo {
+  email: string;
+  name: string;
+  title?: string | null;
+  linkedinUrl?: string | null;
+  companyName?: string | null;
+  companyDomain?: string | null;
+  companyIndustry?: string | null;
+  companyEmployees?: number | null;
+  companyFunding?: string | null;
+  companyLinkedinUrl?: string | null;
+  meetingsCount: number;
+  strength: 'strong' | 'medium' | 'weak' | 'none';
+  isInternal: boolean;
+}
+
+function formatEmailAsName(email: string): string {
+  const prefix = email.split('@')[0];
+  return prefix
+    .replace(/[._-]/g, ' ')
+    .replace(/\b\w/g, c => c.toUpperCase())
+    .trim();
+}
+
+function strengthFromScore(score: number | null | undefined): 'strong' | 'medium' | 'weak' | 'none' {
+  if (!score || score <= 0) return 'none';
+  if (score >= 70) return 'strong';
+  if (score >= 30) return 'medium';
+  return 'weak';
+}
+
+/**
+ * Fetch today's upcoming calendar events for a user directly from Google Calendar.
+ * Returns events with attendees, sorted by start time.
+ */
+export async function getTodayEvents(userId: string, timezone: string): Promise<BriefingEvent[]> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, email: true, googleAccessToken: true, googleRefreshToken: true },
+  });
+
+  if (!user?.googleAccessToken) return [];
+
+  const accessToken = decryptToken(user.googleAccessToken);
+  const refreshToken = user.googleRefreshToken ? decryptToken(user.googleRefreshToken) : null;
+  if (!accessToken) return [];
+
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET
+  );
+  oauth2Client.setCredentials({ access_token: accessToken, refresh_token: refreshToken });
+
+  oauth2Client.on('tokens', async (tokens) => {
+    if (tokens.access_token) {
+      const enc = encryptToken(tokens.access_token);
+      const encRef = tokens.refresh_token ? encryptToken(tokens.refresh_token) : user.googleRefreshToken;
+      await prisma.user.update({ where: { id: userId }, data: { googleAccessToken: enc, googleRefreshToken: encRef } });
+    }
+  });
+
+  const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+
+  // Build today's time range in the user's timezone using Intl for accuracy
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(now);
+  const get = (type: string) => parts.find(p => p.type === type)?.value || '';
+  const dateStr = `${get('year')}-${get('month')}-${get('day')}`;
+
+  // Google Calendar API accepts RFC 3339 with timezone offset, but ISO with
+  // explicit start/end of day in the target timezone works best via Date parsing.
+  // We rely on the API's `timeZone` parameter to interpret the range correctly.
+  const timeMin = `${dateStr}T00:00:00`;
+  const timeMax = `${dateStr}T23:59:59`;
+
+  const events: BriefingEvent[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const response = await calendar.events.list({
+      calendarId: 'primary',
+      timeMin,
+      timeMax,
+      timeZone: timezone,
+      maxResults: 100,
+      singleEvents: true,
+      orderBy: 'startTime',
+      pageToken,
+    });
+
+    for (const event of response.data.items || []) {
+      if (event.status === 'cancelled') continue;
+      if (!event.start?.dateTime) continue; // skip all-day events
+      if (!event.attendees || event.attendees.length === 0) continue;
+
+      const start = new Date(event.start.dateTime);
+      const end = event.end?.dateTime ? new Date(event.end.dateTime) : start;
+      const duration = Math.round((end.getTime() - start.getTime()) / 60000);
+
+      const attendees = event.attendees
+        .filter(a => a.email && a.email.toLowerCase() !== user.email.toLowerCase() && !a.resource)
+        .map(a => ({ email: a.email!.toLowerCase(), name: a.displayName || undefined }));
+
+      if (attendees.length === 0) continue;
+
+      // Only include events that haven't ended yet
+      if (end > now) {
+        events.push({
+          title: event.summary || 'Untitled meeting',
+          startTime: event.start.dateTime,
+          endTime: event.end?.dateTime || event.start.dateTime,
+          duration,
+          attendees,
+        });
+      }
+    }
+
+    pageToken = response.data.nextPageToken || undefined;
+  } while (pageToken);
+
+  return events;
+}
+
+/**
+ * Ensure all attendee emails have Contact + Company records in Introo.
+ * Returns enriched attendee info for the email template.
+ */
+export async function ensureContactsForBriefing(
+  userId: string,
+  emails: string[]
+): Promise<Map<string, BriefingAttendeeInfo>> {
+  const uniqueEmails = [...new Set(emails.filter(e => isBusinessEmail(e)))];
+  const result = new Map<string, BriefingAttendeeInfo>();
+
+  // Determine the user's internal domains
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { email: true, companyDomain: true },
+  });
+  const userDomain = user?.email ? extractDomain(user.email) : '';
+  const internalDomains = new Set<string>([userDomain, user?.companyDomain || ''].filter(Boolean).map(d => d.toLowerCase()));
+
+  const existingContacts = await prisma.contact.findMany({
+    where: { userId, email: { in: uniqueEmails } },
+    select: {
+      email: true, name: true, title: true, meetingsCount: true, linkedinUrl: true,
+      companyId: true,
+      company: { select: {
+        name: true, domain: true, industry: true, employeeCount: true,
+        totalFunding: true, lastFundingRound: true, linkedinUrl: true,
+      } },
+    },
+  });
+
+  // Fetch relationship strength per company
+  const companyIds = [...new Set(existingContacts.map(c => c.companyId).filter(Boolean))] as string[];
+  const relationships = companyIds.length > 0
+    ? await prisma.relationship.findMany({
+        where: { userId, companyId: { in: companyIds } },
+        select: { companyId: true, strengthScore: true },
+      })
+    : [];
+  const strengthByCompany = new Map(relationships.map(r => [r.companyId, r.strengthScore]));
+
+  const existingMap = new Map(existingContacts.map(c => [c.email.toLowerCase(), c]));
+
+  for (const email of uniqueEmails) {
+    const domain = extractDomain(email);
+    const isInternal = internalDomains.has(domain.toLowerCase());
+    const existing = existingMap.get(email);
+
+    if (existing) {
+      const score = existing.companyId ? strengthByCompany.get(existing.companyId) : null;
+      result.set(email, {
+        email,
+        name: existing.name || formatEmailAsName(email),
+        title: existing.title,
+        linkedinUrl: existing.linkedinUrl,
+        companyName: existing.company?.name || null,
+        companyDomain: existing.company?.domain || domain,
+        companyIndustry: existing.company?.industry || null,
+        companyEmployees: existing.company?.employeeCount || null,
+        companyFunding: existing.company?.totalFunding || existing.company?.lastFundingRound || null,
+        companyLinkedinUrl: existing.company?.linkedinUrl || null,
+        meetingsCount: existing.meetingsCount || 0,
+        strength: strengthFromScore(score),
+        isInternal,
+      });
+      continue;
+    }
+
+    // Create new contact + company
+    let companyId: string | undefined;
+    let companyName: string | null = null;
+
+    if (domain) {
+      const company = await prisma.company.upsert({
+        where: { domain },
+        create: { domain, name: normalizeCompanyName(domain) },
+        update: {},
+        select: { id: true, name: true },
+      });
+      companyId = company.id;
+      companyName = company.name;
+    }
+
+    result.set(email, {
+      email,
+      name: formatEmailAsName(email),
+      title: null,
+      linkedinUrl: null,
+      companyName,
+      companyDomain: domain || null,
+      companyIndustry: null,
+      companyEmployees: null,
+      companyFunding: null,
+      companyLinkedinUrl: null,
+      meetingsCount: 0,
+      strength: 'none',
+      isInternal,
+    });
+
+    const existingByEmail = await prisma.contact.findFirst({
+      where: { userId, email },
+    });
+    if (!existingByEmail) {
+      await prisma.contact.create({
+        data: {
+          email,
+          name: formatEmailAsName(email),
+          userId,
+          companyId,
+          meetingsCount: 0,
+          lastSeenAt: new Date(),
+          source: 'briefing',
+        },
+      });
+    }
+  }
+
+  return result;
 }

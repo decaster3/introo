@@ -5935,6 +5935,32 @@ body {
   color: var(--text-muted);
   line-height: 1.2;
 }
+.u-panel-history-item--open {
+  background: rgba(255,255,255,0.03);
+  border-radius: 8px;
+  padding: 8px !important;
+  margin: 2px -8px;
+}
+.u-panel-history-item--open .u-panel-history-title {
+  white-space: normal;
+}
+.u-panel-history-details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+.u-panel-history-detail-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+.u-panel-history-detail-label {
+  color: var(--text-muted);
+}
 .u-panel-history-toggle {
   background: none;
   border: none;
@@ -8273,6 +8299,22 @@ body {
   opacity: 0.7;
 }
 
+.u-settings-tz-select {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 0.72rem;
+  cursor: pointer;
+  max-width: 180px;
+  flex-shrink: 0;
+}
+.u-settings-tz-select:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
 .u-settings-meta {
   font-size: 0.65rem;
   color: var(--text-muted);
@@ -9358,6 +9400,23 @@ body {
 .u-th-funding { width: 10%; }
 .u-th-tags { width: 10%; }
 .u-th-actions { width: 8%; }
+
+/* Draggable column headers */
+.u-table th[draggable="true"] {
+  cursor: grab;
+  position: relative;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.u-table th[draggable="true"]:hover {
+  background: rgba(255,255,255,0.04);
+}
+.u-table th[draggable="true"]:active {
+  cursor: grabbing;
+}
+.u-th-drag-over {
+  background: rgba(91,141,239,0.10) !important;
+  box-shadow: inset 2px 0 0 var(--accent-primary);
+}
 
 /* Rows */
 .u-tr {

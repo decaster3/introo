@@ -14,6 +14,7 @@ export interface User {
   headline?: string | null;
   city?: string | null;
   country?: string | null;
+  timezone?: string | null;
 }
 
 export interface Company {
