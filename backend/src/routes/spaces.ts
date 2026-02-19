@@ -1016,6 +1016,12 @@ router.get('/:id/reach', async (req, res) => {
         title: string | null;
         userId: string;
         userName: string;
+        linkedinUrl: string | null;
+        photoUrl: string | null;
+        city: string | null;
+        country: string | null;
+        meetingsCount: number;
+        lastSeenAt: Date;
       }[];
     }>();
 
@@ -1031,6 +1037,12 @@ router.get('/:id/reach', async (req, res) => {
         title: contact.title,
         userId: contact.userId,
         userName: contact.user.name,
+        linkedinUrl: contact.linkedinUrl,
+        photoUrl: contact.photoUrl,
+        city: contact.city,
+        country: contact.country,
+        meetingsCount: contact.meetingsCount,
+        lastSeenAt: contact.lastSeenAt,
       };
 
       if (existing) {

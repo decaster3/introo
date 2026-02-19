@@ -1269,11 +1269,11 @@ export function AIHomePage() {
         people.push({
           id: c.id, name: c.name, email: c.email, title: c.title || '',
           companyName: co.name, companyDomain: co.domain,
-          strength: 'none',
-          meetings: 0,
-          lastSeen: '',
+          strength: c.meetingsCount ? (c.meetingsCount >= 10 ? 'strong' : c.meetingsCount >= 3 ? 'medium' : 'weak') : 'none',
+          meetings: c.meetingsCount || 0,
+          lastSeen: c.lastSeenAt || '',
           source: sourceLabel,
-          photoUrl: null,
+          photoUrl: c.photoUrl || null,
           company: co,
           isMyContact: false,
         });

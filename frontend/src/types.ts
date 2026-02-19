@@ -207,7 +207,7 @@ export interface MergedCompany {
   domain: string;
   name: string;
   myContacts: DisplayContact[];
-  spaceContacts: { id: string; name: string; email: string; title?: string; userName: string; spaceId?: string }[];
+  spaceContacts: { id: string; name: string; email: string; title?: string; userName: string; spaceId?: string; linkedinUrl?: string | null; photoUrl?: string | null; city?: string | null; country?: string | null; meetingsCount?: number; lastSeenAt?: string }[];
   myCount: number;
   spaceCount: number;
   totalCount: number;

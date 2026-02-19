@@ -404,6 +404,12 @@ router.get('/:id/reach', async (req, res) => {
         title: contact.title,
         userId: peerId,
         userName: peerName,
+        linkedinUrl: contact.linkedinUrl,
+        photoUrl: contact.photoUrl,
+        city: contact.city,
+        country: contact.country,
+        meetingsCount: contact.meetingsCount,
+        lastSeenAt: contact.lastSeenAt,
       };
 
       const existing = companyMap.get(contact.company.id);
