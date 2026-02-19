@@ -81,7 +81,7 @@ export function AIHomePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
   const [selectedView, setSelectedView] = useState<string | null>(null);
-  const [sourceFilter, setSourceFilter] = useState<'all' | 'mine' | 'spaces' | 'both'>('all');
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'mine' | 'spaces' | 'both'>('mine');
   const [accountFilter, setAccountFilter] = useState<string>('all');
   const [strengthFilter, setStrengthFilter] = useState<'all' | 'strong' | 'medium' | 'weak'>('all');
   const [spaceFilter, setSpaceFilter] = useState<string>('all');
