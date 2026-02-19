@@ -4588,7 +4588,7 @@ export function AIHomePage() {
 
                 {/* Meeting history */}
                 {(() => {
-                  const allMeetings: { title: string; date: string; duration?: number; attendees: string[] }[] = [];
+                  const allMeetings: { title: string; date: string; duration?: number; description?: string | null; attendees: string[] }[] = [];
                   co.myContacts.forEach(c => {
                     if (c.meetings && c.meetings.length > 0) {
                       c.meetings.forEach(m => {
@@ -4597,7 +4597,7 @@ export function AIHomePage() {
                         if (existing) {
                           if (!existing.attendees.includes(c.name)) existing.attendees.push(c.name);
                         } else {
-                          allMeetings.push({ title: m.title, date: m.date, duration: m.duration, attendees: [c.name] });
+                          allMeetings.push({ title: m.title, date: m.date, duration: m.duration, description: m.description, attendees: [c.name] });
                         }
                       });
                     }
@@ -4638,6 +4638,15 @@ export function AIHomePage() {
                                       <span className="u-panel-history-detail-label">With</span>
                                       <span>{m.attendees.join(', ')}</span>
                                     </div>
+                                    {m.description && (() => {
+                                      const clean = m.description.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+                                      if (!clean) return null;
+                                      return (
+                                        <div className="u-panel-history-detail-row u-panel-history-desc">
+                                          <span>{clean}</span>
+                                        </div>
+                                      );
+                                    })()}
                                   </div>
                                 )}
                               </div>

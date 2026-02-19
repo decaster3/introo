@@ -6,6 +6,7 @@ interface MeetingInfo {
   title: string;
   date: Date;
   duration?: number;
+  description?: string;
 }
 
 interface CalendarContact {
@@ -186,6 +187,7 @@ export async function syncCalendarForUser(userId: string): Promise<{
       const attendees = event.attendees || [];
       const eventDate = new Date(event.start?.dateTime || event.start?.date || now);
       const eventTitle = event.summary || 'Untitled meeting';
+      const eventDescription = event.description || undefined;
       
       // Calculate duration in minutes
       let duration: number | undefined;
@@ -208,6 +210,7 @@ export async function syncCalendarForUser(userId: string): Promise<{
           title: eventTitle,
           date: eventDate,
           duration,
+          description: eventDescription,
         };
 
         if (existing) {
@@ -326,7 +329,7 @@ export async function syncCalendarForUser(userId: string): Promise<{
     });
 
     // Bulk insert meetings with createMany
-    const meetingRows: { contactId: string; title: string; date: Date; duration?: number }[] = [];
+    const meetingRows: { contactId: string; title: string; date: Date; duration?: number; description?: string }[] = [];
     batch.forEach((contact, idx) => {
       const dbContact = dbContacts[idx];
       const recentMeetings = contact.meetings
@@ -338,6 +341,7 @@ export async function syncCalendarForUser(userId: string): Promise<{
           title: m.title,
           date: m.date,
           duration: m.duration,
+          description: m.description,
         });
       });
     });
@@ -489,6 +493,7 @@ export async function syncCalendarAccount(userId: string, accountId: string): Pr
       const attendees = event.attendees || [];
       const eventDate = new Date(event.start?.dateTime || event.start?.date || now);
       const eventTitle = event.summary || 'Untitled meeting';
+      const eventDescription = event.description || undefined;
       
       let duration: number | undefined;
       if (event.start?.dateTime && event.end?.dateTime) {
@@ -510,6 +515,7 @@ export async function syncCalendarAccount(userId: string, accountId: string): Pr
           title: eventTitle,
           date: eventDate,
           duration,
+          description: eventDescription,
         };
 
         if (existing) {
@@ -615,7 +621,7 @@ export async function syncCalendarAccount(userId: string, accountId: string): Pr
     });
 
     // Bulk insert meetings with createMany
-    const meetingRows: { contactId: string; title: string; date: Date; duration?: number }[] = [];
+    const meetingRows: { contactId: string; title: string; date: Date; duration?: number; description?: string }[] = [];
     batch.forEach((contact, idx) => {
       const dbContact = dbContacts[idx];
       const recentMeetings = contact.meetings
@@ -627,6 +633,7 @@ export async function syncCalendarAccount(userId: string, accountId: string): Pr
           title: m.title,
           date: m.date,
           duration: m.duration,
+          description: m.description,
         });
       });
     });

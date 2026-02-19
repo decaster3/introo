@@ -47,6 +47,7 @@ export interface Meeting {
   title: string;
   date: string;
   duration?: number;
+  description?: string | null;
 }
 
 // =============================================================================
