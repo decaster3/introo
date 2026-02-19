@@ -3533,8 +3533,8 @@ export function AIHomePage() {
                               <div key={c.id} className="u-contact u-contact--space">
                                 <span className="u-contact-private-icon">👤</span>
                                 <div className="u-contact-info">
-                                  <span className="u-contact-name">{c.title || 'Contact'}</span>
-                                  {spaceName && <span className="u-contact-title">from {spaceName}</span>}
+                                  <span className="u-contact-name">Contact</span>
+                                  <span className="u-contact-title">{[c.title, spaceName ? `from ${spaceName}` : null].filter(Boolean).join(' · ')}</span>
                                 </div>
                                 <button className="u-contact-action" onClick={(e) => { e.stopPropagation(); openIntroPanel(company); }}>Intro</button>
                               </div>
@@ -4713,8 +4713,8 @@ export function AIHomePage() {
                           <div key={c.id} className="u-panel-contact-row u-panel-contact-row--private">
                             <div className="u-panel-contact-avatar-private">👤</div>
                             <div className="u-panel-contact-info">
-                              <span className="u-panel-contact-name">{c.title || 'Contact'}</span>
-                              {spaceName && <span className="u-panel-contact-title">from {spaceName}</span>}
+                              <span className="u-panel-contact-name">Contact</span>
+                              <span className="u-panel-contact-title">{[c.title, spaceName ? `from ${spaceName}` : null].filter(Boolean).join(' · ')}</span>
                             </div>
                             <button className="u-panel-contact-intro-btn" onClick={(e) => { e.stopPropagation(); openIntroPanel(co, undefined, inlinePanel.fromSpaceId || undefined); }}>Intro</button>
                           </div>
