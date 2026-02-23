@@ -737,11 +737,19 @@ export async function getTodayEvents(userId: string, timezone: string): Promise<
   const get = (type: string) => parts.find(p => p.type === type)?.value || '';
   const dateStr = `${get('year')}-${get('month')}-${get('day')}`;
 
-  // Google Calendar API accepts RFC 3339 with timezone offset, but ISO with
-  // explicit start/end of day in the target timezone works best via Date parsing.
-  // We rely on the API's `timeZone` parameter to interpret the range correctly.
-  const timeMin = `${dateStr}T00:00:00`;
-  const timeMax = `${dateStr}T23:59:59`;
+  // Compute UTC offset for the target timezone (Google Calendar API requires RFC 3339)
+  const refDate = new Date(`${dateStr}T12:00:00Z`);
+  const utcStr = refDate.toLocaleString('en-US', { timeZone: 'UTC' });
+  const tzStr = refDate.toLocaleString('en-US', { timeZone: timezone });
+  const offsetMs = new Date(utcStr).getTime() - new Date(tzStr).getTime();
+  const offsetSign = offsetMs <= 0 ? '+' : '-';
+  const absOffset = Math.abs(offsetMs);
+  const offsetH = String(Math.floor(absOffset / 3600000)).padStart(2, '0');
+  const offsetM = String(Math.floor((absOffset % 3600000) / 60000)).padStart(2, '0');
+  const offsetSuffix = `${offsetSign}${offsetH}:${offsetM}`;
+
+  const timeMin = `${dateStr}T00:00:00${offsetSuffix}`;
+  const timeMax = `${dateStr}T23:59:59${offsetSuffix}`;
 
   const events: BriefingEvent[] = [];
   let pageToken: string | undefined;
