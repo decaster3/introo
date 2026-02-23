@@ -700,8 +700,8 @@ export function AIHomePage() {
         co.enrichedAt = sc.enrichedAt;
       }
       sc.contacts.forEach(contact => {
-        if (!co.spaceContacts.some(ec => ec.email === contact.email) &&
-            !co.myContacts.some(mc => mc.email === contact.email)) {
+        if (!co.spaceContacts.some(ec => ec.id === contact.id) &&
+            !co.myContacts.some(mc => mc.id === contact.id)) {
           co.spaceContacts.push({ ...contact, spaceId: contact.spaceId });
           co.spaceCount++;
           co.totalCount++;
@@ -745,8 +745,8 @@ export function AIHomePage() {
         co.connectionIds.push(cc.connectionId);
       }
       cc.contacts.forEach(contact => {
-        if (!co.spaceContacts.some(ec => ec.email === contact.email) &&
-            !co.myContacts.some(mc => mc.email === contact.email)) {
+        if (!co.spaceContacts.some(ec => ec.id === contact.id) &&
+            !co.myContacts.some(mc => mc.id === contact.id)) {
           co.spaceContacts.push({ ...contact, spaceId: undefined });
           co.spaceCount++;
           co.totalCount++;
@@ -1236,8 +1236,8 @@ export function AIHomePage() {
 
     for (const co of filteredCompanies) {
       for (const c of co.myContacts) {
-        if (seen.has(c.email)) continue;
-        seen.add(c.email);
+        if (seen.has(c.id)) continue;
+        seen.add(c.id);
         people.push({
           id: c.id, name: c.name, email: c.email, title: c.title || '',
           companyName: co.name, companyDomain: co.domain,
@@ -1253,8 +1253,8 @@ export function AIHomePage() {
         });
       }
       for (const c of co.spaceContacts) {
-        if (seen.has(c.email)) continue;
-        seen.add(c.email);
+        if (seen.has(c.id)) continue;
+        seen.add(c.id);
         let sourceLabel = 'Network';
         if (c.spaceId) {
           const sp = spaces.find(s => s.id === c.spaceId);

@@ -9,7 +9,7 @@ export function PrivacyPage() {
 
       <div className="legal-content">
         <h1>Privacy Policy</h1>
-        <p className="legal-updated">Last updated: February 10, 2024</p>
+        <p className="legal-updated">Last updated: February 23, 2026</p>
 
         <section>
           <h2>1. Introduction</h2>
@@ -35,20 +35,21 @@ export function PrivacyPage() {
 
           <h3>2.2 Google Calendar Data</h3>
           <p>
-            When you connect your Google Calendar, we access and process the following data:
+            When you connect your Google Calendar, we access and process the following data
+            in <strong>read-only</strong> mode. We never modify, create, or delete your calendar events.
           </p>
           <ul>
-            <li><strong>Event Metadata:</strong> Event titles, dates, times, and attendee email addresses</li>
+            <li><strong>Event Metadata:</strong> Event titles, descriptions, dates, times, and duration</li>
+            <li><strong>Attendee Information:</strong> Attendee names and email addresses</li>
             <li><strong>Meeting Patterns:</strong> Frequency and recency of meetings with contacts</li>
           </ul>
           <p>
             <strong>What we DO NOT access:</strong>
           </p>
           <ul>
-            <li>Event descriptions or notes</li>
             <li>Event attachments or documents</li>
             <li>Location details</li>
-            <li>Private or confidential event content</li>
+            <li>Conference call links or credentials</li>
           </ul>
 
           <h3>2.3 Automatically Collected Information</h3>

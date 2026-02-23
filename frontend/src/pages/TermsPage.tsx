@@ -9,7 +9,7 @@ export function TermsPage() {
 
       <div className="legal-content">
         <h1>Terms of Use</h1>
-        <p className="legal-updated">Last updated: February 10, 2024</p>
+        <p className="legal-updated">Last updated: February 23, 2026</p>
 
         <section>
           <h2>1. Agreement to Terms</h2>
@@ -46,7 +46,8 @@ export function TermsPage() {
             <li>Store derived relationship data to power intro matching</li>
           </ul>
           <p>
-            We do not read, store, or access the content of your calendar events beyond metadata. 
+            We access your calendar in read-only mode -- we never modify, create, or delete events. 
+            We process event metadata including titles, descriptions, attendees, and times.
             You can revoke this access at any time through your Google Account settings.
           </p>
         </section>

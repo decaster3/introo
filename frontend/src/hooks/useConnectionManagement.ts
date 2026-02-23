@@ -57,8 +57,8 @@ export function useConnectionManagement(refreshNotifications: () => void) {
             map.set(c.domain, c);
           } else {
             const ex = map.get(c.domain)!;
-            const emails = new Set(ex.contacts.map(x => x.email));
-            c.contacts.forEach(x => { if (!emails.has(x.email)) { ex.contacts.push(x); ex.contactCount++; } });
+            const ids = new Set(ex.contacts.map(x => x.id));
+            c.contacts.forEach(x => { if (!ids.has(x.id)) { ex.contacts.push(x); ex.contactCount++; } });
           }
         });
       });
