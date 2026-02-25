@@ -8,16 +8,31 @@ import prisma from '../lib/prisma.js';
 
 const router = Router();
 
-// Get requests targeted at current user via 1-1 connection
+// Get requests targeted at current user (1:1 connections + space requests they were notified about)
 router.get('/user/incoming', authMiddleware, async (req, res) => {
   try {
     const userId = (req as AuthenticatedRequest).user!.id;
 
-    // Find requests where normalizedQuery.connectionPeerId matches current user
+    // Find space request IDs the user was notified about (as connector or as space owner for review)
+    const spaceNotifications = await prisma.notification.findMany({
+      where: {
+        userId,
+        type: { in: ['intro_request', 'intro_review'] },
+        data: { path: ['spaceId'], not: 'null' },
+      },
+      select: { data: true },
+    });
+    const notifiedRequestIds = spaceNotifications
+      .map(n => (n.data as Record<string, unknown>)?.requestId as string)
+      .filter(Boolean);
+
     const requests = await prisma.introRequest.findMany({
       where: {
-        normalizedQuery: { path: ['connectionPeerId'], equals: userId },
         requesterId: { not: userId },
+        OR: [
+          { normalizedQuery: { path: ['connectionPeerId'], equals: userId } },
+          ...(notifiedRequestIds.length > 0 ? [{ id: { in: notifiedRequestIds } }] : []),
+        ],
       },
       include: {
         requester: {
