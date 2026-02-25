@@ -214,7 +214,7 @@ export function AIHomePage() {
   const [peopleSortDir, setPeopleSortDir] = useState<'asc' | 'desc'>('desc');
   const [gridPage, setGridPage] = useState(0);
   const GRID_PAGE_SIZE = 50;
-  const [excludeMyContacts, setExcludeMyContacts] = useState(false);
+  const [excludeMyContacts, setExcludeMyContacts] = useState(true);
   const [expandedDomain, setExpandedDomain] = useState<string | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [expandedMeetingIdx, setExpandedMeetingIdx] = useState<number | null>(null);
@@ -1374,7 +1374,7 @@ export function AIHomePage() {
 
   const displayCompanies = useMemo(() => {
     if (isNetworkView && excludeMyContacts) {
-      return filteredCompanies.filter(c => !(c.myCount > 0 && c.spaceCount === 0));
+      return filteredCompanies.filter(c => c.myCount === 0);
     }
     return filteredCompanies;
   }, [filteredCompanies, isNetworkView, excludeMyContacts]);
@@ -3638,7 +3638,7 @@ export function AIHomePage() {
                     <div className="u-grid-filter-bar">
                       <label className="u-grid-exclude-label">
                         <input type="checkbox" checked={excludeMyContacts} onChange={e => { setExcludeMyContacts(e.target.checked); setGridPage(0); }} />
-                        Exclude my companies
+                        Exclude companies I have contacts in
                       </label>
                       <span className="u-grid-section-count">{displayCompanies.length}</span>
                     </div>
@@ -4104,7 +4104,7 @@ export function AIHomePage() {
                   <div className="u-grid-filter-bar">
                     <label className="u-grid-exclude-label">
                       <input type="checkbox" checked={excludeMyContacts} onChange={e => { setExcludeMyContacts(e.target.checked); setGridPage(0); }} />
-                      Exclude my contacts
+                      Exclude contacts from my companies
                     </label>
                     <span className="u-grid-section-count">{displayPeople.length}</span>
                   </div>
