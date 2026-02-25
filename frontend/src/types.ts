@@ -290,6 +290,7 @@ export interface InlinePanel {
   spaceId?: string;
   connectionId?: string;
   fromSpaceId?: string;
+  fromConnectionId?: string;
   fromProfile?: boolean;
   fromPeopleTab?: boolean;
   fromIntroDetail?: InlinePanel;

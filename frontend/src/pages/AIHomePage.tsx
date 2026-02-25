@@ -4251,6 +4251,10 @@ export function AIHomePage() {
               if (inlinePanel.fromIntroDetail) {
                 backLabel = 'Intro';
                 backTarget = inlinePanel.fromIntroDetail;
+              } else if (inlinePanel.type === 'intro-detail' && inlinePanel.fromConnectionId) {
+                const bc = connections.find(c => c.id === inlinePanel.fromConnectionId);
+                backLabel = bc ? `👤 ${bc.peer.name}` : 'Connection';
+                backTarget = { type: 'connection', connectionId: inlinePanel.fromConnectionId };
               } else if (inlinePanel.type === 'intro-detail' && inlinePanel.fromSpaceId) {
                 const sp = spaces.find(s => s.id === inlinePanel.fromSpaceId);
                 backLabel = sp ? `${sp.emoji || '🫛'} ${sp.name}` : 'Space';
@@ -5852,337 +5856,161 @@ export function AIHomePage() {
                 </div>
 
                 {/* Intro Requests for this connection */}
-                {connRequests.length > 0 && (
-                  <div className="u-panel-section">
-                    <div className="u-panel-section-h">
-                      Intro Requests
-                      <span className="u-notif-inline-badge">{connRequests.length}</span>
-                    </div>
-                    <p className="u-panel-section-hint">Private between you and {conn.peer.name}.</p>
-                    <div className="u-panel-request-list">
-                      {connRequests.map(r => {
-                        const nq = r.normalizedQuery || {};
-                        const companyName = nq.companyName as string || 'a company';
-                        const companyDomain = nq.companyDomain as string || '';
-                        const companyId = nq.companyId as string || '';
-                        const isMe = r.requester.id === currentUser?.id;
-                        const timeAgo = getTimeAgo(r.createdAt);
-                        const matchedCompany = mergedCompanies.find(c => (companyId && c.id === companyId) || (companyDomain && c.domain === companyDomain));
-                        const myContactsAtCompany = matchedCompany?.myContacts || [];
-                        const isOpen = r.status === 'open';
-                        const isDeclining = decliningRequestId === r.id;
+                {(() => {
+                  if (connRequests.length === 0) return null;
 
-                        return (
-                          <div key={r.id} className={`u-panel-request-card ${isMe ? 'sent' : ''} ${!isOpen ? 'resolved' : ''}`}>
-                            <div className="u-panel-request-top">
-                              <div className={`u-panel-request-avatar ${isMe ? 'sent' : ''}`}>
-                                {r.requester.name.charAt(0).toUpperCase()}
-                              </div>
-                              <div className="u-panel-request-meta">
-                                <span className="u-panel-request-who">{isMe ? 'You' : r.requester.name}</span>
-                                <span className="u-panel-request-time">{timeAgo}</span>
-                              </div>
-                              <span className={`u-panel-request-status u-panel-request-status--${r.status}`}>{r.status.toUpperCase()}</span>
-                              {!isOpen && (
-                                <button
-                                  className="u-panel-request-dismiss"
-                                  title="Dismiss"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setDismissedRequestIds(prev => new Set(prev).add(r.id));
-                                    if (isMe) requestsApi.delete(r.id).catch(() => {});
-                                  }}
-                                >×</button>
-                              )}
-                            </div>
+                  const received = connRequests.filter(r => r.requester.id !== currentUser?.id);
+                  const sent = connRequests.filter(r => r.requester.id === currentUser?.id);
 
-                            <p className="u-panel-request-intent">
-                              {isMe ? 'You requested' : 'Requests'} an intro to{' '}
-                              <span
-                                className={`u-panel-request-company-link ${matchedCompany ? 'clickable' : ''}`}
-                                onClick={() => { if (matchedCompany) setInlinePanel({ type: 'company', company: matchedCompany }); }}
-                              >
-                                <CompanyLogo domain={companyDomain} name={companyName} size={14} />
-                                {companyName}
-                                {matchedCompany && <span className="u-panel-request-arrow">→</span>}
-                              </span>
-                            </p>
+                  const receivedOpen = received.filter(r => r.status === 'open').sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                  const receivedNeedsReview = receivedOpen.filter(r => !(r as any).detailsRequestedAt && !(r as any).checkedWithContactAt);
+                  const receivedInProgress = receivedOpen.filter(r => !!(r as any).detailsRequestedAt || !!(r as any).checkedWithContactAt);
+                  const receivedPast = received.filter(r => r.status !== 'open').sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-                            {r.rawText && <p className="u-panel-request-msg">"{r.rawText}"</p>}
+                  const sentNeedsReply = sent.filter(r => r.status === 'open' && (r as any).detailsRequestedAt).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                  const sentOpen = sent.filter(r => r.status === 'open' && !(r as any).detailsRequestedAt).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                  const sentPast = sent.filter(r => r.status !== 'open').sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-                            {/* Details requested banner — shown to the requester */}
-                            {isMe && isOpen && (() => {
-                              const detailsNotif = notifications.find(n => n.type === 'details_requested' && (n.data as Record<string, unknown>)?.requestId === r.id);
-                              if (!detailsNotif) return null;
-                              const connectorName = (detailsNotif.data as Record<string, unknown>)?.connectorName as string || (r as any).detailsRequestedByName || 'A connector';
-                              return (
-                                <div className="u-panel-request-details-banner">
-                                  <span className="u-panel-request-details-icon">📩</span>
-                                  <span>{connectorName} requested details from you — check your email and reply to them.</span>
-                                </div>
-                              );
-                            })()}
+                  const openCount = receivedOpen.length + sentNeedsReply.length + sentOpen.length;
 
-                            {!isMe && myContactsAtCompany.length > 0 && (
-                              <div className="u-panel-request-contacts">
-                                <span className="u-panel-request-contacts-label">Your contacts at {companyName}:</span>
-                                <div className="u-panel-request-contacts-list">
-                                  {myContactsAtCompany.slice(0, 3).map(c => (
-                                    <span key={c.id} className="u-panel-request-contact-chip clickable"
-                                      onClick={() => setInlinePanel({ type: 'person', contact: c, company: matchedCompany })}
-                                    >
-                                      {c.name}
-                                      {c.title && <span className="u-panel-request-contact-title"> · {c.title}</span>}
-                                    </span>
-                                  ))}
-                                  {myContactsAtCompany.length > 3 && (
-                                    <span className="u-panel-request-contact-chip u-panel-request-contact-more">+{myContactsAtCompany.length - 3} more</span>
-                                  )}
-                                </div>
-                              </div>
-                            )}
+                  const renderConnCard = (r: typeof connRequests[number], direction: 'sent' | 'received') => {
+                    const nq = (r.normalizedQuery || {}) as Record<string, unknown>;
+                    const companyName = (nq.companyName as string) || 'a company';
+                    const companyDomain = (nq.companyDomain as string) || '';
+                    const companyId = (nq.companyId as string) || '';
+                    const matchedCompany = mergedCompanies.find(c => (companyId && c.id === companyId) || (companyDomain && c.domain === companyDomain));
+                    const timeAgo = getTimeAgo(r.createdAt);
+                    const isMe = direction === 'sent';
 
-                            {!isMe && isOpen && !isDeclining && introActionRequestId !== r.id && (
-                              <div className="u-panel-request-actions">
-                                <button
-                                  className="u-req-action-btn u-req-action-btn--intro"
-                                  onClick={() => {
-                                    setIntroActionRequestId(r.id);
-                                    setIntroActionType(null);
-                                    setIntroEmailSubject('');
-                                    setIntroEmailBody('');
-                                    setIntroSelectedContact(myContactsAtCompany.length === 1 ? myContactsAtCompany[0] : null);
-                                  }}
-                                >Make Intro</button>
-                                <button className="u-req-action-btn u-req-action-btn--done" onClick={() => { setConfirmingDoneRequestId(r.id); setDecliningRequestId(null); }}>Intro Done</button>
-                                <button className="u-req-action-btn u-req-action-btn--decline" onClick={() => { setDecliningRequestId(r.id); setDeclineReason(''); setConfirmingDoneRequestId(null); }}>Decline</button>
-                              </div>
-                            )}
-
-                            {confirmingDoneRequestId === r.id && (
-                              <div className="u-req-confirm-done">
-                                <p className="u-req-confirm-done-text">Are you sure they are connected? This will notify the requester that the intro is done.</p>
-                                <div className="u-req-confirm-done-btns">
-                                  <button className="u-req-action-btn u-req-action-btn--done" onClick={async () => {
-                                    try {
-                                      const resp = await requestsApi.markDone(r.id);
-                                      const doneOffer = resp.offers?.length ? resp.offers[resp.offers.length - 1] : { id: '', status: 'accepted', createdAt: new Date().toISOString(), introducer: { id: currentUser?.id || '', name: currentUser?.name || '', avatar: currentUser?.avatar || null } };
-                                      setIncomingRequests(prev => prev.map(req => req.id === r.id ? { ...req, status: 'accepted', offers: [...(req.offers || []), doneOffer] } as typeof req : req));
-                                      setConfirmingDoneRequestId(null);
-                                      setIntroToast('Intro marked as done!');
-                                      setTimeout(() => setIntroToast(null), 3000);
-                                    } catch (err) { console.error('Failed to mark as done:', err); }
-                                  }}>Yes, they're connected</button>
-                                  <button className="u-intro-cancel" onClick={() => setConfirmingDoneRequestId(null)}>Cancel</button>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Intro action flow */}
-                            {introActionRequestId === r.id && !introActionType && (() => {
-                              return (
-                                <div className="u-intro-flow">
-                                  {myContactsAtCompany.length > 1 && !introSelectedContact && (
-                                    <div className="u-intro-contact-pick">
-                                      <span className="u-intro-contact-pick-label">Who do you want to introduce?</span>
-                                      {myContactsAtCompany.map(c => (
-                                        <button key={c.id} className="u-intro-contact-pick-item" onClick={() => setIntroSelectedContact(c)}>
-                                          {c.name}{c.title && <span className="u-intro-contact-pick-title"> · {c.title}</span>}
-                                        </button>
-                                      ))}
-                                      <button className="u-intro-cancel" onClick={() => { setIntroActionRequestId(null); setIntroSelectedContact(null); }}>Cancel</button>
-                                    </div>
-                                  )}
-                                  {(myContactsAtCompany.length <= 1 || introSelectedContact) && (() => {
-                                    const hasContact = !!(introSelectedContact || myContactsAtCompany[0]);
-                                    const cn = introSelectedContact?.name || myContactsAtCompany[0]?.name || 'your contact';
-                                    const cf = cn.split(' ')[0];
-                                    const rn = r.requester.name;
-                                    const rf = rn.split(' ')[0];
-                                    return (
-                                    <div className="u-intro-tags">
-                                      <button className="u-intro-tag" onClick={() => {
-                                        setIntroActionType('ask-details');
-                                        setIntroEmailSubject(`About your intro request to ${companyName}`);
-                                        setIntroEmailBody(`Hi ${rf},\n\nI saw your request for an intro to someone at ${companyName}.${hasContact ? ` I know ${cf} there and may be able to help.` : ''}\n\nBefore I reach out, could you share a bit more about what you're looking for? For example:\n- What's the context for this intro?\n- What would you like to discuss with them?\n- Any specific goals or topics?\n\nJust want to make sure the intro is as useful as possible for both of you. Reply to this email and let me know.\n\nBest,\n${currentUser?.name || ''}`);
-                                      }}>
-                                        Ask {rf} for details
-                                      </button>
-                                      {hasContact && (
-                                      <button className="u-intro-tag" onClick={() => {
-                                        setIntroActionType('make-intro');
-                                        setIntroEmailSubject(`Introduction: ${rn} ↔ ${cn} (${companyName})`);
-                                        setIntroEmailBody(`Hi ${cf} and ${rf},\n\nI'd love to connect you two.\n\n${cf} — ${rf} is interested in connecting with someone at ${companyName}, and I thought you'd be a great person to talk to.\n\n${rf} — ${cf} is at ${companyName}. I think you'll have a lot to discuss.\n\nFeel free to reply all to continue the conversation right here in this thread.\n\nBest,\n${currentUser?.name || ''}`);
-                                      }}>
-                                        Make intro
-                                      </button>
-                                      )}
-                                      {hasContact && (
-                                      <button className="u-intro-tag" onClick={() => {
-                                        setIntroActionType('ask-permission');
-                                        setIntroEmailSubject(`Would you be open to an intro? (${companyName})`);
-                                        setIntroEmailBody(`Hi ${cf},\n\nI have someone in my network who's looking to connect with someone at ${companyName}. I thought of you and wanted to check — would you be open to an introduction?\n\nNo pressure at all — just reply to this email and let me know.\n\nBest,\n${currentUser?.name || ''}`);
-                                      }}>
-                                        Ask {cf} if OK to make intro
-                                      </button>
-                                      )}
-                                      <button className="u-intro-cancel" onClick={() => { setIntroActionRequestId(null); setIntroSelectedContact(null); }}>Cancel</button>
-                                    </div>
-                                    );
-                                  })()}
-                                </div>
-                              );
-                            })()}
-
-                            {/* Email composer */}
-                            {introActionRequestId === r.id && introActionType && (() => {
-                              const contact = introSelectedContact || myContactsAtCompany[0];
-                              const recipientLabel = introActionType === 'ask-details'
-                                ? `To: ${r.requester.email || r.requester.name}`
-                                : introActionType === 'ask-permission' && contact
-                                ? `To: ${contact.email || contact.name}`
-                                : `To: ${contact?.email || ''}, ${r.requester.email || ''}`;
-                              const ccLabel = `CC: ${currentUser?.email || 'you'}`;
-                              return (
-                              <div className="u-intro-email">
-                                <div className="u-intro-email-recipients">
-                                  <span className="u-intro-email-recipient">{recipientLabel}</span>
-                                  <span className="u-intro-email-cc">{ccLabel}</span>
-                                </div>
-                                <label className="u-intro-email-label">Subject</label>
-                                <input
-                                  className="u-intro-email-subject"
-                                  value={introEmailSubject}
-                                  onChange={e => setIntroEmailSubject(e.target.value)}
-                                />
-                                <label className="u-intro-email-label">Message</label>
-                                <textarea
-                                  className="u-intro-email-body"
-                                  rows={8}
-                                  value={introEmailBody}
-                                  onChange={e => setIntroEmailBody(e.target.value)}
-                                />
-                                <div className="u-intro-email-actions">
-                                  <button
-                                    className="u-intro-email-send"
-                                    disabled={introSending}
-                                    onClick={async () => {
-                                      if (introSending) return;
-                                      if ((introActionType === 'make-intro' || introActionType === 'ask-permission') && !contact) {
-                                        setIntroToast('No contact selected');
-                                        setTimeout(() => setIntroToast(null), 3000);
-                                        return;
-                                      }
-                                      setIntroSending(true);
-                                      try {
-                                        if (introActionType === 'make-intro' && contact) {
-                                          await emailApi.sendDoubleIntro({
-                                            requesterEmail: r.requester.email || '',
-                                            requesterName: r.requester.name,
-                                            contactEmail: contact.email,
-                                            contactName: contact.name,
-                                            targetCompany: companyName,
-                                          });
-                                          const offerResp = await offersApi.create({ requestId: r.id, message: `Intro to ${contact.name}` });
-                                          const newOffer = { id: offerResp.id, status: offerResp.status, createdAt: new Date().toISOString(), introducer: { id: currentUser?.id || '', name: currentUser?.name || '', avatar: currentUser?.avatar || null } };
-                                          setIncomingRequests(prev => prev.map(req => req.id === r.id ? { ...req, status: 'accepted', offers: [...(req.offers || []), newOffer] } as typeof req : req));
-                                        } else if (introActionType === 'ask-details') {
-                                          await emailApi.sendContact({
-                                            recipientEmail: r.requester.email || '',
-                                            recipientName: r.requester.name,
-                                            subject: introEmailSubject,
-                                            body: introEmailBody,
-                                            requestId: r.id,
-                                            action: 'ask-details',
-                                          });
-                                          const now = new Date().toISOString();
-                                          setIncomingRequests(prev => prev.map(req => req.id === r.id ? { ...req, detailsRequestedAt: now, detailsRequestedById: currentUser?.id, detailsRequestedByName: currentUser?.name } as typeof req : req));
-                                          if (inlinePanel?.type === 'intro-detail' && inlinePanel.introRequest?.id === r.id) {
-                                            setInlinePanel({ ...inlinePanel, introRequest: { ...inlinePanel.introRequest, detailsRequestedAt: now, detailsRequestedById: currentUser?.id, detailsRequestedByName: currentUser?.name } });
-                                          }
-                                        } else if (introActionType === 'ask-permission' && contact) {
-                                          await emailApi.sendContact({
-                                            recipientEmail: contact.email,
-                                            recipientName: contact.name,
-                                            subject: introEmailSubject,
-                                            body: introEmailBody,
-                                            requestId: r.id,
-                                            action: 'ask-permission',
-                                            contactName: contact.name,
-                                          });
-                                          const now = new Date().toISOString();
-                                          const newCheck = { at: now, name: contact.name, byId: currentUser?.id || '' };
-                                          setIncomingRequests(prev => prev.map(req => {
-                                            if (req.id !== r.id) return req;
-                                            const prevChecks = Array.isArray((req as any).checkedWithContacts) ? (req as any).checkedWithContacts : [];
-                                            return { ...req, checkedWithContactAt: now, checkedWithContactName: contact.name, checkedWithContactById: currentUser?.id, checkedWithContacts: [...prevChecks, newCheck] } as typeof req;
-                                          }));
-                                          if (inlinePanel?.type === 'intro-detail' && inlinePanel.introRequest?.id === r.id) {
-                                            const prevChecks = Array.isArray(inlinePanel.introRequest.checkedWithContacts) ? inlinePanel.introRequest.checkedWithContacts : [];
-                                            setInlinePanel({ ...inlinePanel, introRequest: { ...inlinePanel.introRequest, checkedWithContactAt: now, checkedWithContactName: contact.name, checkedWithContactById: currentUser?.id, checkedWithContacts: [...prevChecks, newCheck] } });
-                                          }
-                                        }
-                                        setIntroActionRequestId(null);
-                                        setIntroActionType(null);
-                                        setIntroSelectedContact(null);
-                                        setIntroToast('Email sent!');
-                                        setTimeout(() => setIntroToast(null), 3000);
-                                      } catch (err) {
-                                        console.error('Failed to send intro email:', err);
-                                        setIntroToast('Failed to send email');
-                                        setTimeout(() => setIntroToast(null), 3000);
-                                      } finally {
-                                        setIntroSending(false);
-                                      }
-                                    }}
-                                  >
-                                    {introSending ? 'Sending...' : 'Send with Introo'}
-                                  </button>
-                                  {introActionType !== 'ask-details' && (
-                                    <button
-                                      className="u-intro-mailto-btn"
-                                      title="Status won't be tracked automatically when using your email app"
-                                      onClick={() => {
-                                        const toEmail = introActionType === 'ask-permission' && contact
-                                          ? (contact.email || '')
-                                          : [contact?.email, r.requester.email].filter(Boolean).join(',');
-                                        const cc = currentUser?.email || '';
-                                        const mailto = `mailto:${toEmail}?cc=${encodeURIComponent(cc)}&subject=${encodeURIComponent(introEmailSubject)}&body=${encodeURIComponent(introEmailBody)}`;
-                                        window.open(mailto, '_blank');
-                                        setIntroToast('Opened in email app — status won\'t update automatically');
-                                        setTimeout(() => setIntroToast(null), 4000);
-                                      }}
-                                    >
-                                      Open in email app
-                                    </button>
-                                  )}
-                                  <button className="u-intro-cancel" onClick={() => { setIntroActionType(null); }}>Back</button>
-                                </div>
-                              </div>
-                              );
-                            })()}
-
-                            {isDeclining && (
-                              <div className="u-req-decline">
-                                <textarea className="u-req-decline-input" placeholder="Reason (optional, stays anonymous)" rows={2} value={declineReason} onChange={e => setDeclineReason(e.target.value)} />
-                                <div className="u-req-decline-btns">
-                                  <button className="u-req-action-btn u-req-action-btn--decline-confirm" onClick={async () => {
-                                    try {
-                                      await requestsApi.decline(r.id, declineReason.trim() || undefined);
-                                      setIncomingRequests(prev => prev.map(req => req.id === r.id ? { ...req, status: 'declined' } : req));
-                                    } catch (err) { console.error('Failed to decline:', err); }
-                                    setDecliningRequestId(null); setDeclineReason('');
-                                  }}>Confirm Decline</button>
-                                  <button className="u-req-action-btn" onClick={() => { setDecliningRequestId(null); setDeclineReason(''); }}>Cancel</button>
-                                </div>
-                              </div>
-                            )}
+                    return (
+                      <div
+                        key={r.id}
+                        className={`u-inbox-card ${r.status !== 'open' ? 'u-inbox-card--resolved' : ''}`}
+                        onClick={() => {
+                          setInlinePanel({
+                            type: 'intro-detail',
+                            company: matchedCompany,
+                            fromConnectionId: conn.id,
+                            introRequest: {
+                              ...r,
+                              direction,
+                              requester: r.requester,
+                              space: null,
+                              connectionPeerName: conn.peer.name,
+                              declineReason: 'declineReason' in r ? (r as any).declineReason : undefined,
+                              declinedByName: 'declinedByName' in r ? (r as any).declinedByName : undefined,
+                              detailsRequestedAt: 'detailsRequestedAt' in r ? (r as any).detailsRequestedAt : undefined,
+                              detailsRequestedById: 'detailsRequestedById' in r ? (r as any).detailsRequestedById : undefined,
+                              detailsRequestedByName: 'detailsRequestedByName' in r ? (r as any).detailsRequestedByName : undefined,
+                              checkedWithContactAt: 'checkedWithContactAt' in r ? (r as any).checkedWithContactAt : undefined,
+                              checkedWithContactName: 'checkedWithContactName' in r ? (r as any).checkedWithContactName : undefined,
+                              checkedWithContactById: 'checkedWithContactById' in r ? (r as any).checkedWithContactById : undefined,
+                              checkedWithContacts: 'checkedWithContacts' in r ? (r as any).checkedWithContacts : undefined,
+                              offers: 'offers' in r ? (r as any).offers : undefined,
+                            },
+                          });
+                        }}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <div className="u-inbox-card-top">
+                          <div className="u-inbox-card-title">
+                            {companyDomain && <CompanyLogo domain={companyDomain} name={companyName} size={18} />}
+                            <span>{isMe ? 'You' : r.requester.name} requested intro to <strong>{companyName}</strong>{!isMe && ' from your network'}</span>
                           </div>
-                        );
-                      })}
+                          {(() => {
+                            const hasDetails = !!(r as any).detailsRequestedAt;
+                            const hasChecked = !!(r as any).checkedWithContactAt;
+                            if (r.status === 'open') {
+                              if (isMe && hasDetails) return <span className="u-inbox-status u-inbox-status--awaiting">Awaiting your reply</span>;
+                              if (isMe) return <span className="u-inbox-status u-inbox-status--inprogress">In progress</span>;
+                              const cls = hasDetails || hasChecked ? 'inprogress' : 'action';
+                              const label = hasDetails ? 'Waiting for details' : hasChecked ? 'Checking with contact' : 'Needs your review';
+                              return <span className={`u-inbox-status u-inbox-status--${cls}`}>{label}</span>;
+                            }
+                            const doneLabel = r.status === 'accepted' ? 'Done' : r.status === 'declined' ? 'Declined' : r.status;
+                            return <span className={`u-inbox-status u-inbox-status--${r.status}`}>{doneLabel}</span>;
+                          })()}
+                        </div>
+                        <p className="u-inbox-card-text">{r.rawText}</p>
+                        <div className="u-inbox-card-meta">
+                          <span className="u-inbox-via">👤 Direct</span>
+                          <span className="u-inbox-time">{timeAgo}</span>
+                        </div>
+                      </div>
+                    );
+                  };
+
+                  return (
+                    <div className="u-panel-section">
+                      <h4 className="u-panel-section-h">
+                        Intro Requests
+                        {openCount > 0 && <span className="u-notif-inline-badge">{openCount}</span>}
+                      </h4>
+                      <p className="u-panel-section-hint">Private between you and {conn.peer.name}.</p>
+
+                      {received.length > 0 && (
+                        <>
+                          {receivedNeedsReview.length > 0 && (
+                            <div className="u-intro-subgroup">
+                              <div className="u-intro-subgroup-header u-intro-subgroup-header--attention">Needs your review</div>
+                              <div className="u-panel-request-inbox">
+                                {receivedNeedsReview.map(r => renderConnCard(r, 'received'))}
+                              </div>
+                            </div>
+                          )}
+                          {receivedInProgress.length > 0 && (
+                            <div className="u-intro-subgroup">
+                              <div className="u-intro-subgroup-header">In progress</div>
+                              <div className="u-panel-request-inbox">
+                                {receivedInProgress.map(r => renderConnCard(r, 'received'))}
+                              </div>
+                            </div>
+                          )}
+                          {receivedPast.length > 0 && (
+                            <div className="u-intro-subgroup">
+                              <div className="u-intro-subgroup-header">Past</div>
+                              <div className="u-panel-request-inbox">
+                                {receivedPast.map(r => renderConnCard(r, 'received'))}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
+
+                      {sent.length > 0 && (
+                        <>
+                          {received.length > 0 && sent.some(r => r.status === 'open') && (
+                            <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', margin: '0.5rem 0' }} />
+                          )}
+                          {sentNeedsReply.length > 0 && (
+                            <div className="u-intro-subgroup">
+                              <div className="u-intro-subgroup-header u-intro-subgroup-header--attention">Needs your reply</div>
+                              <div className="u-panel-request-inbox">
+                                {sentNeedsReply.map(r => renderConnCard(r, 'sent'))}
+                              </div>
+                            </div>
+                          )}
+                          {sentOpen.length > 0 && (
+                            <div className="u-intro-subgroup">
+                              <div className="u-intro-subgroup-header">Your requests</div>
+                              <div className="u-panel-request-inbox">
+                                {sentOpen.map(r => renderConnCard(r, 'sent'))}
+                              </div>
+                            </div>
+                          )}
+                          {sentPast.length > 0 && (
+                            <div className="u-intro-subgroup">
+                              <div className="u-intro-subgroup-header">Past</div>
+                              <div className="u-panel-request-inbox">
+                                {sentPast.map(r => renderConnCard(r, 'sent'))}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
               </div>
               );
@@ -6572,7 +6400,7 @@ export function AIHomePage() {
                                   className={introducerConn ? 'u-intro-timeline-link' : ''}
                                   onClick={introducerConn ? (e) => { e.stopPropagation(); setInlinePanel({ type: 'connection', connectionId: introducerConn.id, fromIntroDetail: { ...inlinePanel } }); } : undefined}
                                 >{acceptedOffer.introducer.name}</strong>
-                                {via ? <> from {via}</> : null} made the intro
+                                {via && connPeerName !== acceptedOffer.introducer.name ? <> from {via}</> : null} made the intro
                               </span>
                               <span className="u-intro-timeline-date">{doneDateStr}, {doneTimeStr}</span>
                             </div>
