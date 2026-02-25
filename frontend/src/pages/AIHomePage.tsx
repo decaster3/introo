@@ -3105,7 +3105,7 @@ export function AIHomePage() {
                   <circle cx="12" cy="5" r="3"/><circle cx="5" cy="19" r="3"/><circle cx="19" cy="19" r="3"/>
                   <path d="M12 8v4M8.5 16.5 10 14M15.5 16.5 14 14"/>
                 </svg>
-                Network
+                {!inlinePanel && 'Network'}
               </button>
               {enriching && (
                 <span className="u-topbar-enriching" title="Auto-enriching contacts...">
@@ -3126,7 +3126,6 @@ export function AIHomePage() {
                     setInlinePanel(null);
                   } else {
                     setInlinePanel({ type: 'notifications' });
-                    // Mark all as read when opening
                     notificationsApi.markAllRead().then(() => {
                       setNotificationCount(0);
                       setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
@@ -3307,6 +3306,9 @@ export function AIHomePage() {
               }}>x</button>
             </div>
           )}
+
+          {/* ── Scrollable content area ── */}
+          <div className="u-scroll-area">
 
           {/* ── Company Grid ──────────────────────────────────── */}
           {entityTab === 'companies' && <div className={`u-grid ${viewMode === 'table' ? 'u-grid--table' : ''}`}>
@@ -4202,7 +4204,8 @@ export function AIHomePage() {
             );
           })()}
 
-        </div>
+          </div>{/* end u-scroll-area */}
+        </div>{/* end u-canvas */}
 
       {/* ── Inline Panel ────────────────────────────────────────────── */}
       {inlinePanel && (
@@ -6374,6 +6377,7 @@ export function AIHomePage() {
                 )}
               </div>
             )}
+
         </div>
       )}
       </div>{/* end u-layout */}

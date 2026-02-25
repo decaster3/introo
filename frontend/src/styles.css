@@ -2037,10 +2037,21 @@ body {
   padding: 0 1.5rem;
   transition: padding-right 0.3s;
   overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow-y: hidden;
+}
+
+.u-scroll-area {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  position: relative;
 }
 
 .u-canvas.has-panel {
-  padding-right: calc(380px + 1.5rem);
+  padding-right: calc(520px + 1.5rem);
 }
 
 /* ── Fast Filters (horizontal bar) ─────────────────── */
@@ -4343,7 +4354,8 @@ body {
   border-color: var(--accent-primary);
   color: #fff;
   box-shadow: 0 0 12px rgba(91,141,239,0.2);
-  padding-bottom: 1.25rem;
+  padding: 0.55rem;
+  justify-content: center;
 }
 
 /* ── Omni Bar (search + hunts combined) ──────────── */
@@ -4463,6 +4475,19 @@ body {
 
 .u-topbar-right {
   display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0;
+}
+
+.has-panel .u-topbar {
+  flex-wrap: wrap;
+}
+
+.has-panel .u-omni {
+  flex: 1 1 auto;
+  min-width: 180px;
+}
+
+.has-panel .u-topbar-right {
+  flex-wrap: wrap;
 }
 
 .u-signals-btn {
@@ -4686,7 +4711,7 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 0.625rem;
-  padding-bottom: 3rem;
+  padding-bottom: 0;
 }
 .u-grid.u-grid--table {
   display: block;
@@ -5411,7 +5436,7 @@ body {
 .u-panel {
   position: fixed;
   top: 0; right: 0;
-  width: 400px; max-width: 90vw;
+  width: 520px; max-width: 90vw;
   height: 100vh;
   background: var(--bg-secondary);
   border-left: 1px solid var(--border-medium);
@@ -9352,6 +9377,11 @@ body {
   justify-content: center;
   gap: 1rem;
   padding: 0.75rem 0;
+  position: sticky;
+  bottom: 0;
+  background: var(--bg-primary);
+  z-index: 10;
+  border-top: 1px solid var(--border-subtle);
 }
 
 .u-grid-page-btn {
