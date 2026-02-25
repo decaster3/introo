@@ -9,6 +9,12 @@ function maskEmail(): string {
   return '••••••';
 }
 
+function abbreviateName(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length <= 1) return fullName;
+  return `${parts[0]} ${parts[parts.length - 1][0]}.`;
+}
+
 const router = Router();
 
 // All routes require authentication
@@ -1021,7 +1027,7 @@ router.get('/:id/reach', async (req, res) => {
         city: string | null;
         country: string | null;
         meetingsCount: number;
-        lastSeenAt: Date;
+        lastSeenAt: Date | null;
       }[];
     }>();
 
@@ -1030,19 +1036,20 @@ router.get('/:id/reach', async (req, res) => {
 
       const existing = companyMap.get(contact.company.id);
       const isOwnContact = contact.userId === userId;
+      const rawName = contact.name || contact.email.split('@')[0];
       const contactInfo = {
         id: contact.id,
-        name: contact.name || contact.email.split('@')[0],
+        name: isOwnContact ? rawName : abbreviateName(rawName),
         email: isOwnContact ? contact.email : maskEmail(),
         title: contact.title,
         userId: contact.userId,
         userName: contact.user.name,
         linkedinUrl: contact.linkedinUrl,
-        photoUrl: contact.photoUrl,
+        photoUrl: isOwnContact ? contact.photoUrl : null,
         city: contact.city,
         country: contact.country,
-        meetingsCount: contact.meetingsCount,
-        lastSeenAt: contact.lastSeenAt,
+        meetingsCount: isOwnContact ? contact.meetingsCount : 0,
+        lastSeenAt: isOwnContact ? contact.lastSeenAt : null,
       };
 
       if (existing) {

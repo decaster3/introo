@@ -9,6 +9,12 @@ function maskEmail(): string {
   return '••••••';
 }
 
+function abbreviateName(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length <= 1) return fullName;
+  return `${parts[0]} ${parts[parts.length - 1][0]}.`;
+}
+
 const router = Router();
 router.use(authMiddleware);
 
@@ -391,25 +397,32 @@ router.get('/:id/reach', async (req, res) => {
         title: string | null;
         userId: string;
         userName: string;
+        linkedinUrl: string | null;
+        photoUrl: string | null;
+        city: string | null;
+        country: string | null;
+        meetingsCount: number;
+        lastSeenAt: Date | null;
       }[];
     }>();
 
     for (const contact of contacts) {
       if (!contact.company) continue;
 
+      const rawName = contact.name || contact.email.split('@')[0];
       const contactInfo = {
         id: contact.id,
-        name: contact.name || contact.email.split('@')[0],
+        name: abbreviateName(rawName),
         email: maskEmail(),
         title: contact.title,
         userId: peerId,
         userName: peerName,
         linkedinUrl: contact.linkedinUrl,
-        photoUrl: contact.photoUrl,
+        photoUrl: null,
         city: contact.city,
         country: contact.country,
-        meetingsCount: contact.meetingsCount,
-        lastSeenAt: contact.lastSeenAt,
+        meetingsCount: 0,
+        lastSeenAt: null,
       };
 
       const existing = companyMap.get(contact.company.id);

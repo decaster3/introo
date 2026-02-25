@@ -69,12 +69,14 @@ Internal documentation for how Introo controls data access across users, spaces,
 | Company name & domain      | **Yes**      | All enriched company data is shared                    |
 | Company industry, size     | **Yes**      | From Apollo enrichment                                 |
 | Company funding, revenue   | **Yes**      | From Apollo enrichment                                 |
-| Contact name               | **Yes**      | First + last name visible                              |
+| Contact name               | **Partial**  | Abbreviated only — e.g. "Nina B." (first name + last initial) |
 | Contact job title          | **Yes**      | Visible to help identify the right person              |
+| Contact photo / avatar     | **Hidden**   | Never shown for other members' contacts                |
 | Contact email              | **Hidden**   | Completely hidden — never shown to other members       |
 | Who knows the contact      | **Hidden**   | UI shows Space name, not the member's name             |
 | Meeting history            | **No**       | Event titles, dates, frequency — never shared          |
-| Connection strength        | **No**       | Strong/medium/weak is private to the contact owner     |
+| Last met date              | **Hidden**   | Never shown in table, card, or detail panel            |
+| Connection strength        | **Hidden**   | Strong/medium/weak never shown for other members' contacts |
 | Tags                       | **No**       | Completely private                                     |
 | Saved Views                | **No**       | Completely private                                     |
 | Member list                | **Yes**      | All members see who else is in the Space               |
@@ -86,11 +88,13 @@ Internal documentation for how Introo controls data access across users, spaces,
 |----------------------------|--------------|--------------------------------------------------------|
 | Company name & domain      | **Yes**      | All enriched company data is shared                    |
 | Company industry, size     | **Yes**      | From Apollo enrichment                                 |
-| Contact name               | **Yes**      | First + last name visible                              |
+| Contact name               | **Partial**  | Abbreviated only — e.g. "Alex T." (first name + last initial) |
 | Contact job title          | **Yes**      | Visible                                                |
+| Contact photo / avatar     | **Hidden**   | Never shown for peer's contacts                        |
 | Contact email              | **Hidden**   | Completely hidden — never shown to the peer            |
 | Meeting history            | **No**       | Never shared                                           |
-| Connection strength        | **No**       | Private to the contact owner                           |
+| Last met date              | **Hidden**   | Never shown in table, card, or detail panel            |
+| Connection strength        | **Hidden**   | Strong/medium/weak never shown for peer's contacts     |
 | Tags                       | **No**       | Private                                                |
 | Saved Views                | **No**       | Private                                                |
 
@@ -127,7 +131,14 @@ Internal documentation for how Introo controls data access across users, spaces,
 **Access control (backend):**
 - `GET /api/spaces/:id/reach` — verifies user is owner or approved member
 - Contacts query: `userId: { in: memberUserIds }, isApproved: true`
-- Email hiding: `isOwnContact ? contact.email : '••••••'`
+- For other members' contacts the API enforces at response level:
+  - **Name**: abbreviated to first name + last initial (e.g. "Nina B.")
+  - **Email**: replaced with `'••••••'`
+  - **Photo**: returned as `null`
+  - **Meetings count**: returned as `0`
+  - **Last seen date**: returned as `null`
+  - **Connection strength**: not included in response
+- Own contacts are returned with full data
 - Intro requests: filtered per-member (only see own + those you can help with)
 
 ### 1:1 Connections
@@ -148,19 +159,35 @@ Internal documentation for how Introo controls data access across users, spaces,
 
 **Access control (backend):**
 - `GET /api/connections/:id/reach` — verifies connection is `accepted` and user is one of the two parties
-- All peer contact emails are hidden: returns `'••••••'` instead of real email
-- No meeting data included in the response
+- All peer contacts are masked at the API response level:
+  - **Name**: abbreviated to first name + last initial (e.g. "Alex T.")
+  - **Email**: replaced with `'••••••'`
+  - **Photo**: returned as `null`
+  - **Meetings count**: returned as `0`
+  - **Last seen date**: returned as `null`
+  - **Connection strength**: not included in response
 
 ---
 
-## Email Hiding
+## Contact Data Masking
 
-Contact email addresses are **completely hidden** from other users. The backend returns a placeholder string (`••••••`) instead of any part of the real email.
+Contact data for other users' contacts is **masked at the backend API level** before it leaves the server. This is not frontend-only filtering — the sensitive data is never sent to the client.
 
-**Where hiding applies:**
-- Space reach endpoint — other members' contact emails are replaced entirely
-- Connection reach endpoint — all peer contact emails are replaced entirely
-- Your own contacts — you always see your own full emails
+**What is masked for non-owned contacts:**
+
+| Field              | Masked value         | Notes                                       |
+|--------------------|----------------------|---------------------------------------------|
+| Name               | First + last initial | e.g. "Nina Baghdasaryan" → "Nina B."        |
+| Email              | `••••••`             | Completely replaced, no partial leak         |
+| Photo / avatar URL | `null`               | Never sent for other users' contacts        |
+| Meetings count     | `0`                  | Real count never leaves the server          |
+| Last seen date     | `null`               | Real date never leaves the server           |
+| Connection strength| Not included         | Never part of the reach API response        |
+
+**Where masking applies:**
+- `GET /api/spaces/:id/reach` — other members' contacts are masked; own contacts returned in full
+- `GET /api/connections/:id/reach` — all peer contacts are masked (they are never your own)
+- `GET /api/relationships/contacts` — only returns the authenticated user's own contacts (no masking needed)
 
 ---
 
@@ -266,9 +293,12 @@ All API routes use `authMiddleware` which:
 
 | Data                                | Shared?       |
 |-------------------------------------|---------------|
-| Full contact email addresses        | **Never** (completely hidden in spaces & connections) |
+| Full contact name                   | **Never** — abbreviated to first name + last initial (e.g. "Nina B.") |
+| Contact photo / avatar              | **Never** — hidden for non-owned contacts |
+| Full contact email addresses        | **Never** — completely hidden in spaces & connections |
 | Meeting titles / calendar events    | **Never**     |
 | Meeting dates / frequency           | **Never**     |
+| Last met date                       | **Never** — hidden in table, card, and detail views |
 | Connection strength (strong/medium/weak) | **Never** |
 | Tags                                | **Never**     |
 | Saved Views                         | **Never**     |

@@ -4177,8 +4177,13 @@ body {
   font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-primary);
-  overflow: hidden;
   white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+}
+.sb-view-card-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
   min-width: 0;
 }
 .sb-view-card--active .sb-view-card-name {
@@ -5057,6 +5062,43 @@ body {
   width: 6px; height: 6px;
   border-radius: 50%;
   flex-shrink: 0;
+}
+
+.sb-tag-section {
+  margin-bottom: 0.5rem;
+}
+.sb-tag-section-label {
+  display: block;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.3rem;
+  padding-left: 0.1rem;
+}
+.sb-tag-section-label--include {
+  color: #6ee7b7;
+}
+.sb-tag-section-label--exclude {
+  color: #fca5a5;
+}
+.sb-tag-or {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: rgba(255,255,255,0.3);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0 0.1rem;
+  flex-shrink: 0;
+}
+.sb-chip--exclude {
+  border-color: rgba(239,68,68,0.4) !important;
+  background: rgba(239,68,68,0.1) !important;
+  color: #fca5a5 !important;
+  text-decoration: line-through;
+  text-decoration-color: rgba(239,68,68,0.4);
 }
 
 /* Tile header -- company name row */

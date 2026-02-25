@@ -70,6 +70,12 @@ function matchesFundingFilter(raw: string | null | undefined, totalFunding: stri
   }
 }
 
+function abbreviateName(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length <= 1) return fullName;
+  return `${parts[0]} ${parts[parts.length - 1][0]}.`;
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function AIHomePage() {
@@ -527,7 +533,8 @@ export function AIHomePage() {
       if (next[domain].length === 0) delete next[domain];
     });
     persistCompanyTags(next);
-    setTagFilter(prev => prev.filter(t => t !== name));
+    setTagInclude(prev => prev.filter(t => t !== name));
+    setTagExclude(prev => prev.filter(t => t !== name));
     setGridPage(0);
     // Persist to server
     tagsApi.deleteTag(name).catch(() => {});
@@ -554,14 +561,15 @@ export function AIHomePage() {
 
   const allTags = useMemo(() => tagDefs.map(t => t.name), [tagDefs]);
 
-  const [tagFilter, setTagFilter] = useState<string[]>([]);
+  const [tagInclude, setTagInclude] = useState<string[]>([]);
+  const [tagExclude, setTagExclude] = useState<string[]>([]);
 
   // Auto-expand sidebar sections that have active filters; auto-collapse when cleared
   const prevActiveSectionsRef = useRef<Set<string>>(new Set(['source']));
   useEffect(() => {
     const active = new Set<string>();
     active.add('source');
-    if (tagFilter.length > 0) active.add('tags');
+    if (tagInclude.length > 0 || tagExclude.length > 0) active.add('tags');
     if (strengthFilter !== 'all') active.add('strength');
     if (sidebarFilters.aiKeywords.length > 0 || sidebarFilters.excludeKeywords.length > 0 || sidebarFilters.description) active.add('description');
     if (sidebarFilters.connectedYears.length > 0 || sidebarFilters.connectedMonths.length > 0) active.add('connected-time');
@@ -586,7 +594,7 @@ export function AIHomePage() {
       });
     }
     prevActiveSectionsRef.current = active;
-  }, [strengthFilter, tagFilter, sidebarFilters]);
+  }, [strengthFilter, tagInclude, tagExclude, sidebarFilters]);
 
   // ─── Data transforms ────────────────────────────────────────────────────────
 
@@ -913,10 +921,15 @@ export function AIHomePage() {
             const text = [co.description, co.industry, co.name].filter(Boolean).join(' ').toLowerCase();
             if (hf.excludeKeywords.some(ex => text.includes(ex))) filterMatch = false;
           }
-          if (hf.tagFilter && hf.tagFilter.length > 0 && filterMatch) {
+          if (hf.tagInclude && hf.tagInclude.length > 0 && filterMatch) {
             hasAnyFilter = true;
             const tags = companyTags[co.domain] || [];
-            if (!hf.tagFilter.every(t => tags.includes(t))) filterMatch = false;
+            if (!hf.tagInclude.some(t => tags.includes(t))) filterMatch = false;
+          }
+          if (hf.tagExclude && hf.tagExclude.length > 0 && filterMatch) {
+            hasAnyFilter = true;
+            const tags = companyTags[co.domain] || [];
+            if (hf.tagExclude.some(t => tags.includes(t))) filterMatch = false;
           }
           if (hf.connectedYears && hf.connectedYears.length > 0 && filterMatch) {
             hasAnyFilter = true;
@@ -1029,11 +1042,17 @@ export function AIHomePage() {
       );
     }
 
-    // Filter by tags
-    if (tagFilter.length > 0) {
+    // Filter by tags (include = OR, exclude = OR)
+    if (tagInclude.length > 0) {
       result = result.filter(c => {
         const tags = companyTags[c.domain] || [];
-        return tagFilter.every(t => tags.includes(t));
+        return tagInclude.some(t => tags.includes(t));
+      });
+    }
+    if (tagExclude.length > 0) {
+      result = result.filter(c => {
+        const tags = companyTags[c.domain] || [];
+        return !tagExclude.some(t => tags.includes(t));
       });
     }
 
@@ -1214,7 +1233,7 @@ export function AIHomePage() {
     }
 
     return result;
-  }, [mergedCompanies, selectedView, searchQuery, sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, sortBy, sidebarFilters, tagFilter, companyTags, tableSorts, groupByField, groupByDir]);
+  }, [mergedCompanies, selectedView, searchQuery, sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, sortBy, sidebarFilters, tagInclude, tagExclude, companyTags, tableSorts, groupByField, groupByDir]);
 
   // Flatten filteredCompanies into a deduplicated people array
   interface FlatPerson {
@@ -1380,25 +1399,6 @@ export function AIHomePage() {
     return counts;
   }, [mergedCompanies]);
 
-  // Chip counts for revenue ranges
-  const revenueRangeCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    ['0-1m', '1-10m', '10-50m', '50-100m', '100m+'].forEach(range => {
-      counts[range] = mergedCompanies.filter(c => {
-        if (!c.annualRevenue) return false;
-        const rev = c.annualRevenue.toLowerCase();
-        const m = parseRevenueMillions(rev);
-        if (range === '0-1m') return m < 1;
-        if (range === '1-10m') return m >= 1 && m < 10;
-        if (range === '10-50m') return m >= 10 && m < 50;
-        if (range === '50-100m') return m >= 50 && m < 100;
-        if (range === '100m+') return m >= 100;
-        return false;
-      }).length;
-    });
-    return counts;
-  }, [mergedCompanies]);
-
   // Chip counts for funding rounds
   const fundingRoundCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -1441,9 +1441,9 @@ export function AIHomePage() {
     if (sf.technologies.length > 0) n++;
     if (sf.connectedYears.length > 0 || sf.connectedMonths.length > 0) n++;
     if (sf.lastContactYears.length > 0 || sf.lastContactMonths.length > 0) n++;
-    if (tagFilter.length > 0) n++;
+    if (tagInclude.length > 0 || tagExclude.length > 0) n++;
     return n;
-  }, [searchQuery, sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, sidebarFilters, tagFilter]);
+  }, [searchQuery, sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, sidebarFilters, tagInclude, tagExclude]);
 
   // Build removable pills for every active filter
   // Compute year/month counts from contacts for "Connected since" filter
@@ -1503,14 +1503,15 @@ export function AIHomePage() {
     if (sf.lastContactMonths.length > 0) filters.lastContactMonths = [...sf.lastContactMonths];
     if (sourceFilter !== 'all') filters.sourceFilter = sourceFilter;
     if (strengthFilter !== 'all') filters.strengthFilter = strengthFilter;
-    if (tagFilter.length > 0) filters.tagFilter = [...tagFilter];
+    if (tagInclude.length > 0) filters.tagInclude = [...tagInclude];
+    if (tagExclude.length > 0) filters.tagExclude = [...tagExclude];
     if (spaceFilter !== 'all') filters.spaceFilter = spaceFilter;
     if (connectionFilter !== 'all') filters.connectionFilter = connectionFilter;
     if (accountFilter !== 'all') filters.accountFilter = accountFilter;
     if (peopleSorts.length > 0) filters.peopleSortRules = peopleSorts.map(s => ({ field: s.field, dir: s.dir }));
     if (peopleGroupByField) filters.peopleGroupBy = { field: peopleGroupByField, dir: peopleGroupByDir };
     return filters;
-  }, [sidebarFilters, sourceFilter, strengthFilter, tagFilter, spaceFilter, connectionFilter, accountFilter, peopleSorts, peopleGroupByField, peopleGroupByDir]);
+  }, [sidebarFilters, sourceFilter, strengthFilter, tagInclude, tagExclude, spaceFilter, connectionFilter, accountFilter, peopleSorts, peopleGroupByField, peopleGroupByDir]);
 
   const clearAllFilters = useCallback(() => {
     setSourceFilter('all');
@@ -1549,7 +1550,8 @@ export function AIHomePage() {
       lastContactYears: [],
       lastContactMonths: [],
     });
-    setTagFilter([]);
+    setTagInclude([]);
+    setTagExclude([]);
   }, []);
 
   // Stats
@@ -1674,7 +1676,7 @@ export function AIHomePage() {
       (sf.revenueRanges.length > 0 ? 1 : 0) +
       (sf.country ? 1 : 0) +
       (sf.city ? 1 : 0) +
-      (tagFilter.length > 0 ? 1 : 0) +
+      (tagInclude.length > 0 || tagExclude.length > 0 ? 1 : 0) +
       (sf.connectedYears.length > 0 || sf.connectedMonths.length > 0 ? 1 : 0) +
       (sf.lastContactYears.length > 0 || sf.lastContactMonths.length > 0 ? 1 : 0) +
       (sf.foundedFrom ? 1 : 0) +
@@ -1684,7 +1686,7 @@ export function AIHomePage() {
       const t = setTimeout(() => setShowViewPrompt(true), 1500);
       return () => clearTimeout(t);
     }
-  }, [activeFilterCount, viewPromptDismissed, savedViews.length, selectedView, showViewPrompt, sidebarFilters, tagFilter]);
+  }, [activeFilterCount, viewPromptDismissed, savedViews.length, selectedView, showViewPrompt, sidebarFilters, tagInclude, tagExclude]);
 
   
 
@@ -1716,7 +1718,8 @@ export function AIHomePage() {
         });
         setSourceFilter('all');
         setStrengthFilter('all');
-        setTagFilter([]);
+        setTagInclude([]);
+        setTagExclude([]);
         setSpaceFilter('all');
         setConnectionFilter('all');
         setAccountFilter('all');
@@ -1768,7 +1771,8 @@ export function AIHomePage() {
         });
         setSourceFilter((f.sourceFilter as 'all' | 'mine' | 'spaces' | 'both') || 'all');
         setStrengthFilter((f.strengthFilter as 'all' | 'strong' | 'medium' | 'weak') || 'all');
-        setTagFilter(f.tagFilter || []);
+        setTagInclude(f.tagInclude || f.tagFilter || []);
+        setTagExclude(f.tagExclude || []);
         setSpaceFilter((f.spaceFilter as string) || 'all');
         setConnectionFilter((f.connectionFilter as string) || 'all');
         setAccountFilter((f.accountFilter as string) || 'all');
@@ -2123,7 +2127,7 @@ export function AIHomePage() {
   // ─── Active-sections set (for indicator dots) ──────────────────────────────
   const activeSectionIds = useMemo(() => {
     const s = new Set<string>();
-    if (tagFilter.length > 0) s.add('tags');
+    if (tagInclude.length > 0 || tagExclude.length > 0) s.add('tags');
     if (strengthFilter !== 'all') s.add('strength');
     if (sidebarFilters.aiKeywords.length > 0 || sidebarFilters.excludeKeywords.length > 0 || sidebarFilters.description) s.add('description');
     if (sidebarFilters.connectedYears.length > 0 || sidebarFilters.connectedMonths.length > 0) s.add('connected-time');
@@ -2135,7 +2139,7 @@ export function AIHomePage() {
     if (sidebarFilters.technologies.length > 0) s.add('technologies');
     if (groupByField || tableSorts.length > 0 || peopleGroupByField || peopleSorts.length > 0) s.add('sort-group');
     return s;
-  }, [strengthFilter, tagFilter, sidebarFilters, groupByField, tableSorts, peopleGroupByField, peopleSorts]);
+  }, [strengthFilter, tagInclude, tagExclude, sidebarFilters, groupByField, tableSorts, peopleGroupByField, peopleSorts]);
 
   // ─── Sidebar section helper ────────────────────────────────────────────────
 
@@ -2257,7 +2261,7 @@ export function AIHomePage() {
                           />
                         ) : (
                           <span className="sb-view-card-name">
-                            {v.title}
+                            <span className="sb-view-card-name-text">{v.title}</span>
                             <svg className="sb-view-card-pencil" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" onClick={e => { e.stopPropagation(); setEditingViewId(v.id); setEditingViewName(v.title); }}><path d="M17 3a2.85 2.85 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
                           </span>
                         )}
@@ -2475,29 +2479,87 @@ export function AIHomePage() {
 
             {/* ── Tags filter ── */}
             <SidebarSection id="tags" icon="🏷" title="Tags">
-              {allTags.length > 0 && (
-                <div className="sb-chips">
-                  {allTags.map(t => {
-                    const color = getTagColor(t);
-                    const count = Object.values(companyTags).filter(tags => tags.includes(t)).length;
-                    const isActive = tagFilter.includes(t);
-                    return (
-                      <button
-                        key={t}
-                        className={`sb-chip sb-chip--tag ${isActive ? 'active' : ''}`}
-                        style={isActive ? { borderColor: color.border, background: color.bg, color: color.text } : {}}
-                        onClick={() => { setTagFilter(prev =>
-                          prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]
-                        ); setGridPage(0); }}
-                        onContextMenu={e => { e.preventDefault(); deleteTagDef(t); }}
-                      >
-                        <span className="sb-tag-dot" style={{ background: color.text }} />
-                        {t} <span className="sb-chip-count">{count}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+              {allTags.length > 0 && (() => {
+                const unselected = allTags.filter(t => !tagInclude.includes(t) && !tagExclude.includes(t));
+                return (
+                <>
+                  {/* Include section */}
+                  {tagInclude.length > 0 && (
+                    <div className="sb-tag-section">
+                      <span className="sb-tag-section-label sb-tag-section-label--include">Include</span>
+                      <div className="sb-chips">
+                        {tagInclude.map((t, i) => {
+                          const color = getTagColor(t);
+                          const count = Object.values(companyTags).filter(tags => tags.includes(t)).length;
+                          return (
+                            <React.Fragment key={t}>
+                              {i > 0 && <span className="sb-tag-or">or</span>}
+                              <button
+                                className="sb-chip sb-chip--tag active"
+                                style={{ borderColor: color.border, background: color.bg, color: color.text }}
+                                onClick={() => { setTagInclude(prev => prev.filter(x => x !== t)); setGridPage(0); }}
+                                onContextMenu={e => { e.preventDefault(); deleteTagDef(t); }}
+                              >
+                                <span className="sb-tag-dot" style={{ background: color.text }} />
+                                {t} <span className="sb-chip-count">{count}</span>
+                              </button>
+                            </React.Fragment>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Exclude section */}
+                  {tagExclude.length > 0 && (
+                    <div className="sb-tag-section">
+                      <span className="sb-tag-section-label sb-tag-section-label--exclude">Exclude</span>
+                      <div className="sb-chips">
+                        {tagExclude.map((t, i) => {
+                          const color = getTagColor(t);
+                          const count = Object.values(companyTags).filter(tags => tags.includes(t)).length;
+                          return (
+                            <React.Fragment key={t}>
+                              {i > 0 && <span className="sb-tag-or">or</span>}
+                              <button
+                                className="sb-chip sb-chip--tag sb-chip--exclude"
+                                onClick={() => { setTagExclude(prev => prev.filter(x => x !== t)); setGridPage(0); }}
+                                onContextMenu={e => { e.preventDefault(); deleteTagDef(t); }}
+                              >
+                                <span className="sb-tag-dot" style={{ background: color.text }} />
+                                {t} <span className="sb-chip-count">{count}</span>
+                              </button>
+                            </React.Fragment>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Unselected tags */}
+                  {unselected.length > 0 && (
+                    <div className="sb-chips">
+                      {unselected.map(t => {
+                        const color = getTagColor(t);
+                        const count = Object.values(companyTags).filter(tags => tags.includes(t)).length;
+                        return (
+                          <button
+                            key={t}
+                            className="sb-chip sb-chip--tag"
+                            onClick={() => { setTagInclude(prev => [...prev, t]); setGridPage(0); }}
+                            onContextMenu={e => { e.preventDefault(); setTagExclude(prev => prev.includes(t) ? prev : [...prev, t]); setTagInclude(prev => prev.filter(x => x !== t)); setGridPage(0); }}
+                            title="Click to include · Right-click to exclude"
+                          >
+                            <span className="sb-tag-dot" style={{ background: color.text }} />
+                            {t} <span className="sb-chip-count">{count}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+                );
+              })()}
               <form className="sb-tag-add-form" onSubmit={e => {
                 e.preventDefault();
                 const input = e.currentTarget.querySelector('input') as HTMLInputElement;
@@ -2878,68 +2940,6 @@ export function AIHomePage() {
               </div>
             </SidebarSection>
 
-            {/* ── Annual Revenue ── */}
-            {Object.values(revenueRangeCounts).some(c => c > 0) && (
-            <SidebarSection id="revenue" icon="💵" title="Annual Revenue">
-              <div className="sb-chips">
-                {[
-                  { label: '<$1M', value: '0-1m' },
-                  { label: '$1-10M', value: '1-10m' },
-                  { label: '$10-50M', value: '10-50m' },
-                  { label: '$50-100M', value: '50-100m' },
-                  { label: '$100M+', value: '100m+' },
-                ].map(r => {
-                  const cnt = revenueRangeCounts[r.value] || 0;
-                  return (
-                  <label key={r.value} className={`sb-chip ${sidebarFilters.revenueRanges.includes(r.value) ? 'active' : ''} ${cnt === 0 ? 'sb-chip--empty' : ''}`}>
-                    <input
-                      type="checkbox"
-                      checked={sidebarFilters.revenueRanges.includes(r.value)}
-                      onChange={() => setSidebarFilters(p => ({
-                        ...p,
-                        revenueRanges: p.revenueRanges.includes(r.value)
-                          ? p.revenueRanges.filter(x => x !== r.value)
-                          : [...p.revenueRanges, r.value],
-                      }))}
-                      style={{ display: 'none' }}
-                    />
-                    {r.label} <span className="sb-chip-count">{cnt}</span>
-                  </label>
-                  );
-                })}
-              </div>
-            </SidebarSection>
-            )}
-
-            {/* ── Technologies (search company descriptions) ── */}
-            <SidebarSection id="technologies" icon="⚙️" title="Technologies">
-              <input
-                className="sb-input"
-                placeholder="e.g. React, Python, AWS..."
-                onKeyDown={e => {
-                  if (e.key === 'Enter') {
-                    const val = (e.target as HTMLInputElement).value.trim();
-                    if (val && !sidebarFilters.technologies.includes(val)) {
-                      setSidebarFilters(p => ({ ...p, technologies: [...p.technologies, val] }));
-                      (e.target as HTMLInputElement).value = '';
-                    }
-                  }
-                }}
-              />
-              {sidebarFilters.technologies.length > 0 && (
-                <div className="sb-chips">
-                  {sidebarFilters.technologies.map(t => (
-                    <span key={t} className="sb-chip active">
-                      {t}
-                      <button
-                        className="sb-chip-x"
-                        onClick={() => setSidebarFilters(p => ({ ...p, technologies: p.technologies.filter(x => x !== t) }))}
-                      >×</button>
-                    </span>
-                  ))}
-                </div>
-              )}
-            </SidebarSection>
           </div>
           {/* Docs CTA when no filters active */}
           {activeFilterCount === 0 && !groupByField && tableSorts.length === 0 && (
@@ -2989,7 +2989,8 @@ export function AIHomePage() {
                   titleParts.push('Connected ' + parts.join(', '));
                 }
                 if (strengthFilter !== 'all') titleParts.push(`Strength: ${strengthFilter}`);
-                if (tagFilter.length > 0) titleParts.push(`Tags: ${tagFilter.join(', ')}`);
+                if (tagInclude.length > 0) titleParts.push(`Include: ${tagInclude.join(', ')}`);
+                if (tagExclude.length > 0) titleParts.push(`Exclude: ${tagExclude.join(', ')}`);
                 if (groupByField) titleParts.push(`Grouped: ${SORT_FIELD_LABELS[groupByField]}`);
                 if (tableSorts.length > 0) titleParts.push(`Sorted: ${tableSorts.map(s => SORT_FIELD_LABELS[s.field]).join(', ')}`);
 
@@ -3991,7 +3992,7 @@ export function AIHomePage() {
             const colCount = 6;
             const renderPersonRow = (person: FlatPerson) => (
               <tr
-                key={person.email}
+                key={person.id}
                 className="u-tr u-tr--person"
                 onClick={() => {
                   const contact = person.displayContact || { id: person.id, name: person.name, email: person.email, title: person.title, userName: person.source };
@@ -4000,9 +4001,9 @@ export function AIHomePage() {
               >
                 <td className="u-td-person">
                   <div className="u-td-person-inner">
-                    <PersonAvatar email={person.email} name={person.name} avatarUrl={person.photoUrl} size={28} />
+                    {person.isMyContact && <PersonAvatar email={person.email} name={person.name} avatarUrl={person.photoUrl} size={28} />}
                     <div className="u-td-person-info">
-                      <span className="u-td-person-name">{person.name}</span>
+                      <span className="u-td-person-name">{person.isMyContact ? person.name : abbreviateName(person.name)}</span>
                       {person.title && <span className="u-td-person-title">{person.title}</span>}
                     </div>
                   </div>
@@ -4014,7 +4015,7 @@ export function AIHomePage() {
                   </div>
                 </td>
                 <td className="u-td-pstrength">
-                  {person.strength !== 'none' && (
+                  {person.isMyContact && person.strength !== 'none' && (
                     <span className={`u-td-strength-pill u-td-strength--${person.strength}`}>
                       {person.strength}
                     </span>
@@ -4024,7 +4025,11 @@ export function AIHomePage() {
                   {person.meetings > 0 ? <span className="u-td-num">{person.meetings}</span> : <span className="u-td-muted">—</span>}
                 </td>
                 <td className="u-td-plastseen">
-                  {person.lastSeen ? <span className="u-td-muted">{getTimeAgo(person.lastSeen)}</span> : <span className="u-td-muted">—</span>}
+                  {person.isMyContact ? (
+                    person.lastSeen ? <span className="u-td-muted">{getTimeAgo(person.lastSeen)}</span> : <span className="u-td-muted">—</span>
+                  ) : (
+                    <span className="u-td-muted">—</span>
+                  )}
                 </td>
                 <td className="u-td-psource">
                   <span className={`u-td-source-badge ${person.source === 'you' ? 'u-td-source--you' : 'u-td-source--network'}`}>
@@ -4036,7 +4041,7 @@ export function AIHomePage() {
 
             const renderPersonCard = (person: FlatPerson) => (
               <div
-                key={person.email}
+                key={person.id}
                 className="u-person-card"
                 onClick={() => {
                   const contact = person.displayContact || { id: person.id, name: person.name, email: person.email, title: person.title, userName: person.source };
@@ -4044,9 +4049,9 @@ export function AIHomePage() {
                 }}
               >
                 <div className="u-person-card-top">
-                  <PersonAvatar email={person.email} name={person.name} avatarUrl={person.photoUrl} size={40} />
+                  {person.isMyContact && <PersonAvatar email={person.email} name={person.name} avatarUrl={person.photoUrl} size={40} />}
                   <div className="u-person-card-info">
-                    <span className="u-person-card-name">{person.name}</span>
+                    <span className="u-person-card-name">{person.isMyContact ? person.name : abbreviateName(person.name)}</span>
                     {person.title && <span className="u-person-card-title">{person.title}</span>}
                   </div>
                 </div>
@@ -4055,13 +4060,13 @@ export function AIHomePage() {
                   <span>{person.companyName}</span>
                 </div>
                 <div className="u-person-card-meta">
-                  {person.strength !== 'none' && (
+                  {person.isMyContact && person.strength !== 'none' && (
                     <span className={`u-person-card-badge u-td-strength--${person.strength}`}>{person.strength}</span>
                   )}
                   {person.meetings > 0 && (
                     <span className="u-person-card-badge">{person.meetings} meeting{person.meetings !== 1 ? 's' : ''}</span>
                   )}
-                  {person.lastSeen && (
+                  {person.isMyContact && person.lastSeen && (
                     <span className="u-person-card-badge u-person-card-badge--muted">{getTimeAgo(person.lastSeen)}</span>
                   )}
                 </div>
@@ -4261,13 +4266,13 @@ export function AIHomePage() {
                     ← {co.name}
                   </button>
                 )}
-                <PersonAvatar email={c.email} name={c.name} avatarUrl={dc?.photoUrl} size={56} />
-                <h2>{c.name}</h2>
+                {isMyContact && <PersonAvatar email={c.email} name={c.name} avatarUrl={dc?.photoUrl} size={56} />}
+                <h2>{isMyContact ? c.name : abbreviateName(c.name)}</h2>
                 <p className="u-panel-subtitle">
                   {dc?.headline || c.title || ''}
                   {co && !dc?.headline && ` at ${co.name}`}
                 </p>
-                <p className="u-panel-email">{c.email}</p>
+                {isMyContact && <p className="u-panel-email">{c.email}</p>}
 
                 {/* Badges row */}
                 <div className="u-panel-badges">
@@ -4307,7 +4312,7 @@ export function AIHomePage() {
                       <a href={dc.linkedinUrl} target="_blank" rel="noopener noreferrer" className="u-panel-link">LinkedIn Profile</a>
                     </div>
                   )}
-                  {dc && dc.meetingsCount > 0 && (
+                  {isMyContact && dc && dc.meetingsCount > 0 && (
                     <div className="u-panel-detail-row">
                       <span className="u-panel-detail-icon">📅</span>
                       <span>{dc.meetingsCount} meeting{dc.meetingsCount !== 1 ? 's' : ''} &middot; last {new Date(dc.lastSeenAt).toLocaleDateString()}</span>
@@ -4374,12 +4379,14 @@ export function AIHomePage() {
                       ✨ Request Intro
                     </button>
                   )}
-                  <a
-                    className="u-action-btn"
-                    href={`mailto:${c.email}?subject=${encodeURIComponent(`Hi ${c.name || 'there'}`)}&body=${encodeURIComponent(`Hi ${c.name || 'there'},\n\nI wanted to reach out and connect.\n\nBest,\n${currentUser?.name || ''}`)}`}
-                  >
-                    ✉ Email
-                  </a>
+                  {isMyContact && (
+                    <a
+                      className="u-action-btn"
+                      href={`mailto:${c.email}?subject=${encodeURIComponent(`Hi ${c.name || 'there'}`)}&body=${encodeURIComponent(`Hi ${c.name || 'there'},\n\nI wanted to reach out and connect.\n\nBest,\n${currentUser?.name || ''}`)}`}
+                    >
+                      ✉ Email
+                    </a>
+                  )}
                 </div>
               </div>
               );

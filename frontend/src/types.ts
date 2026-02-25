@@ -252,6 +252,8 @@ export interface ViewFilters {
   lastContactYears?: string[];
   lastContactMonths?: string[];
   tagFilter?: string[];
+  tagInclude?: string[];
+  tagExclude?: string[];
   spaceFilter?: string;
   connectionFilter?: string;
   accountFilter?: string;
