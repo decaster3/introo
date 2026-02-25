@@ -64,7 +64,7 @@ export function NotificationsPanel({
     const connPeerName = data.connectionPeerName as string | undefined;
     const requesterId = data.requesterId as string | undefined;
     const timeAgo = getTimeAgo(n.createdAt);
-    const isIntroType = ['intro_request', 'intro_offered', 'intro_declined'].includes(n.type);
+    const isIntroType = ['intro_request', 'intro_offered', 'intro_declined', 'intro_review', 'intro_approved', 'details_requested'].includes(n.type);
     const is1to1 = isIntroType && !spaceId && !!(connPeerId || requesterId);
 
     const notifConn = connPeerId || requesterId
@@ -81,6 +81,9 @@ export function NotificationsPanel({
     if (n.type === 'intro_request') { icon = '🤝'; accentClass = 'intro'; }
     else if (n.type === 'intro_offered') { icon = '✨'; accentClass = 'offered'; }
     else if (n.type === 'intro_declined') { icon = '✗'; accentClass = 'declined'; }
+    else if (n.type === 'intro_review') { icon = '📋'; accentClass = 'intro'; }
+    else if (n.type === 'intro_approved') { icon = '✅'; accentClass = 'offered'; }
+    else if (n.type === 'details_requested') { icon = '📝'; accentClass = 'intro'; }
     else if (n.type === 'space_invited' || n.type === 'space_approved') { icon = '🎉'; accentClass = 'space-positive'; }
     else if (n.type === 'space_member_joined') { icon = '👋'; accentClass = 'space-positive'; }
     else if (n.type === 'space_join_request') { icon = '📩'; accentClass = 'space-neutral'; }
@@ -110,7 +113,7 @@ export function NotificationsPanel({
             if (!n.isRead) notificationsApi.markAsRead(n.id);
             return;
           }
-          if (n.type === 'intro_request' && spaceId) {
+          if ((n.type === 'intro_request' || n.type === 'intro_review' || n.type === 'intro_approved') && spaceId) {
             onNavigate({ type: 'space', spaceId });
           } else if (n.type === 'intro_request' && notifConn) {
             onNavigate({ type: 'connection', connectionId: notifConn.id });

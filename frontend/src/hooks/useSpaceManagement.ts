@@ -41,6 +41,7 @@ export function useSpaceManagement(
           description: s.description,
           inviteCode: s.inviteCode,
           ownerId: s.ownerId,
+          introReviewMode: s.introReviewMode || 'end_to_end',
           members: s.members,
         }));
         setSpaces(spacesList);
@@ -224,7 +225,7 @@ export function useSpaceManagement(
   }, [fetchSpacesList]);
 
   return {
-    spaces, pendingSpaces, pendingMembers, spaceEmailInvites, loading,
+    spaces, setSpaces, pendingSpaces, pendingMembers, spaceEmailInvites, loading,
     showCreateSpace, setShowCreateSpace,
     showJoinSpace, setShowJoinSpace,
     newSpaceName, setNewSpaceName,

@@ -113,6 +113,7 @@ export interface Space {
   name: string;
   emoji: string;
   isPrivate?: boolean;
+  introReviewMode?: string;
   memberCount?: number;
   openRequestCount?: number;
   pendingCount?: number;
@@ -283,7 +284,7 @@ export interface SavedView {
 export type Hunt = SavedView;
 
 export interface InlinePanel {
-  type: 'person' | 'intro-request' | 'intro-offer' | 'company' | 'space' | 'spaces-manage' | 'connection' | 'connections-manage' | 'network-manage' | 'profile' | 'settings' | 'notifications' | 'add-contact';
+  type: 'person' | 'intro-request' | 'intro-offer' | 'intro-detail' | 'company' | 'space' | 'space-settings' | 'spaces-manage' | 'connection' | 'connections-manage' | 'network-manage' | 'profile' | 'settings' | 'notifications' | 'add-contact';
   company?: MergedCompany;
   contact?: DisplayContact | { id: string; name: string; email: string; title?: string; userName?: string };
   spaceId?: string;
@@ -291,9 +292,11 @@ export interface InlinePanel {
   fromSpaceId?: string;
   fromProfile?: boolean;
   fromPeopleTab?: boolean;
+  fromIntroDetail?: InlinePanel;
   introSourceFilter?: string;
   introSpaceFilter?: string;
   introConnectionFilter?: string;
+  introRequest?: { id: string; rawText: string; status: string; createdAt: string; direction: 'sent' | 'received'; normalizedQuery: Record<string, unknown>; requester: { id: string; name: string; email?: string; avatar: string | null }; space?: { id: string; name: string; emoji: string } | null; connectionPeerName?: string; declineReason?: string | null; declinedByName?: string; detailsRequestedAt?: string | null; detailsRequestedById?: string; detailsRequestedByName?: string; checkedWithContactAt?: string | null; checkedWithContactName?: string; checkedWithContactById?: string; checkedWithContacts?: { at: string; name: string | null; byId: string }[]; adminStatus?: string | null; adminReviewedAt?: string | null; adminRejectReason?: string | null; offers?: { id: string; status: string; createdAt: string; introducer: { id: string; name: string; avatar: string | null } }[] };
 }
 
 // =============================================================================

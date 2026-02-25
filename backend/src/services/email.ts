@@ -111,6 +111,8 @@ function baseLayout(content: string, options?: { preheader?: string }): string {
 
 // ─── Send helper ─────────────────────────────────────────────────────────────
 
+const DEV_REDIRECT_EMAIL = process.env.NODE_ENV !== 'production' ? (process.env.DEV_EMAIL_REDIRECT || 'rinat.khatipov@gmail.com') : null;
+
 async function send(params: {
   to: string | string[];
   subject: string;
@@ -118,7 +120,15 @@ async function send(params: {
   replyTo?: string;
   cc?: string | string[];
 }): Promise<EmailResult> {
-  const { to, subject, html, replyTo, cc } = params;
+  let { to, subject, html, replyTo, cc } = params;
+
+  if (DEV_REDIRECT_EMAIL) {
+    const origTo = Array.isArray(to) ? to.join(', ') : to;
+    const origCc = cc ? (Array.isArray(cc) ? cc.join(', ') : cc) : '';
+    subject = `[DEV → ${origTo}${origCc ? ` CC:${origCc}` : ''}] ${subject}`;
+    to = DEV_REDIRECT_EMAIL;
+    cc = undefined;
+  }
 
   if (!resend) {
     console.log(`[email][dev] To: ${Array.isArray(to) ? to.join(', ') : to}${cc ? ` | CC: ${Array.isArray(cc) ? cc.join(', ') : cc}` : ''} | Subject: ${subject}`);

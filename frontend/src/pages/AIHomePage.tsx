@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAppState, useAppActions } from '../store';
-import { API_BASE, calendarApi, requestsApi, notificationsApi, offersApi, tagsApi, emailApi, viewsApi, enrichmentApi, relationshipsApi, type CalendarAccountInfo } from '../lib/api';
+import { API_BASE, calendarApi, requestsApi, spacesApi, notificationsApi, offersApi, tagsApi, emailApi, viewsApi, enrichmentApi, relationshipsApi, type CalendarAccountInfo, type IntroRequestResponse } from '../lib/api';
 import { calculateStrength, type SpaceCompany, type DisplayContact, type MergedCompany, type ViewFilters, type SavedView, type ViewSortRule, type InlinePanel } from '../types';
 import { PersonAvatar, CompanyLogo, OnboardingTour } from '../components';
 import { ProfilePanel, SettingsPanel, NotificationsPanel } from '../components/panels';
@@ -235,16 +235,24 @@ export function AIHomePage() {
   const [notifications, setNotifications] = useState<Awaited<ReturnType<typeof notificationsApi.getAll>>>([]);
   const [myIntroRequests, setMyIntroRequests] = useState<Awaited<ReturnType<typeof requestsApi.getMine>>>([]);
   const [spaceRequests, setSpaceRequests] = useState<Record<string, { id: string; rawText: string; status: string; createdAt: string; normalizedQuery: Record<string, unknown>; requester: { id: string; name: string; email?: string; avatar: string | null } }[]>>({});
+  const [networkTab, setNetworkTab] = useState<'network' | 'intros'>('network');
+  const [pastReceivedCollapsed, setPastReceivedCollapsed] = useState(true);
+  const [pastSentCollapsed, setPastSentCollapsed] = useState(true);
+  const [spacePastReceivedCollapsed, setSpacePastReceivedCollapsed] = useState(true);
+  const [spacePastSentCollapsed, setSpacePastSentCollapsed] = useState(true);
   const [decliningRequestId, setDecliningRequestId] = useState<string | null>(null);
   const [declineReason, setDeclineReason] = useState('');
+  const [rejectingAdminRequestId, setRejectingAdminRequestId] = useState<string | null>(null);
+  const [adminRejectReason, setAdminRejectReason] = useState('');
   const [dismissedRequestIds, setDismissedRequestIds] = useState<Set<string>>(new Set());
-  const [incomingRequests, setIncomingRequests] = useState<{ id: string; rawText: string; status: string; createdAt: string; normalizedQuery: Record<string, unknown>; requester: { id: string; name: string; email?: string; avatar: string | null } }[]>([]);
+  const [incomingRequests, setIncomingRequests] = useState<(IntroRequestResponse & { email?: string })[]>([]);
   const [introActionRequestId, setIntroActionRequestId] = useState<string | null>(null);
   const [introActionType, setIntroActionType] = useState<'ask-details' | 'make-intro' | 'ask-permission' | null>(null);
   const [introEmailSubject, setIntroEmailSubject] = useState('');
   const [introEmailBody, setIntroEmailBody] = useState('');
   const [introSelectedContact, setIntroSelectedContact] = useState<{ id: string; name: string; email: string; title?: string } | null>(null);
   const [introSending, setIntroSending] = useState(false);
+  const [confirmingDoneRequestId, setConfirmingDoneRequestId] = useState<string | null>(null);
   const [introToast, setIntroToast] = useState<string | null>(null);
 
   // ─── Onboarding activation state ────────────────────────────────────────────
@@ -291,7 +299,7 @@ export function AIHomePage() {
 
   // Space management (hook)
   const {
-    spaces, pendingSpaces, pendingMembers, spaceEmailInvites, loading,
+    spaces, setSpaces, pendingSpaces, pendingMembers, spaceEmailInvites, loading,
     showCreateSpace, setShowCreateSpace,
     showJoinSpace, setShowJoinSpace,
     newSpaceName, setNewSpaceName,
@@ -2000,6 +2008,9 @@ export function AIHomePage() {
 
   const openIntroPanel = useCallback((company: MergedCompany, overrideSourceFilter?: string, overrideSpaceFilter?: string) => {
     setIntroSelectedThrough(null);
+    setIntroRequestText('');
+    setIntroRequestSent(false);
+    setIntroRequestSending(false);
     setInlinePanel({
       type: 'intro-request',
       company,
@@ -2008,6 +2019,19 @@ export function AIHomePage() {
       introConnectionFilter: connectionFilter,
     });
   }, [sourceFilter, spaceFilter, connectionFilter]);
+
+  useEffect(() => {
+    if (inlinePanel?.type !== 'intro-request') {
+      setIntroRequestText('');
+      setIntroRequestSent(false);
+      setIntroRequestSending(false);
+      setIntroSelectedThrough(null);
+    }
+    if (inlinePanel?.type !== 'intro-detail') {
+      setRejectingAdminRequestId(null);
+      setAdminRejectReason('');
+    }
+  }, [inlinePanel?.type]);
 
   const openPersonPanel = useCallback((contact: DisplayContact | { id: string; name: string; email: string; title?: string; userName?: string }, company?: MergedCompany) => {
     setInlinePanel({ type: 'person', contact, company });
@@ -2152,6 +2176,7 @@ export function AIHomePage() {
   // ─── Active-sections set (for indicator dots) ──────────────────────────────
   const activeSectionIds = useMemo(() => {
     const s = new Set<string>();
+    if (sourceFilter !== 'all' || spaceFilter !== 'all' || connectionFilter !== 'all' || accountFilter !== 'all') s.add('source');
     if (tagInclude.length > 0 || tagExclude.length > 0) s.add('tags');
     if (strengthFilter !== 'all') s.add('strength');
     if (sidebarFilters.aiKeywords.length > 0 || sidebarFilters.excludeKeywords.length > 0 || sidebarFilters.description) s.add('description');
@@ -2164,7 +2189,7 @@ export function AIHomePage() {
     if (sidebarFilters.technologies.length > 0) s.add('technologies');
     if (groupByField || tableSorts.length > 0 || peopleGroupByField || peopleSorts.length > 0) s.add('sort-group');
     return s;
-  }, [strengthFilter, tagInclude, tagExclude, sidebarFilters, groupByField, tableSorts, peopleGroupByField, peopleSorts]);
+  }, [sourceFilter, spaceFilter, connectionFilter, accountFilter, strengthFilter, tagInclude, tagExclude, sidebarFilters, groupByField, tableSorts, peopleGroupByField, peopleSorts]);
 
   // ─── Sidebar section helper ────────────────────────────────────────────────
   // SidebarSection is now a stable component defined outside AIHomePage.
@@ -2438,7 +2463,7 @@ export function AIHomePage() {
                     <button
                       key={s.id}
                       className={`sb-space-pill ${spaceFilter === s.id ? 'active' : ''}`}
-                      onClick={() => { setSpaceFilter(spaceFilter === s.id ? 'all' : s.id); setSourceFilter('all'); setAccountFilter('all'); setConnectionFilter('all'); }}
+                      onClick={() => { const deselecting = spaceFilter === s.id; setSpaceFilter(deselecting ? 'all' : s.id); setSourceFilter(deselecting ? 'all' : 'spaces'); setAccountFilter('all'); setConnectionFilter('all'); }}
                       onDoubleClick={() => setInlinePanel({ type: 'space', spaceId: s.id })}
                       title={`${s.name} — ${s.memberCount || 0} members. Double-click for details.`}
                     >
@@ -2458,7 +2483,7 @@ export function AIHomePage() {
                     <button
                       key={c.id}
                       className={`sb-space-pill ${connectionFilter === c.id ? 'active' : ''}`}
-                      onClick={() => { setConnectionFilter(connectionFilter === c.id ? 'all' : c.id); setSpaceFilter('all'); setSourceFilter('all'); setAccountFilter('all'); }}
+                      onClick={() => { const deselecting = connectionFilter === c.id; setConnectionFilter(deselecting ? 'all' : c.id); setSpaceFilter('all'); setSourceFilter(deselecting ? 'all' : 'spaces'); setAccountFilter('all'); }}
                       onDoubleClick={() => setInlinePanel({ type: 'connection', connectionId: c.id })}
                       title={`${c.peer.name} — ${c.peer.email}. Double-click for details.`}
                     >
@@ -3105,7 +3130,13 @@ export function AIHomePage() {
                   <circle cx="12" cy="5" r="3"/><circle cx="5" cy="19" r="3"/><circle cx="19" cy="19" r="3"/>
                   <path d="M12 8v4M8.5 16.5 10 14M15.5 16.5 14 14"/>
                 </svg>
-                {!inlinePanel && 'Network'}
+                {!inlinePanel && 'Network & Intros'}
+                {(() => {
+                  const _openRcv = incomingRequests.filter(r => r.status === 'open' && !dismissedRequestIds.has(r.id)).length;
+                  const _needsReply = (myIntroRequests || []).filter(r => r.status === 'open' && (r as any).detailsRequestedAt).length;
+                  const _total = _openRcv + _needsReply;
+                  return _total > 0 ? <span className="u-network-btn-badge">{_total}</span> : null;
+                })()}
               </button>
               {enriching && (
                 <span className="u-topbar-enriching" title="Auto-enriching contacts...">
@@ -4212,12 +4243,66 @@ export function AIHomePage() {
         <div className="u-panel">
             <button className="u-panel-close" onClick={() => setInlinePanel(null)}>×</button>
 
+            {/* Universal back button */}
+            {inlinePanel.type !== 'network-manage' && inlinePanel.type !== 'spaces-manage' && inlinePanel.type !== 'connections-manage' && (() => {
+              let backLabel = 'Back';
+              let backTarget: typeof inlinePanel | null = null;
+
+              if (inlinePanel.fromIntroDetail) {
+                backLabel = 'Intro';
+                backTarget = inlinePanel.fromIntroDetail;
+              } else if (inlinePanel.type === 'intro-detail' && inlinePanel.fromSpaceId) {
+                const sp = spaces.find(s => s.id === inlinePanel.fromSpaceId);
+                backLabel = sp ? `${sp.emoji || '🫛'} ${sp.name}` : 'Space';
+                backTarget = { type: 'space', spaceId: inlinePanel.fromSpaceId };
+              } else if (inlinePanel.type === 'intro-detail') {
+                backLabel = 'Intros';
+                backTarget = { type: 'network-manage' };
+              } else if (inlinePanel.type === 'intro-request' && inlinePanel.company) {
+                backLabel = inlinePanel.company.name || 'Company';
+                backTarget = { type: 'company', company: inlinePanel.company };
+              } else if (inlinePanel.type === 'person' && inlinePanel.company) {
+                backLabel = inlinePanel.company.name || 'Company';
+                backTarget = { type: 'company', company: inlinePanel.company, fromSpaceId: inlinePanel.fromSpaceId };
+              } else if (inlinePanel.type === 'person' && inlinePanel.fromPeopleTab) {
+                backLabel = 'Close';
+                backTarget = null;
+              } else if (inlinePanel.type === 'company' && inlinePanel.fromSpaceId) {
+                const sp = spaces.find(s => s.id === inlinePanel.fromSpaceId);
+                backLabel = sp ? `${sp.emoji || '🫛'} ${sp.name}` : 'Space';
+                backTarget = { type: 'space', spaceId: inlinePanel.fromSpaceId };
+              } else if (inlinePanel.type === 'space-settings' && inlinePanel.spaceId) {
+                const sp = spaces.find(s => s.id === inlinePanel.spaceId);
+                backLabel = sp ? `${sp.emoji || '🫛'} ${sp.name}` : 'Space';
+                backTarget = { type: 'space', spaceId: inlinePanel.spaceId };
+              } else if (inlinePanel.type === 'space' || inlinePanel.type === 'connection') {
+                backLabel = 'Network';
+                backTarget = { type: 'network-manage' };
+              } else if (inlinePanel.type === 'profile') {
+                backLabel = 'Network';
+                backTarget = { type: 'network-manage' };
+              }
+
+              return (
+                <button
+                  className="u-panel-back"
+                  onClick={() => {
+                    if (inlinePanel.type === 'intro-detail' && backTarget?.type === 'network-manage') {
+                      setNetworkTab('intros');
+                    }
+                    setInlinePanel(backTarget);
+                  }}
+                >
+                  ← {backLabel}
+                </button>
+              );
+            })()}
+
             {inlinePanel.type === 'person' && inlinePanel.contact && (() => {
               const c = inlinePanel.contact;
               const dc = 'connectionStrength' in c ? (c as DisplayContact) : null;
               const co = inlinePanel.company;
-              const fromSpace = inlinePanel.fromSpaceId ? spaces.find(s => s.id === inlinePanel.fromSpaceId) : null;
-              const isMyContact = !!dc; // DisplayContact = user's own contact, no intro needed
+              const isMyContact = !!dc;
               const isInNetwork = isMyContact || connections.some(conn => conn.peer.email === c.email && conn.status === 'accepted');
               return (
               <div className="u-panel-person">
@@ -4261,21 +4346,6 @@ export function AIHomePage() {
                       </div>
                     )}
                   </div>
-                )}
-                {inlinePanel.fromPeopleTab && (
-                  <button className="u-panel-breadcrumb" onClick={() => setInlinePanel(null)}>
-                    ← People
-                  </button>
-                )}
-                {!inlinePanel.fromPeopleTab && fromSpace && (
-                  <button className="u-panel-breadcrumb" onClick={() => setInlinePanel({ type: 'space', spaceId: fromSpace.id })}>
-                    ← {fromSpace.emoji} {fromSpace.name}
-                  </button>
-                )}
-                {!inlinePanel.fromPeopleTab && !fromSpace && co && (
-                  <button className="u-panel-breadcrumb" onClick={() => setInlinePanel({ type: 'company', company: co, fromSpaceId: inlinePanel.fromSpaceId })}>
-                    ← {co.name}
-                  </button>
                 )}
                 {isMyContact && <PersonAvatar email={c.email} name={c.name} avatarUrl={dc?.photoUrl} size={56} />}
                 <h2>{isMyContact ? c.name : abbreviateName(c.name)}</h2>
@@ -4405,7 +4475,6 @@ export function AIHomePage() {
 
             {inlinePanel.type === 'company' && inlinePanel.company && (() => {
               const co = inlinePanel.company;
-              const fromSpaceForCompany = inlinePanel.fromSpaceId ? spaces.find(s => s.id === inlinePanel.fromSpaceId) : null;
               return (
               <div className="u-panel-company" onClick={() => { if (deleteConfirmId) setDeleteConfirmId(null); }}>
                 {co.myCount > 0 && (
@@ -4447,16 +4516,6 @@ export function AIHomePage() {
                       </div>
                     )}
                   </div>
-                )}
-                {inlinePanel.fromProfile && (
-                  <button className="u-panel-breadcrumb" onClick={() => setInlinePanel({ type: 'profile' })}>
-                    ← My Profile
-                  </button>
-                )}
-                {fromSpaceForCompany && !inlinePanel.fromProfile && (
-                  <button className="u-panel-breadcrumb" onClick={() => setInlinePanel({ type: 'space', spaceId: fromSpaceForCompany.id })}>
-                    ← {fromSpaceForCompany.emoji} {fromSpaceForCompany.name}
-                  </button>
                 )}
                 <div className="u-panel-company-hero">
                   <CompanyLogo domain={co.domain} name={co.name} size={48} />
@@ -4831,18 +4890,19 @@ export function AIHomePage() {
               const thisSpaceRequests = spaceRequests[space.id] || [];
               return (
               <div className="u-panel-space">
-                <button
-                  className="u-panel-breadcrumb"
-                  onClick={() => setInlinePanel({ type: 'network-manage' })}
-                >
-                  ← Spaces
-                </button>
                 <div className="u-panel-space-hero">
                   <span className="u-panel-space-emoji">{space.emoji}</span>
-                  <div>
+                  <div style={{ flex: 1 }}>
                     <h2>{space.name}</h2>
                     <span className="u-panel-space-meta">{space.memberCount} members · {spaceCompanyCount} companies</span>
                   </div>
+                  {isOwner && (
+                    <button
+                      className="u-space-settings-btn"
+                      title="Space settings"
+                      onClick={() => setInlinePanel({ type: 'space-settings', spaceId: space.id })}
+                    >⚙</button>
+                  )}
                 </div>
 
                 {space.description && (
@@ -4926,347 +4986,215 @@ export function AIHomePage() {
                   </div>
                 )}
 
-                {/* Intro Requests — all open requests in this space */}
-                {(() => { const visibleRequests = thisSpaceRequests.filter(r => !dismissedRequestIds.has(r.id)); return visibleRequests.length > 0 ? (
-                  <div className="u-panel-section">
-                    <div className="u-panel-section-h">
-                      Intro Requests
-                      <span className="u-notif-inline-badge">{visibleRequests.length}</span>
-                    </div>
-                    <p className="u-panel-section-hint">Only you see these — the requester doesn't know who has the connection.</p>
-                    <div className="u-panel-request-list">
-                      {thisSpaceRequests.map(r => {
-                        const nq = r.normalizedQuery || {};
-                        const companyName = nq.companyName as string || 'a company';
-                        const companyDomain = nq.companyDomain as string || '';
-                        const companyId = nq.companyId as string || '';
-                        const isMe = r.requester.id === currentUser?.id;
-                        const timeAgo = getTimeAgo(r.createdAt);
-                        const matchedCompany = mergedCompanies.find(c => (companyId && c.id === companyId) || (companyDomain && c.domain === companyDomain));
-                        const myContactsAtCompany = matchedCompany?.myContacts || [];
-                        const isOpen = r.status === 'open';
-                        const isDeclining = decliningRequestId === r.id;
 
-                        return (
-                          <div key={r.id} className={`u-panel-request-card ${isMe ? 'sent' : ''} ${!isOpen ? 'resolved' : ''}`}>
-                            {/* Header row: avatar, name, time, status */}
-                            <div className="u-panel-request-top">
-                              <div
-                                className={`u-panel-request-avatar ${isMe ? 'sent' : ''} ${!isMe ? 'clickable' : ''}`}
-                                onClick={() => { if (!isMe) setInlinePanel({ type: 'person', contact: { id: r.requester.id, name: r.requester.name, email: r.requester.email || '' }, fromSpaceId: space.id }); }}
-                                title={!isMe ? `View ${r.requester.name}'s profile` : undefined}
+                {/* Intro Requests — sub-grouped like Intros tab */}
+                {(() => {
+                  const visibleRequests = thisSpaceRequests.filter(r => !dismissedRequestIds.has(r.id));
+                  if (visibleRequests.length === 0) return null;
+
+                  const received = visibleRequests.filter(r => r.requester.id !== currentUser?.id);
+                  const sent = visibleRequests.filter(r => r.requester.id === currentUser?.id);
+
+                  const pendingAdminReview = isOwner ? received.filter(r => r.status === 'open' && (r as any).adminStatus === 'pending_review').sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) : [];
+                  const receivedOpen = received.filter(r => r.status === 'open' && (r as any).adminStatus !== 'pending_review').sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                  const hasMyContacts = (r: typeof receivedOpen[number]) => {
+                    const nq = r.normalizedQuery || {};
+                    const cid = nq.companyId as string;
+                    const cd = nq.companyDomain as string;
+                    const mc = mergedCompanies.find(c => (cid && c.id === cid) || (cd && c.domain === cd));
+                    return (mc?.myContacts?.length || 0) > 0;
+                  };
+                  const receivedNeedsReview = receivedOpen.filter(r => hasMyContacts(r) && !(r as any).detailsRequestedAt && !(r as any).checkedWithContactAt && (r as any).adminStatus !== 'approved');
+                  const receivedInProgress = receivedOpen.filter(r => !hasMyContacts(r) || !!(r as any).detailsRequestedAt || !!(r as any).checkedWithContactAt || (r as any).adminStatus === 'approved');
+                  const receivedPast = received.filter(r => r.status !== 'open').sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+                  const sentNeedsReply = sent.filter(r => r.status === 'open' && (r as any).detailsRequestedAt).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                  const sentOpen = sent.filter(r => r.status === 'open' && !(r as any).detailsRequestedAt).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                  const sentPast = sent.filter(r => r.status !== 'open').sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+                  const renderSpaceCard = (r: typeof visibleRequests[number], direction: 'sent' | 'received') => {
+                    const nq = r.normalizedQuery || {};
+                    const companyName = nq.companyName as string || 'a company';
+                    const companyDomain = nq.companyDomain as string || '';
+                    const companyId = nq.companyId as string || '';
+                    const isMe = direction === 'sent';
+                    const timeAgo = getTimeAgo(r.createdAt);
+                    const matchedCompany = mergedCompanies.find(c => (companyId && c.id === companyId) || (companyDomain && c.domain === companyDomain));
+
+                    return (
+                      <div
+                        key={r.id}
+                        className={`u-inbox-card ${r.status !== 'open' ? 'u-inbox-card--resolved' : ''}`}
+                        onClick={() => {
+                          setInlinePanel({
+                            type: 'intro-detail',
+                            company: matchedCompany,
+                            fromSpaceId: space.id,
+                            introRequest: {
+                              ...r,
+                              direction,
+                              requester: r.requester,
+                              space: { id: space.id, name: space.name, emoji: space.emoji },
+                              offers: (r as any).offers || [],
+                            },
+                          });
+                        }}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <div className="u-inbox-card-top">
+                          <div className="u-inbox-card-title">
+                            {companyDomain && <CompanyLogo domain={companyDomain} name={companyName} size={18} />}
+                            <span>{isMe ? 'You' : r.requester.name} requested intro to <strong>{companyName}</strong>{!isMe && ' from your network'}</span>
+                          </div>
+                          {(() => {
+                            const adminSt = (r as any).adminStatus;
+                            if (r.status === 'open' && adminSt === 'pending_review') {
+                              return <span className="u-inbox-status u-inbox-status--awaiting">{isMe ? 'Awaiting admin review' : 'Pending review'}</span>;
+                            }
+                            if (r.status === 'open' && adminSt === 'approved') {
+                              const hasDetails = !!(r as any).detailsRequestedAt;
+                              const hasChecked = !!(r as any).checkedWithContactAt;
+                              if (hasDetails || hasChecked) {
+                                return <span className="u-inbox-status u-inbox-status--inprogress">{hasDetails ? 'Waiting for details' : 'Checking with contact'}</span>;
+                              }
+                              return <span className="u-inbox-status u-inbox-status--inprogress">Approved — with connectors</span>;
+                            }
+                            if (r.status !== 'open') {
+                              const label = r.status === 'accepted' ? 'Done' : r.status === 'declined' && (r as any).adminStatus === 'rejected' ? 'Not approved' : r.status === 'declined' ? 'Declined' : r.status;
+                              return <span className={`u-inbox-status u-inbox-status--${r.status}`}>{label}</span>;
+                            }
+                            return null;
+                          })()}
+                          {r.status !== 'open' && (
+                            <button
+                              className="u-panel-request-dismiss"
+                              title="Dismiss"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDismissedRequestIds(prev => new Set(prev).add(r.id));
+                                if (isMe) {
+                                  requestsApi.delete(r.id).catch(() => {});
+                                }
+                              }}
+                            >
+                              ×
+                            </button>
+                          )}
+                        </div>
+                        <p className="u-inbox-card-text">{r.rawText}</p>
+                        <div className="u-inbox-card-meta">
+                          <span className="u-inbox-time">{timeAgo}</span>
+                        </div>
+                      </div>
+                    );
+                  };
+
+                  return (
+                    <>
+                      {pendingAdminReview.length > 0 && (
+                        <div className="u-panel-section">
+                          <div className="u-panel-section-h">
+                            Pending your approval
+                            <span className="u-notif-inline-badge">{pendingAdminReview.length}</span>
+                          </div>
+                          <div className="u-panel-request-inbox">
+                            {pendingAdminReview.map(r => renderSpaceCard(r, 'received'))}
+                          </div>
+                        </div>
+                      )}
+
+                      {received.length > 0 && (
+                        <div className="u-panel-section">
+                          <div className="u-panel-section-h">
+                            Intro requests from others
+                            {receivedOpen.length > 0 && <span className="u-notif-inline-badge">{receivedOpen.length}</span>}
+                          </div>
+
+                          {receivedNeedsReview.length > 0 && (
+                            <div className="u-intro-subgroup">
+                              <div className="u-intro-subgroup-header u-intro-subgroup-header--attention">Needs your review</div>
+                              <div className="u-panel-request-inbox">
+                                {receivedNeedsReview.map(r => renderSpaceCard(r, 'received'))}
+                              </div>
+                            </div>
+                          )}
+
+                          {receivedInProgress.length > 0 && (
+                            <div className="u-intro-subgroup">
+                              <div className="u-intro-subgroup-header">In progress</div>
+                              <div className="u-panel-request-inbox">
+                                {receivedInProgress.map(r => renderSpaceCard(r, 'received'))}
+                              </div>
+                            </div>
+                          )}
+
+                          {receivedPast.length > 0 && (
+                            <div className="u-intro-subgroup">
+                              <button
+                                className="u-intro-subgroup-toggle"
+                                onClick={() => setSpacePastReceivedCollapsed(v => !v)}
                               >
-                                {r.requester.name.charAt(0).toUpperCase()}
-                              </div>
-                              <div className="u-panel-request-meta">
-                                <span
-                                  className={`u-panel-request-who ${!isMe ? 'clickable' : ''}`}
-                                  onClick={() => { if (!isMe) setInlinePanel({ type: 'person', contact: { id: r.requester.id, name: r.requester.name, email: r.requester.email || '' }, fromSpaceId: space.id }); }}
-                                  title={!isMe ? `View ${r.requester.name}'s profile` : undefined}
-                                >
-                                  {isMe ? 'You' : r.requester.name}
-                                </span>
-                                <span className="u-panel-request-time">{timeAgo}</span>
-                              </div>
-                              <span className={`u-panel-request-status u-panel-request-status--${r.status}`}>{r.status.toUpperCase()}</span>
-                              {!isOpen && (
-                                <button
-                                  className="u-panel-request-dismiss"
-                                  title="Dismiss"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setDismissedRequestIds(prev => new Set(prev).add(r.id));
-                                    // Delete from server if it's my request
-                                    if (isMe) {
-                                      requestsApi.delete(r.id).catch(() => {});
-                                    }
-                                  }}
-                                >
-                                  ×
-                                </button>
+                                <span className={`u-intro-subgroup-arrow ${spacePastReceivedCollapsed ? '' : 'u-intro-subgroup-arrow--open'}`}>▸</span>
+                                Past
+                                <span className="u-intro-subgroup-count">{receivedPast.length}</span>
+                              </button>
+                              {!spacePastReceivedCollapsed && (
+                                <div className="u-panel-request-inbox">
+                                  {receivedPast.map(r => renderSpaceCard(r, 'received'))}
+                                </div>
                               )}
                             </div>
+                          )}
+                        </div>
+                      )}
 
-                            {/* Intent line */}
-                            <p className="u-panel-request-intent">
-                              {isMe ? 'You requested' : 'Requests'} an intro to{' '}
-                              <span
-                                className={`u-panel-request-company-link ${matchedCompany ? 'clickable' : ''}`}
-                                onClick={() => { if (matchedCompany) setInlinePanel({ type: 'company', company: matchedCompany, fromSpaceId: space.id }); }}
-                                title={matchedCompany ? `View ${companyName}` : undefined}
-                              >
-                                <CompanyLogo domain={companyDomain} name={companyName} size={14} />
-                                {companyName}
-                                {matchedCompany && <span className="u-panel-request-arrow">→</span>}
-                              </span>
-                            </p>
-
-                            {/* Message */}
-                            {r.rawText && (
-                              <p className="u-panel-request-msg">"{r.rawText}"</p>
-                            )}
-
-                            {/* Details requested banner — shown to the requester */}
-                            {isMe && isOpen && (() => {
-                              const detailsNotif = notifications.find(n => n.type === 'details_requested' && (n.data as Record<string, unknown>)?.requestId === r.id);
-                              if (!detailsNotif) return null;
-                              const connectorName = (detailsNotif.data as Record<string, unknown>)?.connectorName as string || 'A connector';
-                              return (
-                                <div className="u-panel-request-details-banner">
-                                  <span className="u-panel-request-details-icon">📩</span>
-                                  <span>{connectorName} requested details from you — check your email and reply to them.</span>
-                                </div>
-                              );
-                            })()}
-
-                            {/* Your contacts at this company */}
-                            {!isMe && myContactsAtCompany.length > 0 && (
-                              <div className="u-panel-request-contacts">
-                                <span className="u-panel-request-contacts-label">Your contacts at {companyName}:</span>
-                                <div className="u-panel-request-contacts-list">
-                                  {myContactsAtCompany.slice(0, 3).map(c => (
-                                    <span
-                                      key={c.id}
-                                      className="u-panel-request-contact-chip clickable"
-                                      onClick={() => setInlinePanel({ type: 'person', contact: c, company: matchedCompany, fromSpaceId: space.id })}
-                                      title={`View ${c.name}'s profile`}
-                                    >
-                                      {c.name}
-                                      {c.title && <span className="u-panel-request-contact-title"> · {c.title}</span>}
-                                    </span>
-                                  ))}
-                                  {myContactsAtCompany.length > 3 && (
-                                    <span className="u-panel-request-contact-chip u-panel-request-contact-more">+{myContactsAtCompany.length - 3} more</span>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Action buttons — only for others' requests that are still open */}
-                            {!isMe && isOpen && !isDeclining && introActionRequestId !== r.id && (
-                              <div className="u-panel-request-actions">
-                                <button
-                                  className="u-req-action-btn u-req-action-btn--intro"
-                                  onClick={() => {
-                                    setIntroActionRequestId(r.id);
-                                    setIntroActionType(null);
-                                    setIntroEmailSubject('');
-                                    setIntroEmailBody('');
-                                    setIntroSelectedContact(myContactsAtCompany.length === 1 ? myContactsAtCompany[0] : null);
-                                  }}
-                                >
-                                  Make Intro
-                                </button>
-                                <button
-                                  className="u-req-action-btn u-req-action-btn--done"
-                                  onClick={async () => {
-                                    try {
-                                      await requestsApi.markDone(r.id);
-                                      setSpaceRequests(prev => ({
-                                        ...prev,
-                                        [space.id]: (prev[space.id] || []).map(req =>
-                                          req.id === r.id ? { ...req, status: 'accepted' } : req
-                                        ),
-                                      }));
-                                      setIntroToast('Intro marked as done!');
-                                      setTimeout(() => setIntroToast(null), 3000);
-                                    } catch (err) {
-                                      console.error('Failed to mark as done:', err);
-                                    }
-                                  }}
-                                >
-                                  Intro Done
-                                </button>
-                                <button
-                                  className="u-req-action-btn u-req-action-btn--decline"
-                                  onClick={() => { setDecliningRequestId(r.id); setDeclineReason(''); }}
-                                >
-                                  Decline
-                                </button>
-                              </div>
-                            )}
-
-                            {/* Intro action flow */}
-                            {introActionRequestId === r.id && !introActionType && (() => {
-                              return (
-                                <div className="u-intro-flow">
-                                  {myContactsAtCompany.length > 1 && !introSelectedContact && (
-                                    <div className="u-intro-contact-pick">
-                                      <span className="u-intro-contact-pick-label">Who do you want to introduce?</span>
-                                      {myContactsAtCompany.map(c => (
-                                        <button key={c.id} className="u-intro-contact-pick-item" onClick={() => setIntroSelectedContact(c)}>
-                                          {c.name}{c.title && <span className="u-intro-contact-pick-title"> · {c.title}</span>}
-                                        </button>
-                                      ))}
-                                      <button className="u-intro-cancel" onClick={() => { setIntroActionRequestId(null); setIntroSelectedContact(null); }}>Cancel</button>
-                                    </div>
-                                  )}
-                                  {(myContactsAtCompany.length <= 1 || introSelectedContact) && (() => {
-                                    const cn = introSelectedContact?.name || myContactsAtCompany[0]?.name || 'your contact';
-                                    const cf = cn.split(' ')[0];
-                                    const rn = r.requester.name;
-                                    const rf = rn.split(' ')[0];
-                                    return (
-                                    <div className="u-intro-tags">
-                                      <button className="u-intro-tag" onClick={() => {
-                                        setIntroActionType('ask-details');
-                                        setIntroEmailSubject(`About your intro request to ${companyName}`);
-                                        setIntroEmailBody(`Hi ${rf},\n\nI saw your request for an intro to someone at ${companyName}. I know ${cf} there and may be able to help.\n\nBefore I reach out, could you share a bit more about what you're looking for? For example:\n- What's the context for this intro?\n- What would you like to discuss with them?\n- Any specific goals or topics?\n\nJust want to make sure the intro is as useful as possible for both of you. Reply to this email and let me know.\n\nBest,\n${currentUser?.name || ''}`);
-                                      }}>
-                                        Ask {rf} for details
-                                      </button>
-                                      <button className="u-intro-tag" onClick={() => {
-                                        setIntroActionType('make-intro');
-                                        setIntroEmailSubject(`Introduction: ${rn} ↔ ${cn} (${companyName})`);
-                                        setIntroEmailBody(`Hi ${cf} and ${rf},\n\nI'd love to connect you two.\n\n${cf} — ${rf} is interested in connecting with someone at ${companyName}, and I thought you'd be a great person to talk to.\n\n${rf} — ${cf} is at ${companyName}. I think you'll have a lot to discuss.\n\nFeel free to reply all to continue the conversation right here in this thread.\n\nBest,\n${currentUser?.name || ''}`);
-                                      }}>
-                                        Make intro
-                                      </button>
-                                      <button className="u-intro-tag" onClick={() => {
-                                        setIntroActionType('ask-permission');
-                                        setIntroEmailSubject(`Would you be open to an intro? (${companyName})`);
-                                        setIntroEmailBody(`Hi ${cf},\n\nI have someone in my network who's looking to connect with someone at ${companyName}. I thought of you and wanted to check — would you be open to an introduction?\n\nNo pressure at all — just reply to this email and let me know.\n\nBest,\n${currentUser?.name || ''}`);
-                                      }}>
-                                        Ask {cf} if OK to make intro
-                                      </button>
-                                      <button className="u-intro-cancel" onClick={() => { setIntroActionRequestId(null); setIntroSelectedContact(null); }}>Cancel</button>
-                                    </div>
-                                    );
-                                  })()}
-                                </div>
-                              );
-                            })()}
-
-                            {/* Email composer */}
-                            {introActionRequestId === r.id && introActionType && (() => {
-                              const contact = introSelectedContact || myContactsAtCompany[0];
-                              const recipientLabel = introActionType === 'ask-details'
-                                ? `To: ${r.requester.email || r.requester.name}`
-                                : introActionType === 'ask-permission' && contact
-                                ? `To: ${contact.email || contact.name}`
-                                : `To: ${contact?.email || ''}, ${r.requester.email || ''}`;
-                              const ccLabel = `CC: ${currentUser?.email || 'you'}`;
-                              return (
-                              <div className="u-intro-email">
-                                <div className="u-intro-email-recipients">
-                                  <span className="u-intro-email-recipient">{recipientLabel}</span>
-                                  <span className="u-intro-email-cc">{ccLabel}</span>
-                                </div>
-                                <label className="u-intro-email-label">Subject</label>
-                                <input
-                                  className="u-intro-email-subject"
-                                  value={introEmailSubject}
-                                  onChange={e => setIntroEmailSubject(e.target.value)}
-                                />
-                                <label className="u-intro-email-label">Message</label>
-                                <textarea
-                                  className="u-intro-email-body"
-                                  rows={8}
-                                  value={introEmailBody}
-                                  onChange={e => setIntroEmailBody(e.target.value)}
-                                />
-                                <div className="u-intro-email-actions">
-                                  <button
-                                    className="u-intro-email-send"
-                                    disabled={introSending}
-                                    onClick={async () => {
-                                      setIntroSending(true);
-                                      try {
-                                        if (introActionType === 'make-intro' && contact) {
-                                          await emailApi.sendDoubleIntro({
-                                            requesterEmail: r.requester.email || '',
-                                            requesterName: r.requester.name,
-                                            contactEmail: contact.email,
-                                            contactName: contact.name,
-                                            targetCompany: companyName,
-                                          });
-                                          await offersApi.create({ requestId: r.id, message: `Intro to ${contact.name}` });
-                                        } else if (introActionType === 'ask-details') {
-                                          await emailApi.sendContact({
-                                            recipientEmail: r.requester.email || '',
-                                            recipientName: r.requester.name,
-                                            subject: introEmailSubject,
-                                            body: introEmailBody,
-                                            requestId: r.id,
-                                            action: 'ask-details',
-                                          });
-                                        } else if (introActionType === 'ask-permission' && contact) {
-                                          await emailApi.sendContact({
-                                            recipientEmail: contact.email,
-                                            recipientName: contact.name,
-                                            subject: introEmailSubject,
-                                            body: introEmailBody,
-                                          });
-                                        }
-                                        setIntroActionRequestId(null);
-                                        setIntroActionType(null);
-                                        setIntroSelectedContact(null);
-                                        setIntroToast('Email sent!');
-                                        setTimeout(() => setIntroToast(null), 3000);
-                                      } catch (err) {
-                                        console.error('Failed to send intro email:', err);
-                                        setIntroToast('Failed to send email');
-                                        setTimeout(() => setIntroToast(null), 3000);
-                                      } finally {
-                                        setIntroSending(false);
-                                      }
-                                    }}
-                                  >
-                                    {introSending ? 'Sending...' : 'Send Email'}
-                                  </button>
-                                  <button className="u-intro-cancel" onClick={() => { setIntroActionType(null); }}>Back</button>
-                                </div>
-                              </div>
-                              );
-                            })()}
-
-                            {/* Decline form */}
-                            {isDeclining && (
-                              <div className="u-req-decline">
-                                <textarea
-                                  className="u-req-decline-input"
-                                  placeholder="Reason (optional, stays anonymous)"
-                                  rows={2}
-                                  value={declineReason}
-                                  onChange={e => setDeclineReason(e.target.value)}
-                                />
-                                <div className="u-req-decline-btns">
-                                  <button
-                                    className="u-req-action-btn u-req-action-btn--decline-confirm"
-                                    onClick={async () => {
-                                      try {
-                                        await requestsApi.decline(r.id, declineReason.trim() || undefined);
-                                        setSpaceRequests(prev => ({
-                                          ...prev,
-                                          [space.id]: (prev[space.id] || []).map(req =>
-                                            req.id === r.id ? { ...req, status: 'declined' } : req
-                                          ),
-                                        }));
-                                        fetchSpacesList();
-                                      } catch (err) {
-                                        console.error('Failed to decline:', err);
-                                      }
-                                      setDecliningRequestId(null);
-                                      setDeclineReason('');
-                                    }}
-                                  >
-                                    Confirm Decline
-                                  </button>
-                                  <button
-                                    className="u-req-action-btn"
-                                    onClick={() => { setDecliningRequestId(null); setDeclineReason(''); }}
-                                  >
-                                    Cancel
-                                  </button>
-                                </div>
-                              </div>
-                            )}
+                      {sent.length > 0 && (
+                        <div className="u-panel-section">
+                          <div className="u-panel-section-h">
+                            Your intro requests
+                            {sentNeedsReply.length > 0 && <span className="u-notif-inline-badge">{sentNeedsReply.length}</span>}
                           </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : null; })()}
+
+                          {sentNeedsReply.length > 0 && (
+                            <div className="u-intro-subgroup">
+                              <div className="u-intro-subgroup-header u-intro-subgroup-header--attention">Needs your review</div>
+                              <div className="u-panel-request-inbox">
+                                {sentNeedsReply.map(r => renderSpaceCard(r, 'sent'))}
+                              </div>
+                            </div>
+                          )}
+
+                          {sentOpen.length > 0 && (
+                            <div className="u-intro-subgroup">
+                              <div className="u-intro-subgroup-header">In progress</div>
+                              <div className="u-panel-request-inbox">
+                                {sentOpen.map(r => renderSpaceCard(r, 'sent'))}
+                              </div>
+                            </div>
+                          )}
+
+                          {sentPast.length > 0 && (
+                            <div className="u-intro-subgroup">
+                              <button
+                                className="u-intro-subgroup-toggle"
+                                onClick={() => setSpacePastSentCollapsed(v => !v)}
+                              >
+                                <span className={`u-intro-subgroup-arrow ${spacePastSentCollapsed ? '' : 'u-intro-subgroup-arrow--open'}`}>▸</span>
+                                Past
+                                <span className="u-intro-subgroup-count">{sentPast.length}</span>
+                              </button>
+                              {!spacePastSentCollapsed && (
+                                <div className="u-panel-request-inbox">
+                                  {sentPast.map(r => renderSpaceCard(r, 'sent'))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
 
                 {/* Space actions */}
                 <div className="u-panel-actions">
@@ -5302,9 +5230,31 @@ export function AIHomePage() {
             {/* ── Network Panel (Spaces + 1:1 Connections) ── */}
             {(inlinePanel.type === 'network-manage' || inlinePanel.type === 'spaces-manage' || inlinePanel.type === 'connections-manage') && (
               <div className="u-panel-spaces">
-                <h2>Your Network</h2>
-                <p className="u-panel-space-meta">{spaces.length} spaces · {connections.filter(c => c.status === 'accepted').length} connections</p>
+                {/* Tabs */}
+                {(() => {
+                  const openReceivedCount = incomingRequests.filter(r => r.status === 'open' && !dismissedRequestIds.has(r.id)).length;
+                  const needsReplySentCount = (myIntroRequests || []).filter(r => r.status === 'open' && (r as any).detailsRequestedAt).length;
+                  const openIntroCount = openReceivedCount + needsReplySentCount;
+                  return (
+                    <div className="u-network-tabs">
+                      <button
+                        className={`u-network-tab ${networkTab === 'network' ? 'u-network-tab--active' : ''}`}
+                        onClick={() => setNetworkTab('network')}
+                      >
+                        Your Network
+                      </button>
+                      <button
+                        className={`u-network-tab ${networkTab === 'intros' ? 'u-network-tab--active' : ''}`}
+                        onClick={() => setNetworkTab('intros')}
+                      >
+                        Intros
+                        {openIntroCount > 0 && <span className="u-network-tab-badge">{openIntroCount}</span>}
+                      </button>
+                    </div>
+                  );
+                })()}
 
+                {networkTab === 'network' && <>
                 {/* My Profile Card (compact) */}
                 {currentUser && (
                   <div className="u-panel-space-card" onClick={() => setInlinePanel({ type: 'profile' })} style={{ cursor: 'pointer' }}>
@@ -5564,6 +5514,289 @@ export function AIHomePage() {
                     <span className="u-panel-docs-cta-arrow">→</span>
                   </a>
                 </div>
+                </>}
+
+                {/* ── Intros Tab ── */}
+                {networkTab === 'intros' && (() => {
+                  const allSent = (myIntroRequests || []).map(r => ({ ...r, direction: 'sent' as const }));
+                  const allReceived = (incomingRequests || []).filter(r => !dismissedRequestIds.has(r.id)).map(r => ({ ...r, direction: 'received' as const }));
+                  const totalCount = allSent.length + allReceived.length;
+
+                  const receivedOpen = allReceived.filter(r => r.status === 'open').sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                  const receivedNeedsReview = receivedOpen.filter(r => !(r as any).detailsRequestedAt && !(r as any).checkedWithContactAt);
+                  const receivedInProgress = receivedOpen.filter(r => !!(r as any).detailsRequestedAt || !!(r as any).checkedWithContactAt);
+                  const receivedPast = allReceived.filter(r => r.status !== 'open').sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+                  const sentAwaitingAdmin = allSent.filter(r => r.status === 'open' && (r as any).adminStatus === 'pending_review').sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                  const sentNeedsReply = allSent.filter(r => r.status === 'open' && (r as any).adminStatus !== 'pending_review' && (r as any).detailsRequestedAt).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                  const sentOpen = allSent.filter(r => r.status === 'open' && (r as any).adminStatus !== 'pending_review' && !(r as any).detailsRequestedAt).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                  const sentPast = allSent.filter(r => r.status !== 'open').sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+                  const renderReceivedCard = (r: typeof allReceived[number]) => {
+                    const nq = (r.normalizedQuery || {}) as Record<string, unknown>;
+                    const companyName = (nq.companyName as string) || 'a company';
+                    const companyDomain = (nq.companyDomain as string) || '';
+                    const companyId = (nq.companyId as string) || '';
+                    const matchedCompany = mergedCompanies.find(c => (companyId && c.id === companyId) || (companyDomain && c.domain === companyDomain));
+                    const timeAgo = getTimeAgo(r.createdAt);
+                    const space = 'space' in r ? (r as any).space : null;
+                    const spaceName = space?.name as string | undefined;
+                    const hasConnectionPeer = !!(nq.connectionPeerId);
+                    const via = spaceName
+                      ? `${space?.emoji || '🫛'} ${spaceName}`
+                      : hasConnectionPeer
+                        ? `👤 Direct`
+                        : null;
+
+                    return (
+                      <div
+                        key={r.id}
+                        className={`u-inbox-card ${r.status !== 'open' ? 'u-inbox-card--resolved' : ''}`}
+                        onClick={() => {
+                          setInlinePanel({
+                            type: 'intro-detail',
+                            company: matchedCompany,
+                            introRequest: {
+                              ...r,
+                              direction: r.direction,
+                              requester: r.requester,
+                              space: 'space' in r ? (r as any).space : null,
+                              connectionPeerName: 'connectionPeerName' in r ? (r as any).connectionPeerName : undefined,
+                              declineReason: 'declineReason' in r ? (r as any).declineReason : undefined,
+                              declinedByName: 'declinedByName' in r ? (r as any).declinedByName : undefined,
+                              detailsRequestedAt: 'detailsRequestedAt' in r ? (r as any).detailsRequestedAt : undefined,
+                              detailsRequestedById: 'detailsRequestedById' in r ? (r as any).detailsRequestedById : undefined,
+                              detailsRequestedByName: 'detailsRequestedByName' in r ? (r as any).detailsRequestedByName : undefined,
+                              checkedWithContactAt: 'checkedWithContactAt' in r ? (r as any).checkedWithContactAt : undefined,
+                              checkedWithContactName: 'checkedWithContactName' in r ? (r as any).checkedWithContactName : undefined,
+                              checkedWithContactById: 'checkedWithContactById' in r ? (r as any).checkedWithContactById : undefined,
+                              checkedWithContacts: 'checkedWithContacts' in r ? (r as any).checkedWithContacts : undefined,
+                              adminStatus: 'adminStatus' in r ? (r as any).adminStatus : undefined,
+                              adminReviewedAt: 'adminReviewedAt' in r ? (r as any).adminReviewedAt : undefined,
+                              adminRejectReason: 'adminRejectReason' in r ? (r as any).adminRejectReason : undefined,
+                              offers: 'offers' in r ? (r as any).offers : undefined,
+                            },
+                          });
+                        }}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <div className="u-inbox-card-top">
+                          <div className="u-inbox-card-title">
+                            {companyDomain && <CompanyLogo domain={companyDomain} name={companyName} size={18} />}
+                            <span>{r.requester.name} requested intro to <strong>{companyName}</strong> from your network</span>
+                          </div>
+                          {(() => {
+                            const hasDetails = !!(r as any).detailsRequestedAt;
+                            const hasChecked = !!(r as any).checkedWithContactAt;
+                            if (r.status === 'open') {
+                              const cls = hasDetails || hasChecked ? 'inprogress' : 'action';
+                              const label = hasDetails ? 'Waiting for details' : hasChecked ? 'Checking with contact' : 'Needs your review';
+                              return <span className={`u-inbox-status u-inbox-status--${cls}`}>{label}</span>;
+                            }
+                            const doneLabel = r.status === 'accepted' ? 'Done' : r.status === 'declined' ? 'Declined' : r.status;
+                            return <span className={`u-inbox-status u-inbox-status--${r.status}`}>{doneLabel}</span>;
+                          })()}
+                        </div>
+                        <p className="u-inbox-card-text">{r.rawText}</p>
+                        <div className="u-inbox-card-meta">
+                          {via && <span className="u-inbox-via">{via}</span>}
+                          <span className="u-inbox-time">{timeAgo}</span>
+                        </div>
+                      </div>
+                    );
+                  };
+
+                  const renderSentCard = (r: typeof allSent[number]) => {
+                    const nq = (r.normalizedQuery || {}) as Record<string, unknown>;
+                    const companyName = (nq.companyName as string) || 'a company';
+                    const companyDomain = (nq.companyDomain as string) || '';
+                    const companyId = (nq.companyId as string) || '';
+                    const matchedCompany = mergedCompanies.find(c => (companyId && c.id === companyId) || (companyDomain && c.domain === companyDomain));
+                    const timeAgo = getTimeAgo(r.createdAt);
+                    const space = 'space' in r ? (r as any).space : null;
+                    const spaceName = space?.name as string | undefined;
+                    const connPeerName = (nq.connectionPeerName as string | undefined) || (r as any).connectionPeerName;
+                    const via = spaceName
+                      ? `${space?.emoji || '🫛'} ${spaceName}`
+                      : connPeerName
+                        ? `👤 ${connPeerName}`
+                        : '';
+
+                    return (
+                      <div
+                        key={r.id}
+                        className={`u-inbox-card ${r.status !== 'open' ? 'u-inbox-card--resolved' : ''}`}
+                        onClick={() => {
+                          setInlinePanel({
+                            type: 'intro-detail',
+                            company: matchedCompany,
+                            introRequest: {
+                              ...r,
+                              direction: r.direction,
+                              requester: r.requester,
+                              space: 'space' in r ? (r as any).space : null,
+                              connectionPeerName: 'connectionPeerName' in r ? (r as any).connectionPeerName : undefined,
+                              declineReason: 'declineReason' in r ? (r as any).declineReason : undefined,
+                              declinedByName: 'declinedByName' in r ? (r as any).declinedByName : undefined,
+                              detailsRequestedAt: 'detailsRequestedAt' in r ? (r as any).detailsRequestedAt : undefined,
+                              detailsRequestedById: 'detailsRequestedById' in r ? (r as any).detailsRequestedById : undefined,
+                              detailsRequestedByName: 'detailsRequestedByName' in r ? (r as any).detailsRequestedByName : undefined,
+                              checkedWithContactAt: 'checkedWithContactAt' in r ? (r as any).checkedWithContactAt : undefined,
+                              checkedWithContactName: 'checkedWithContactName' in r ? (r as any).checkedWithContactName : undefined,
+                              checkedWithContactById: 'checkedWithContactById' in r ? (r as any).checkedWithContactById : undefined,
+                              checkedWithContacts: 'checkedWithContacts' in r ? (r as any).checkedWithContacts : undefined,
+                              adminStatus: 'adminStatus' in r ? (r as any).adminStatus : undefined,
+                              adminReviewedAt: 'adminReviewedAt' in r ? (r as any).adminReviewedAt : undefined,
+                              adminRejectReason: 'adminRejectReason' in r ? (r as any).adminRejectReason : undefined,
+                              offers: 'offers' in r ? (r as any).offers : undefined,
+                            },
+                          });
+                        }}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <div className="u-inbox-card-top">
+                          <div className="u-inbox-card-title">
+                            {companyDomain && <CompanyLogo domain={companyDomain} name={companyName} size={18} />}
+                            <span>You requested intro to <strong>{companyName}</strong></span>
+                          </div>
+                          {(() => {
+                            const adminSt = (r as any).adminStatus;
+                            if (adminSt === 'pending_review') {
+                              return <span className="u-inbox-status u-inbox-status--awaiting">Awaiting admin review</span>;
+                            }
+                            const hasDetails = !!(r as any).detailsRequestedAt;
+                            if (r.status === 'open') {
+                              const cls = hasDetails ? 'awaiting' : 'inprogress';
+                              const label = hasDetails ? 'Awaiting your reply' : 'In progress';
+                              return <span className={`u-inbox-status u-inbox-status--${cls}`}>{label}</span>;
+                            }
+                            const doneLabel = r.status === 'accepted' ? 'Done' : r.status === 'declined' && adminSt === 'rejected' ? 'Not approved' : r.status === 'declined' ? 'Declined' : r.status;
+                            return <span className={`u-inbox-status u-inbox-status--${r.status}`}>{doneLabel}</span>;
+                          })()}
+                        </div>
+                        <p className="u-inbox-card-text">{r.rawText}</p>
+                        <div className="u-inbox-card-meta">
+                          {via && <span className="u-inbox-via">{via}</span>}
+                          <span className="u-inbox-time">{timeAgo}</span>
+                        </div>
+                      </div>
+                    );
+                  };
+
+                  return (
+                    <>
+                      {totalCount === 0 ? (
+                        <div className="u-panel-spaces-empty" style={{ padding: '2rem 1rem', textAlign: 'center' }}>
+                          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>No intro requests yet</p>
+                          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Request intros to companies in your network's reach, or help others with theirs.</p>
+                        </div>
+                      ) : (
+                        <>
+                          {/* ── Received ── */}
+                          {allReceived.length > 0 && (
+                            <div className="u-panel-section">
+                              <h4 className="u-panel-section-h">
+                                Intro requests from others
+                                {receivedOpen.length > 0 && <span className="u-notif-inline-badge">{receivedOpen.length}</span>}
+                              </h4>
+
+                              {receivedNeedsReview.length > 0 && (
+                                <div className="u-intro-subgroup">
+                                  <div className="u-intro-subgroup-header u-intro-subgroup-header--attention">Needs your review</div>
+                                  <div className="u-panel-request-inbox">
+                                    {receivedNeedsReview.map(renderReceivedCard)}
+                                  </div>
+                                </div>
+                              )}
+
+                              {receivedInProgress.length > 0 && (
+                                <div className="u-intro-subgroup">
+                                  <div className="u-intro-subgroup-header">In progress</div>
+                                  <div className="u-panel-request-inbox">
+                                    {receivedInProgress.map(renderReceivedCard)}
+                                  </div>
+                                </div>
+                              )}
+
+                              {receivedPast.length > 0 && (
+                                <div className="u-intro-subgroup">
+                                  <button
+                                    className="u-intro-subgroup-toggle"
+                                    onClick={() => setPastReceivedCollapsed(v => !v)}
+                                  >
+                                    <span className={`u-intro-subgroup-arrow ${pastReceivedCollapsed ? '' : 'u-intro-subgroup-arrow--open'}`}>▸</span>
+                                    Past
+                                    <span className="u-intro-subgroup-count">{receivedPast.length}</span>
+                                  </button>
+                                  {!pastReceivedCollapsed && (
+                                    <div className="u-panel-request-inbox">
+                                      {receivedPast.map(renderReceivedCard)}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* ── Sent ── */}
+                          {allSent.length > 0 && (
+                            <div className="u-panel-section">
+                              <h4 className="u-panel-section-h">
+                                Your intro requests
+                                {(sentNeedsReply.length + sentAwaitingAdmin.length) > 0 && <span className="u-notif-inline-badge">{sentNeedsReply.length + sentAwaitingAdmin.length}</span>}
+                              </h4>
+
+                              {sentAwaitingAdmin.length > 0 && (
+                                <div className="u-intro-subgroup">
+                                  <div className="u-intro-subgroup-header u-intro-subgroup-header--awaiting">Awaiting admin review</div>
+                                  <div className="u-panel-request-inbox">
+                                    {sentAwaitingAdmin.map(renderSentCard)}
+                                  </div>
+                                </div>
+                              )}
+
+                              {sentNeedsReply.length > 0 && (
+                                <div className="u-intro-subgroup">
+                                  <div className="u-intro-subgroup-header u-intro-subgroup-header--attention">Needs your review</div>
+                                  <div className="u-panel-request-inbox">
+                                    {sentNeedsReply.map(renderSentCard)}
+                                  </div>
+                                </div>
+                              )}
+
+                              {sentOpen.length > 0 && (
+                                <div className="u-intro-subgroup">
+                                  <div className="u-intro-subgroup-header">In progress</div>
+                                  <div className="u-panel-request-inbox">
+                                    {sentOpen.map(renderSentCard)}
+                                  </div>
+                                </div>
+                              )}
+
+                              {sentPast.length > 0 && (
+                                <div className="u-intro-subgroup">
+                                  <button
+                                    className="u-intro-subgroup-toggle"
+                                    onClick={() => setPastSentCollapsed(v => !v)}
+                                  >
+                                    <span className={`u-intro-subgroup-arrow ${pastSentCollapsed ? '' : 'u-intro-subgroup-arrow--open'}`}>▸</span>
+                                    Past
+                                    <span className="u-intro-subgroup-count">{sentPast.length}</span>
+                                  </button>
+                                  {!pastSentCollapsed && (
+                                    <div className="u-panel-request-inbox">
+                                      {sentPast.map(renderSentCard)}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             )}
 
@@ -5584,7 +5817,6 @@ export function AIHomePage() {
 
               return (
               <div className="u-panel-space">
-                <button className="u-panel-breadcrumb" onClick={() => setInlinePanel({ type: 'network-manage' })}>← Network</button>
                 <div className="u-panel-space-hero">
                   <PersonAvatar email={conn.peer.email} name={conn.peer.name} avatarUrl={conn.peer.avatar} size={48} />
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -5682,7 +5914,7 @@ export function AIHomePage() {
                             {isMe && isOpen && (() => {
                               const detailsNotif = notifications.find(n => n.type === 'details_requested' && (n.data as Record<string, unknown>)?.requestId === r.id);
                               if (!detailsNotif) return null;
-                              const connectorName = (detailsNotif.data as Record<string, unknown>)?.connectorName as string || 'A connector';
+                              const connectorName = (detailsNotif.data as Record<string, unknown>)?.connectorName as string || (r as any).detailsRequestedByName || 'A connector';
                               return (
                                 <div className="u-panel-request-details-banner">
                                   <span className="u-panel-request-details-icon">📩</span>
@@ -5722,15 +5954,27 @@ export function AIHomePage() {
                                     setIntroSelectedContact(myContactsAtCompany.length === 1 ? myContactsAtCompany[0] : null);
                                   }}
                                 >Make Intro</button>
-                                <button className="u-req-action-btn u-req-action-btn--done" onClick={async () => {
-                                  try {
-                                    await requestsApi.markDone(r.id);
-                                    setIncomingRequests(prev => prev.map(req => req.id === r.id ? { ...req, status: 'accepted' } : req));
-                                    setIntroToast('Intro marked as done!');
-                                    setTimeout(() => setIntroToast(null), 3000);
-                                  } catch (err) { console.error('Failed to mark as done:', err); }
-                                }}>Intro Done</button>
-                                <button className="u-req-action-btn u-req-action-btn--decline" onClick={() => { setDecliningRequestId(r.id); setDeclineReason(''); }}>Decline</button>
+                                <button className="u-req-action-btn u-req-action-btn--done" onClick={() => { setConfirmingDoneRequestId(r.id); setDecliningRequestId(null); }}>Intro Done</button>
+                                <button className="u-req-action-btn u-req-action-btn--decline" onClick={() => { setDecliningRequestId(r.id); setDeclineReason(''); setConfirmingDoneRequestId(null); }}>Decline</button>
+                              </div>
+                            )}
+
+                            {confirmingDoneRequestId === r.id && (
+                              <div className="u-req-confirm-done">
+                                <p className="u-req-confirm-done-text">Are you sure they are connected? This will notify the requester that the intro is done.</p>
+                                <div className="u-req-confirm-done-btns">
+                                  <button className="u-req-action-btn u-req-action-btn--done" onClick={async () => {
+                                    try {
+                                      const resp = await requestsApi.markDone(r.id);
+                                      const doneOffer = resp.offers?.length ? resp.offers[resp.offers.length - 1] : { id: '', status: 'accepted', createdAt: new Date().toISOString(), introducer: { id: currentUser?.id || '', name: currentUser?.name || '', avatar: currentUser?.avatar || null } };
+                                      setIncomingRequests(prev => prev.map(req => req.id === r.id ? { ...req, status: 'accepted', offers: [...(req.offers || []), doneOffer] } as typeof req : req));
+                                      setConfirmingDoneRequestId(null);
+                                      setIntroToast('Intro marked as done!');
+                                      setTimeout(() => setIntroToast(null), 3000);
+                                    } catch (err) { console.error('Failed to mark as done:', err); }
+                                  }}>Yes, they're connected</button>
+                                  <button className="u-intro-cancel" onClick={() => setConfirmingDoneRequestId(null)}>Cancel</button>
+                                </div>
                               </div>
                             )}
 
@@ -5750,6 +5994,7 @@ export function AIHomePage() {
                                     </div>
                                   )}
                                   {(myContactsAtCompany.length <= 1 || introSelectedContact) && (() => {
+                                    const hasContact = !!(introSelectedContact || myContactsAtCompany[0]);
                                     const cn = introSelectedContact?.name || myContactsAtCompany[0]?.name || 'your contact';
                                     const cf = cn.split(' ')[0];
                                     const rn = r.requester.name;
@@ -5759,10 +6004,11 @@ export function AIHomePage() {
                                       <button className="u-intro-tag" onClick={() => {
                                         setIntroActionType('ask-details');
                                         setIntroEmailSubject(`About your intro request to ${companyName}`);
-                                        setIntroEmailBody(`Hi ${rf},\n\nI saw your request for an intro to someone at ${companyName}. I know ${cf} there and may be able to help.\n\nBefore I reach out, could you share a bit more about what you're looking for? For example:\n- What's the context for this intro?\n- What would you like to discuss with them?\n- Any specific goals or topics?\n\nJust want to make sure the intro is as useful as possible for both of you. Reply to this email and let me know.\n\nBest,\n${currentUser?.name || ''}`);
+                                        setIntroEmailBody(`Hi ${rf},\n\nI saw your request for an intro to someone at ${companyName}.${hasContact ? ` I know ${cf} there and may be able to help.` : ''}\n\nBefore I reach out, could you share a bit more about what you're looking for? For example:\n- What's the context for this intro?\n- What would you like to discuss with them?\n- Any specific goals or topics?\n\nJust want to make sure the intro is as useful as possible for both of you. Reply to this email and let me know.\n\nBest,\n${currentUser?.name || ''}`);
                                       }}>
                                         Ask {rf} for details
                                       </button>
+                                      {hasContact && (
                                       <button className="u-intro-tag" onClick={() => {
                                         setIntroActionType('make-intro');
                                         setIntroEmailSubject(`Introduction: ${rn} ↔ ${cn} (${companyName})`);
@@ -5770,6 +6016,8 @@ export function AIHomePage() {
                                       }}>
                                         Make intro
                                       </button>
+                                      )}
+                                      {hasContact && (
                                       <button className="u-intro-tag" onClick={() => {
                                         setIntroActionType('ask-permission');
                                         setIntroEmailSubject(`Would you be open to an intro? (${companyName})`);
@@ -5777,6 +6025,7 @@ export function AIHomePage() {
                                       }}>
                                         Ask {cf} if OK to make intro
                                       </button>
+                                      )}
                                       <button className="u-intro-cancel" onClick={() => { setIntroActionRequestId(null); setIntroSelectedContact(null); }}>Cancel</button>
                                     </div>
                                     );
@@ -5818,6 +6067,12 @@ export function AIHomePage() {
                                     className="u-intro-email-send"
                                     disabled={introSending}
                                     onClick={async () => {
+                                      if (introSending) return;
+                                      if ((introActionType === 'make-intro' || introActionType === 'ask-permission') && !contact) {
+                                        setIntroToast('No contact selected');
+                                        setTimeout(() => setIntroToast(null), 3000);
+                                        return;
+                                      }
                                       setIntroSending(true);
                                       try {
                                         if (introActionType === 'make-intro' && contact) {
@@ -5828,7 +6083,9 @@ export function AIHomePage() {
                                             contactName: contact.name,
                                             targetCompany: companyName,
                                           });
-                                          await offersApi.create({ requestId: r.id, message: `Intro to ${contact.name}` });
+                                          const offerResp = await offersApi.create({ requestId: r.id, message: `Intro to ${contact.name}` });
+                                          const newOffer = { id: offerResp.id, status: offerResp.status, createdAt: new Date().toISOString(), introducer: { id: currentUser?.id || '', name: currentUser?.name || '', avatar: currentUser?.avatar || null } };
+                                          setIncomingRequests(prev => prev.map(req => req.id === r.id ? { ...req, status: 'accepted', offers: [...(req.offers || []), newOffer] } as typeof req : req));
                                         } else if (introActionType === 'ask-details') {
                                           await emailApi.sendContact({
                                             recipientEmail: r.requester.email || '',
@@ -5838,13 +6095,32 @@ export function AIHomePage() {
                                             requestId: r.id,
                                             action: 'ask-details',
                                           });
+                                          const now = new Date().toISOString();
+                                          setIncomingRequests(prev => prev.map(req => req.id === r.id ? { ...req, detailsRequestedAt: now, detailsRequestedById: currentUser?.id, detailsRequestedByName: currentUser?.name } as typeof req : req));
+                                          if (inlinePanel?.type === 'intro-detail' && inlinePanel.introRequest?.id === r.id) {
+                                            setInlinePanel({ ...inlinePanel, introRequest: { ...inlinePanel.introRequest, detailsRequestedAt: now, detailsRequestedById: currentUser?.id, detailsRequestedByName: currentUser?.name } });
+                                          }
                                         } else if (introActionType === 'ask-permission' && contact) {
                                           await emailApi.sendContact({
                                             recipientEmail: contact.email,
                                             recipientName: contact.name,
                                             subject: introEmailSubject,
                                             body: introEmailBody,
+                                            requestId: r.id,
+                                            action: 'ask-permission',
+                                            contactName: contact.name,
                                           });
+                                          const now = new Date().toISOString();
+                                          const newCheck = { at: now, name: contact.name, byId: currentUser?.id || '' };
+                                          setIncomingRequests(prev => prev.map(req => {
+                                            if (req.id !== r.id) return req;
+                                            const prevChecks = Array.isArray((req as any).checkedWithContacts) ? (req as any).checkedWithContacts : [];
+                                            return { ...req, checkedWithContactAt: now, checkedWithContactName: contact.name, checkedWithContactById: currentUser?.id, checkedWithContacts: [...prevChecks, newCheck] } as typeof req;
+                                          }));
+                                          if (inlinePanel?.type === 'intro-detail' && inlinePanel.introRequest?.id === r.id) {
+                                            const prevChecks = Array.isArray(inlinePanel.introRequest.checkedWithContacts) ? inlinePanel.introRequest.checkedWithContacts : [];
+                                            setInlinePanel({ ...inlinePanel, introRequest: { ...inlinePanel.introRequest, checkedWithContactAt: now, checkedWithContactName: contact.name, checkedWithContactById: currentUser?.id, checkedWithContacts: [...prevChecks, newCheck] } });
+                                          }
                                         }
                                         setIntroActionRequestId(null);
                                         setIntroActionType(null);
@@ -5860,8 +6136,26 @@ export function AIHomePage() {
                                       }
                                     }}
                                   >
-                                    {introSending ? 'Sending...' : 'Send Email'}
+                                    {introSending ? 'Sending...' : 'Send with Introo'}
                                   </button>
+                                  {introActionType !== 'ask-details' && (
+                                    <button
+                                      className="u-intro-mailto-btn"
+                                      title="Status won't be tracked automatically when using your email app"
+                                      onClick={() => {
+                                        const toEmail = introActionType === 'ask-permission' && contact
+                                          ? (contact.email || '')
+                                          : [contact?.email, r.requester.email].filter(Boolean).join(',');
+                                        const cc = currentUser?.email || '';
+                                        const mailto = `mailto:${toEmail}?cc=${encodeURIComponent(cc)}&subject=${encodeURIComponent(introEmailSubject)}&body=${encodeURIComponent(introEmailBody)}`;
+                                        window.open(mailto, '_blank');
+                                        setIntroToast('Opened in email app — status won\'t update automatically');
+                                        setTimeout(() => setIntroToast(null), 4000);
+                                      }}
+                                    >
+                                      Open in email app
+                                    </button>
+                                  )}
                                   <button className="u-intro-cancel" onClick={() => { setIntroActionType(null); }}>Back</button>
                                 </div>
                               </div>
@@ -5921,6 +6215,68 @@ export function AIHomePage() {
               />
             )}
 
+            {/* ── Space Settings Panel ── */}
+            {inlinePanel.type === 'space-settings' && inlinePanel.spaceId && (() => {
+              const space = spaces.find(s => s.id === inlinePanel.spaceId);
+              if (!space) return null;
+              return (
+                <div className="u-panel-space-settings">
+                  <div className="u-panel-space-hero">
+                    <span className="u-panel-space-emoji">{space.emoji}</span>
+                    <div>
+                      <h2>{space.name}</h2>
+                      <span className="u-panel-space-meta">Settings</span>
+                    </div>
+                  </div>
+
+                  <div className="u-panel-section">
+                    <h4 className="u-panel-section-h">Intro review mode</h4>
+                    <p className="u-space-settings-desc">Choose how intro requests are handled in this space.</p>
+
+                    <label className={`u-space-settings-option ${(space as any).introReviewMode !== 'admin_review' ? 'u-space-settings-option--active' : ''}`}>
+                      <input
+                        type="radio"
+                        name={`review-mode-${space.id}`}
+                        checked={(space as any).introReviewMode !== 'admin_review'}
+                        onChange={async () => {
+                          try {
+                            await spacesApi.update(space.id, { introReviewMode: 'end_to_end' });
+                            setSpaces(prev => prev.map(s => s.id === space.id ? { ...s, introReviewMode: 'end_to_end' } : s));
+                            setIntroToast('Intro mode updated');
+                            setTimeout(() => setIntroToast(null), 3000);
+                          } catch { setIntroToast('Failed to update'); setTimeout(() => setIntroToast(null), 3000); }
+                        }}
+                      />
+                      <div className="u-space-settings-option-content">
+                        <span className="u-space-settings-option-title">End-to-end</span>
+                        <span className="u-space-settings-option-desc">Requests go directly to connectors who have contacts at the target company.</span>
+                      </div>
+                    </label>
+
+                    <label className={`u-space-settings-option ${(space as any).introReviewMode === 'admin_review' ? 'u-space-settings-option--active' : ''}`}>
+                      <input
+                        type="radio"
+                        name={`review-mode-${space.id}`}
+                        checked={(space as any).introReviewMode === 'admin_review'}
+                        onChange={async () => {
+                          try {
+                            await spacesApi.update(space.id, { introReviewMode: 'admin_review' });
+                            setSpaces(prev => prev.map(s => s.id === space.id ? { ...s, introReviewMode: 'admin_review' } : s));
+                            setIntroToast('Admin review mode enabled');
+                            setTimeout(() => setIntroToast(null), 3000);
+                          } catch { setIntroToast('Failed to update'); setTimeout(() => setIntroToast(null), 3000); }
+                        }}
+                      />
+                      <div className="u-space-settings-option-content">
+                        <span className="u-space-settings-option-title">Admin review</span>
+                        <span className="u-space-settings-option-desc">You review each intro request before it reaches connectors. Gives you full control over which requests get forwarded.</span>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* ── Settings Panel ── */}
             {inlinePanel.type === 'settings' && (
               <SettingsPanel
@@ -5941,6 +6297,721 @@ export function AIHomePage() {
                 onLogout={logout}
               />
             )}
+
+            {/* ── Intro Detail Panel ── */}
+            {inlinePanel.type === 'intro-detail' && inlinePanel.introRequest && (() => {
+              const req = inlinePanel.introRequest;
+              const nq = (req.normalizedQuery || {}) as Record<string, unknown>;
+              const companyName = (nq.companyName as string) || 'a company';
+              const companyDomain = (nq.companyDomain as string) || '';
+              const companyId = (nq.companyId as string) || '';
+              const matchedCompany = inlinePanel.company || mergedCompanies.find(c => (companyId && c.id === companyId) || (companyDomain && c.domain === companyDomain))
+                || (companyDomain ? { id: companyId || undefined, domain: companyDomain, name: companyName, myContacts: [], spaceContacts: [], myCount: 0, spaceCount: 0, totalCount: 0, hasStrongConnection: false, bestStrength: 'none' as const, source: 'space' as const, matchingViews: [], spaceIds: [], connectionIds: [] } : undefined);
+              const isSent = req.direction === 'sent';
+              const spaceName = req.space?.name;
+              const spaceEmoji = req.space?.emoji || '🫛';
+              const connPeerName = (nq.connectionPeerName as string | undefined) || req.connectionPeerName;
+              const via = spaceName
+                ? `${spaceEmoji} ${spaceName}`
+                : connPeerName
+                  ? `👤 ${connPeerName}`
+                  : null;
+              const createdDate = new Date(req.createdAt);
+              const requestedDateStr = createdDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+              const requestedTimeStr = createdDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+              const myContactsAtCompany = matchedCompany?.myContacts || [];
+              const isOpen = req.status === 'open';
+              const isDone = req.status === 'accepted';
+              const isDeclined = req.status === 'declined';
+              const isPendingReview = req.adminStatus === 'pending_review';
+              const isAdminRejected = req.adminStatus === 'rejected';
+              const hasDetailsRequested = !!req.detailsRequestedAt;
+              const checkedContacts: { at: string; name: string | null; byId: string }[] = Array.isArray(req.checkedWithContacts) && req.checkedWithContacts.length > 0
+                ? req.checkedWithContacts
+                : req.checkedWithContactAt ? [{ at: req.checkedWithContactAt, name: req.checkedWithContactName || null, byId: req.checkedWithContactById || '' }] : [];
+              const hasCheckedWithContact = checkedContacts.length > 0;
+              const acceptedOffer = req.offers?.find(o => o.status === 'accepted');
+
+              const getStatusBadge = (): { cls: string; label: string } => {
+                if (isOpen && isPendingReview) return { cls: 'awaiting', label: isSent ? 'Awaiting admin review' : 'Pending your review' };
+                if (isOpen && hasDetailsRequested && isSent) return { cls: 'awaiting', label: 'Awaiting your reply' };
+                if (isOpen && hasDetailsRequested) return { cls: 'inprogress', label: 'Waiting for details' };
+                if (isOpen && hasCheckedWithContact && !isSent) return { cls: 'inprogress', label: 'Checking with contact' };
+                if (isOpen && isSent) return { cls: 'inprogress', label: 'In progress' };
+                if (isOpen && !isSent && myContactsAtCompany.length > 0) return { cls: 'action', label: 'Needs your review' };
+                if (isOpen) return { cls: 'inprogress', label: 'In progress' };
+                if (isDone) return { cls: 'accepted', label: 'Done' };
+                if (isDeclined && isAdminRejected) return { cls: 'declined', label: 'Not approved' };
+                if (isDeclined) return { cls: 'declined', label: 'Declined' };
+                return { cls: req.status, label: req.status };
+              };
+              const statusBadge = getStatusBadge();
+
+              return (
+                <div className="u-panel-intro-detail">
+                  {/* Header: logo + title + status */}
+                  <div className="u-intro-detail-hero">
+                    <div className="u-intro-detail-hero-left" onClick={() => { if (matchedCompany) setInlinePanel({ type: 'company', company: matchedCompany, fromIntroDetail: { ...inlinePanel } }); }} style={{ cursor: matchedCompany ? 'pointer' : 'default' }}>
+                      {companyDomain && <CompanyLogo domain={companyDomain} name={companyName} size={36} />}
+                    </div>
+                    <div className="u-intro-detail-hero-info">
+                      <span className="u-intro-detail-title">
+                        {isSent ? 'You' : (() => {
+                          const reqConn = connections.find(c => c.peer.id === req.requester.id);
+                          if (reqConn) return <strong className="u-intro-timeline-link" onClick={() => setInlinePanel({ type: 'connection', connectionId: reqConn.id, fromIntroDetail: { ...inlinePanel } })}>{req.requester.name}</strong>;
+                          if (req.space) return <strong className="u-intro-timeline-link" onClick={() => setInlinePanel({ type: 'space', spaceId: req.space!.id, fromIntroDetail: { ...inlinePanel } })}>{req.requester.name}</strong>;
+                          return req.requester.name;
+                        })()} requested intro to{' '}
+                        <strong
+                          className={matchedCompany ? 'u-intro-timeline-link' : ''}
+                          onClick={matchedCompany ? () => setInlinePanel({ type: 'company', company: matchedCompany, fromIntroDetail: { ...inlinePanel } }) : undefined}
+                        >{companyName}</strong>
+                      </span>
+                      {companyDomain && <span className="u-intro-detail-company-domain">{companyDomain}</span>}
+                    </div>
+                    <span className={`u-inbox-status u-inbox-status--${statusBadge.cls}`}>
+                      {statusBadge.label}
+                    </span>
+                  </div>
+
+                  {/* Message */}
+                  <div className="u-intro-detail-section">
+                    <p className="u-intro-detail-message">{req.rawText}</p>
+                  </div>
+
+                  {/* Timeline */}
+                  <div className="u-intro-detail-section">
+                    <h4 className="u-intro-detail-label">Timeline</h4>
+                    <div className="u-intro-detail-timeline">
+                      {/* Requested */}
+                      <div className="u-intro-timeline-item">
+                        <div className="u-intro-timeline-dot" />
+                        <div className="u-intro-timeline-content">
+                          <span className="u-intro-timeline-title">{isSent ? 'You' : (() => {
+                            const requesterConn = connections.find(c => c.peer.id === req.requester.id);
+                            if (requesterConn) return <strong className="u-intro-timeline-link" onClick={(e) => { e.stopPropagation(); setInlinePanel({ type: 'connection', connectionId: requesterConn.id, fromIntroDetail: { ...inlinePanel } }); }}>{req.requester.name}</strong>;
+                            if (req.space) return <strong className="u-intro-timeline-link" onClick={(e) => { e.stopPropagation(); setInlinePanel({ type: 'space', spaceId: req.space!.id, fromIntroDetail: { ...inlinePanel } }); }}>{req.requester.name}</strong>;
+                            return <strong>{req.requester.name}</strong>;
+                          })()} created this request</span>
+                          {via && (() => {
+                            const connPeerId = nq.connectionPeerId as string | undefined;
+                            const viaConn = connPeerId ? connections.find(c => c.peer.id === connPeerId) : undefined;
+                            const viaSpace = req.space ? spaces.find(s => s.id === req.space!.id) : undefined;
+                            return (
+                              <span className="u-intro-timeline-via">
+                                {'via '}
+                                {viaConn ? (
+                                  <span className="u-intro-timeline-link" onClick={(e) => { e.stopPropagation(); setInlinePanel({ type: 'connection', connectionId: viaConn.id, fromIntroDetail: { ...inlinePanel } }); }}>👤 {connPeerName}</span>
+                                ) : viaSpace ? (
+                                  <span className="u-intro-timeline-link" onClick={(e) => { e.stopPropagation(); setInlinePanel({ type: 'space', spaceId: viaSpace.id, fromIntroDetail: { ...inlinePanel } }); }}>{spaceEmoji} {spaceName}</span>
+                                ) : via}
+                              </span>
+                            );
+                          })()}
+                          <span className="u-intro-timeline-date">{requestedDateStr}, {requestedTimeStr}</span>
+                        </div>
+                      </div>
+
+                      {/* Admin review status */}
+                      {isPendingReview && (() => {
+                        const isAdmin = req.space && spaces.find(s => s.id === req.space!.id)?.ownerId === currentUser?.id;
+                        const connectors: { id: string; name: string; contacts: string[] }[] = (req as any).potentialConnectors || [];
+                        return (
+                          <div className="u-intro-timeline-item u-intro-timeline-item--awaiting">
+                            <div className="u-intro-timeline-dot u-intro-timeline-dot--awaiting" />
+                            <div className="u-intro-timeline-content">
+                              <span className="u-intro-timeline-title">Awaiting space admin approval</span>
+                              <span className="u-intro-timeline-via">
+                                {isAdmin && connectors.length > 0
+                                  ? `If approved, ${connectors.length} connector${connectors.length !== 1 ? 's' : ''} will be notified`
+                                  : isAdmin && connectors.length === 0
+                                    ? 'No connectors found at this company yet'
+                                    : 'Request needs to be approved before it reaches connectors'}
+                              </span>
+                              {isAdmin && connectors.length > 0 && (
+                                <div className="u-intro-connectors-list">
+                                  {connectors.map((conn, i) => {
+                                    const connConnection = connections.find(c => c.peer.id === conn.id);
+                                    return (
+                                      <div key={i} className="u-intro-connector-item">
+                                        <span
+                                          className={`u-intro-connector-name ${connConnection ? 'u-intro-timeline-link' : ''}`}
+                                          onClick={connConnection ? (e) => { e.stopPropagation(); setInlinePanel({ type: 'connection', connectionId: connConnection.id, fromIntroDetail: { ...inlinePanel } }); } : undefined}
+                                        >{conn.name}</span>
+                                        <span className="u-intro-connector-via">knows {conn.contacts.join(', ')}</span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                      {req.adminStatus === 'approved' && req.adminReviewedAt && (() => {
+                        const reviewDate = new Date(req.adminReviewedAt);
+                        const reviewDateStr = reviewDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                        const reviewTimeStr = reviewDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+                        return (
+                          <div className="u-intro-timeline-item">
+                            <div className="u-intro-timeline-dot" />
+                            <div className="u-intro-timeline-content">
+                              <span className="u-intro-timeline-title">Approved by space admin</span>
+                              <span className="u-intro-timeline-via">Request forwarded to connectors</span>
+                              <span className="u-intro-timeline-date">{reviewDateStr}, {reviewTimeStr}</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Pending / reviewing — show for sent requests, but not while awaiting admin review */}
+                      {isSent && !isPendingReview && (() => {
+                        const spaceObj = req.space;
+                        const spaceData = spaceObj ? spaces.find(s => s.id === spaceObj.id) : null;
+                        const memberCount = spaceData ? (spaceData.memberCount || 1) - 1 : 0;
+                        const pendingConnPeerId = nq.connectionPeerId as string | undefined;
+                        const pendingConn = pendingConnPeerId ? connections.find(c => c.peer.id === pendingConnPeerId) : undefined;
+                        return (
+                          <div className="u-intro-timeline-item u-intro-timeline-item--pending">
+                            <div className="u-intro-timeline-dot u-intro-timeline-dot--pending" />
+                            <div className="u-intro-timeline-content">
+                              <span className="u-intro-timeline-title">
+                                {connPeerName
+                                  ? <><strong
+                                      className={pendingConn ? 'u-intro-timeline-link' : ''}
+                                      onClick={pendingConn ? (e) => { e.stopPropagation(); setInlinePanel({ type: 'connection', connectionId: pendingConn.id, fromIntroDetail: { ...inlinePanel } }); } : undefined}
+                                    >{connPeerName}</strong> {isOpen && !hasDetailsRequested ? 'is reviewing your request' : 'received your request'}</>
+                                  : spaceData
+                                    ? <>{memberCount} member{memberCount !== 1 ? 's' : ''} of <strong
+                                        className="u-intro-timeline-link"
+                                        onClick={(e) => { e.stopPropagation(); setInlinePanel({ type: 'space', spaceId: spaceObj!.id, fromIntroDetail: { ...inlinePanel } }); }}
+                                      >{spaceObj!.emoji} {spaceObj!.name}</strong> {isOpen && !hasDetailsRequested ? 'notified and reviewing' : 'notified'}</>
+                                    : <>Your request is being reviewed</>
+                                }
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Details requested */}
+                      {hasDetailsRequested && (() => {
+                        const detailsDate = new Date(req.detailsRequestedAt!);
+                        const detailsDateStr = detailsDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                        const detailsTimeStr = detailsDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+                        const detailsName = req.detailsRequestedByName;
+                        const detailsById = (req as any).detailsRequestedById as string | undefined;
+                        const detailsConn = detailsById ? connections.find(c => c.peer.id === detailsById) : undefined;
+                        return (
+                          <div className="u-intro-timeline-item u-intro-timeline-item--awaiting">
+                            <div className="u-intro-timeline-dot u-intro-timeline-dot--awaiting" />
+                            <div className="u-intro-timeline-content">
+                              <span className="u-intro-timeline-title">
+                                {isSent ? (
+                                  <>
+                                    <strong
+                                      className={detailsConn ? 'u-intro-timeline-link' : ''}
+                                      onClick={detailsConn ? (e) => { e.stopPropagation(); setInlinePanel({ type: 'connection', connectionId: detailsConn.id, fromIntroDetail: { ...inlinePanel } }); } : undefined}
+                                    >{detailsName || 'Someone from your network'}</strong>
+                                    {' '}wants to know more before making the intro
+                                  </>
+                                ) : (
+                                  <>You asked {(() => {
+                                    const requesterConn = connections.find(c => c.peer.id === req.requester.id);
+                                    return (
+                                      <strong
+                                        className={requesterConn ? 'u-intro-timeline-link' : ''}
+                                        onClick={requesterConn ? (e) => { e.stopPropagation(); setInlinePanel({ type: 'connection', connectionId: requesterConn.id, fromIntroDetail: { ...inlinePanel } }); } : undefined}
+                                      >{req.requester.name}</strong>
+                                    );
+                                  })()} for more details</>
+                                )}
+                              </span>
+                              <span className="u-intro-timeline-via">
+                                {isSent ? 'Check your email and reply to move this forward' : 'Waiting for their response'}
+                              </span>
+                              <span className="u-intro-timeline-date">{detailsDateStr}, {detailsTimeStr}</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Checked with contact(s) */}
+                      {hasCheckedWithContact && !isSent && checkedContacts.map((cc, idx) => {
+                        const checkedDate = new Date(cc.at);
+                        const checkedDateStr = checkedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                        const checkedTimeStr = checkedDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+                        const contactName = cc.name || 'your contact';
+                        return (
+                          <div key={idx} className="u-intro-timeline-item u-intro-timeline-item--awaiting">
+                            <div className="u-intro-timeline-dot u-intro-timeline-dot--awaiting" />
+                            <div className="u-intro-timeline-content">
+                              <span className="u-intro-timeline-title">
+                                You checked with <strong>{contactName}</strong> if they're open to the intro
+                              </span>
+                              <span className="u-intro-timeline-via">Waiting for their reply</span>
+                              <span className="u-intro-timeline-date">{checkedDateStr}, {checkedTimeStr}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {/* Completed */}
+                      {isDone && acceptedOffer && (() => {
+                        const doneDate = new Date(acceptedOffer.createdAt);
+                        const doneDateStr = doneDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                        const doneTimeStr = doneDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+                        const introducerConn = connections.find(c => c.peer.id === acceptedOffer.introducer.id);
+                        return (
+                          <div className="u-intro-timeline-item u-intro-timeline-item--done">
+                            <div className="u-intro-timeline-dot u-intro-timeline-dot--done" />
+                            <div className="u-intro-timeline-content">
+                              <span className="u-intro-timeline-title">
+                                <strong
+                                  className={introducerConn ? 'u-intro-timeline-link' : ''}
+                                  onClick={introducerConn ? (e) => { e.stopPropagation(); setInlinePanel({ type: 'connection', connectionId: introducerConn.id, fromIntroDetail: { ...inlinePanel } }); } : undefined}
+                                >{acceptedOffer.introducer.name}</strong>
+                                {via ? <> from {via}</> : null} made the intro
+                              </span>
+                              <span className="u-intro-timeline-date">{doneDateStr}, {doneTimeStr}</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Done without offer data */}
+                      {isDone && !acceptedOffer && (
+                        <div className="u-intro-timeline-item u-intro-timeline-item--done">
+                          <div className="u-intro-timeline-dot u-intro-timeline-dot--done" />
+                          <div className="u-intro-timeline-content">
+                            <span className="u-intro-timeline-title">Intro completed{via ? <> by {via}</> : null}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Declined */}
+                      {isDeclined && (() => {
+                        const declinerId = nq.connectionPeerId as string | undefined;
+                        const declinerConn = declinerId ? connections.find(c => c.peer.id === declinerId) : undefined;
+                        return (
+                          <div className="u-intro-timeline-item u-intro-timeline-item--declined">
+                            <div className="u-intro-timeline-dot u-intro-timeline-dot--declined" />
+                            <div className="u-intro-timeline-content">
+                              <span className="u-intro-timeline-title">
+                                {isAdminRejected
+                                  ? 'Not approved by space admin'
+                                  : req.declinedByName
+                                    ? <>Declined by <strong
+                                        className={declinerConn ? 'u-intro-timeline-link' : ''}
+                                        onClick={declinerConn ? (e) => { e.stopPropagation(); setInlinePanel({ type: 'connection', connectionId: declinerConn.id, fromIntroDetail: { ...inlinePanel } }); } : undefined}
+                                      >{req.declinedByName}</strong></>
+                                    : 'Request declined'}
+                              </span>
+                              {isAdminRejected && req.adminRejectReason && (
+                                <span className="u-intro-timeline-reason">{req.adminRejectReason}</span>
+                              )}
+                              {!isAdminRejected && req.declineReason && (
+                                <span className="u-intro-timeline-reason">{req.declineReason}</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Your contacts at this company (for received requests) */}
+                  {!isSent && myContactsAtCompany.length > 0 && (
+                    <div className="u-intro-detail-section">
+                      <h4 className="u-intro-detail-label">Your contacts at {companyName}</h4>
+                      <div className="u-intro-detail-contacts">
+                        {myContactsAtCompany.map(c => (
+                          <div
+                            key={c.id}
+                            className="u-intro-detail-contact"
+                            onClick={() => setInlinePanel({ type: 'person', contact: c, company: matchedCompany, fromIntroDetail: { ...inlinePanel } })}
+                          >
+                            <PersonAvatar email={c.email} name={c.name} size={28} />
+                            <div className="u-intro-detail-contact-info">
+                              <span className="u-intro-detail-contact-name">{c.name}</span>
+                              <span className="u-intro-detail-contact-title">{c.title || c.email}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Admin review actions (only for space owner) */}
+                  {isOpen && isPendingReview && req.space && (() => {
+                    const spaceForReview = spaces.find(s => s.id === req.space!.id);
+                    if (!spaceForReview || spaceForReview.ownerId !== currentUser?.id) return null;
+                    const isRejecting = rejectingAdminRequestId === req.id;
+                    return (
+                      <>
+                        {!isRejecting && (
+                          <div className="u-intro-detail-actions">
+                            <button
+                              className="u-action-btn u-action-btn--primary"
+                              onClick={async () => {
+                                try {
+                                  await requestsApi.adminReview(req.id, 'approve');
+                                  const now = new Date().toISOString();
+                                  const updatedReq = { ...req, adminStatus: 'approved' as const, adminReviewedAt: now };
+                                  setInlinePanel(prev => prev ? { ...prev, introRequest: updatedReq as any } : prev);
+                                  setSpaceRequests(prev => {
+                                    const reqs = prev[req.space!.id] || [];
+                                    return { ...prev, [req.space!.id]: reqs.map(r => r.id === req.id ? { ...r, adminStatus: 'approved', adminReviewedAt: now } as any : r) };
+                                  });
+                                  setIntroToast('Request approved and sent to connectors');
+                                  setTimeout(() => setIntroToast(null), 3000);
+                                } catch { setIntroToast('Failed to approve'); setTimeout(() => setIntroToast(null), 3000); }
+                              }}
+                            >Approve</button>
+                            <button
+                              className="u-action-btn u-action-btn--danger"
+                              onClick={() => { setRejectingAdminRequestId(req.id); setAdminRejectReason(''); }}
+                            >Reject</button>
+                          </div>
+                        )}
+                        {isRejecting && (
+                          <div className="u-req-confirm-done">
+                            <p className="u-req-confirm-done-text">Are you sure you want to reject this request? The requester will be notified.</p>
+                            <textarea className="u-req-decline-input" placeholder="Reason (optional)" rows={2} value={adminRejectReason} onChange={e => setAdminRejectReason(e.target.value)} />
+                            <div className="u-req-confirm-done-btns">
+                              <button className="u-req-action-btn u-req-action-btn--decline-confirm" onClick={async () => {
+                                try {
+                                  const trimmedReason = adminRejectReason.trim() || null;
+                                  await requestsApi.adminReview(req.id, 'reject', trimmedReason || undefined);
+                                  const updatedReq = { ...req, status: 'declined', adminStatus: 'rejected' as const, adminRejectReason: trimmedReason };
+                                  setInlinePanel(prev => prev ? { ...prev, introRequest: updatedReq as any } : prev);
+                                  setSpaceRequests(prev => {
+                                    const reqs = prev[req.space!.id] || [];
+                                    return { ...prev, [req.space!.id]: reqs.map(r => r.id === req.id ? { ...r, status: 'declined', adminStatus: 'rejected', adminRejectReason: trimmedReason } as any : r) };
+                                  });
+                                  setRejectingAdminRequestId(null); setAdminRejectReason('');
+                                  setIntroToast('Request rejected');
+                                  setTimeout(() => setIntroToast(null), 3000);
+                                } catch { setIntroToast('Failed to reject'); setTimeout(() => setIntroToast(null), 3000); }
+                              }}>Yes, reject</button>
+                              <button className="u-intro-cancel" onClick={() => { setRejectingAdminRequestId(null); setAdminRejectReason(''); }}>Cancel</button>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
+
+                  {/* Actions */}
+                  {isOpen && (isSent || (!isPendingReview && myContactsAtCompany.length > 0)) && (
+                    <div className="u-intro-detail-actions">
+                      {isSent ? (
+                        <button
+                          className="u-action-btn u-action-btn--danger"
+                          onClick={async () => {
+                            try {
+                              await requestsApi.delete(req.id);
+                              setMyIntroRequests(prev => prev.filter(r => r.id !== req.id));
+                              if (introActionRequestId === req.id) {
+                                setIntroActionRequestId(null);
+                                setIntroActionType(null);
+                                setIntroSelectedContact(null);
+                              }
+                              setIntroToast('Request withdrawn');
+                              setTimeout(() => setIntroToast(null), 3000);
+                              setNetworkTab('intros'); setInlinePanel({ type: 'network-manage' });
+                            } catch { setIntroToast('Failed to withdraw'); setTimeout(() => setIntroToast(null), 3000); }
+                          }}
+                        >
+                          Withdraw Request
+                        </button>
+                      ) : (
+                        <>
+                          {introActionRequestId === req.id ? (
+                            <div className="u-intro-actions-row">
+                              <button
+                                className="u-action-btn"
+                                onClick={() => { setIntroActionRequestId(null); setIntroActionType(null); setIntroSelectedContact(null); }}
+                              >
+                                ← Back
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="u-intro-actions-row">
+                              <button
+                                className="u-primary-btn"
+                                onClick={() => {
+                                  setIntroActionRequestId(req.id);
+                                  setIntroActionType(null);
+                                  setIntroEmailSubject('');
+                                  setIntroEmailBody('');
+                                  setIntroSelectedContact(myContactsAtCompany.length === 1 ? myContactsAtCompany[0] : null);
+                                }}
+                              >
+                                Make Intro
+                              </button>
+                              <button
+                                className="u-action-btn"
+                                onClick={() => { setConfirmingDoneRequestId(req.id); setDecliningRequestId(null); }}
+                              >
+                                Mark Done
+                              </button>
+                              <button
+                                className="u-action-btn u-action-btn--danger"
+                                onClick={() => { setDecliningRequestId(req.id); setDeclineReason(''); setConfirmingDoneRequestId(null); }}
+                              >
+                                Decline
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Confirm decline */}
+                          {decliningRequestId === req.id && (
+                            <div className="u-req-confirm-done">
+                              <p className="u-req-confirm-done-text">Are you sure you want to decline? This will notify the requester.</p>
+                              <textarea className="u-req-decline-input" placeholder="Reason (optional, stays anonymous)" rows={2} value={declineReason} onChange={e => setDeclineReason(e.target.value)} />
+                              <div className="u-req-confirm-done-btns">
+                                <button className="u-req-action-btn u-req-action-btn--decline-confirm" onClick={async () => {
+                                  try {
+                                    await requestsApi.decline(req.id, declineReason.trim() || undefined);
+                                    setIncomingRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'declined', declineReason: declineReason.trim() || undefined, declinedByName: currentUser?.name } as typeof r : r));
+                                    setDecliningRequestId(null); setDeclineReason('');
+                                    setIntroToast('Request declined');
+                                    setTimeout(() => setIntroToast(null), 3000);
+                                    setNetworkTab('intros'); setInlinePanel({ type: 'network-manage' });
+                                  } catch { setIntroToast('Failed to decline'); setTimeout(() => setIntroToast(null), 3000); }
+                                }}>Yes, decline</button>
+                                <button className="u-intro-cancel" onClick={() => { setDecliningRequestId(null); setDeclineReason(''); }}>Cancel</button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Confirm mark done */}
+                          {confirmingDoneRequestId === req.id && (
+                            <div className="u-req-confirm-done">
+                              <p className="u-req-confirm-done-text">Are you sure they are connected? This will notify the requester that the intro is done.</p>
+                              <div className="u-req-confirm-done-btns">
+                                <button className="u-req-action-btn u-req-action-btn--done" onClick={async () => {
+                                  try {
+                                    const resp = await requestsApi.markDone(req.id);
+                                    const doneOffer = resp.offers?.length ? resp.offers[resp.offers.length - 1] : { id: '', status: 'accepted', createdAt: new Date().toISOString(), introducer: { id: currentUser?.id || '', name: currentUser?.name || '', avatar: currentUser?.avatar || null } };
+                                    setIncomingRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'accepted', offers: [...(r.offers || []), doneOffer] } as typeof r : r));
+                                    setConfirmingDoneRequestId(null);
+                                    setIntroToast('Intro marked as done!');
+                                    setTimeout(() => setIntroToast(null), 3000);
+                                    setNetworkTab('intros'); setInlinePanel({ type: 'network-manage' });
+                                  } catch { setIntroToast('Failed to update'); setTimeout(() => setIntroToast(null), 3000); }
+                                }}>Yes, they're connected</button>
+                                <button className="u-intro-cancel" onClick={() => setConfirmingDoneRequestId(null)}>Cancel</button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Expanded sub-options (contact pick or action cards) */}
+                          {introActionRequestId === req.id && !introActionType && (
+                            <div className="u-intro-suboptions">
+                              {myContactsAtCompany.length > 1 && !introSelectedContact ? (
+                                <div className="u-intro-contact-pick">
+                                  <span className="u-intro-contact-pick-label">Who do you want to introduce?</span>
+                                  {myContactsAtCompany.map(c => (
+                                    <button key={c.id} className="u-intro-contact-pick-item" onClick={() => setIntroSelectedContact(c)}>
+                                      <PersonAvatar email={c.email} name={c.name} size={28} />
+                                      <div className="u-intro-contact-pick-info">
+                                        <span className="u-intro-contact-pick-name">{c.name}</span>
+                                        {c.title && <span className="u-intro-contact-pick-title">{c.title}</span>}
+                                      </div>
+                                    </button>
+                                  ))}
+                                </div>
+                              ) : (() => {
+                                const hasContact = !!(introSelectedContact || myContactsAtCompany[0]);
+                                const cn = introSelectedContact?.name || myContactsAtCompany[0]?.name || 'your contact';
+                                const cf = cn.split(' ')[0];
+                                const rn = req.requester.name;
+                                const rf = rn.split(' ')[0];
+                                return (
+                                  <div className="u-intro-option-cards">
+                                    {hasContact && (
+                                    <button className="u-intro-option-card u-intro-option-card--primary" onClick={() => {
+                                      setIntroActionType('make-intro');
+                                      setIntroEmailSubject(`Introduction: ${rn} ↔ ${cn} (${companyName})`);
+                                      setIntroEmailBody(`Hi ${cf} and ${rf},\n\nI'd love to connect you two.\n\n${cf} — ${rf} is interested in connecting with someone at ${companyName}, and I thought you'd be a great person to talk to.\n\n${rf} — ${cf} is at ${companyName}. I think you'll have a lot to discuss.\n\nFeel free to reply all to continue the conversation right here in this thread.\n\nBest,\n${currentUser?.name || ''}`);
+                                    }}>
+                                      <span className="u-intro-option-icon">{companyDomain ? <CompanyLogo domain={companyDomain} name={companyName} size={20} /> : '🤝'}</span>
+                                      <div className="u-intro-option-text">
+                                        <span className="u-intro-option-label">Connect {rf} with {cf} at {companyName}</span>
+                                        <span className="u-intro-option-desc">Email both parties with a warm introduction</span>
+                                      </div>
+                                    </button>
+                                    )}
+                                    <button className="u-intro-option-card" onClick={() => {
+                                      setIntroActionType('ask-details');
+                                      setIntroEmailSubject(`About your intro request to ${companyName}`);
+                                      setIntroEmailBody(`Hi ${rf},\n\nI saw your request for an intro to someone at ${companyName}.${hasContact ? ` I know ${cf} there and may be able to help.` : ''}\n\nBefore I reach out, could you share a bit more about what you're looking for? For example:\n- What's the context for this intro?\n- What would you like to discuss with them?\n- Any specific goals or topics?\n\nJust want to make sure the intro is as useful as possible for both of you. Reply to this email and let me know.\n\nBest,\n${currentUser?.name || ''}`);
+                                    }}>
+                                      <span className="u-intro-option-icon">💬</span>
+                                      <div className="u-intro-option-text">
+                                        <span className="u-intro-option-label">Ask {rf} for more context</span>
+                                        <span className="u-intro-option-desc">Email {rn} to clarify what they're looking for</span>
+                                      </div>
+                                    </button>
+                                    {hasContact && (
+                                    <button className="u-intro-option-card" onClick={() => {
+                                      setIntroActionType('ask-permission');
+                                      setIntroEmailSubject(`Would you be open to an intro? (${companyName})`);
+                                      setIntroEmailBody(`Hi ${cf},\n\nI have someone in my network who's looking to connect with someone at ${companyName}. I thought of you and wanted to check — would you be open to an introduction?\n\nNo pressure at all — just reply to this email and let me know.\n\nBest,\n${currentUser?.name || ''}`);
+                                    }}>
+                                      <span className="u-intro-option-icon">{companyDomain ? <CompanyLogo domain={companyDomain} name={companyName} size={20} /> : '✋'}</span>
+                                      <div className="u-intro-option-text">
+                                        <span className="u-intro-option-label">Check with {cf} at {companyName}</span>
+                                        <span className="u-intro-option-desc">Email {cn} to ask if they're open to the intro</span>
+                                      </div>
+                                    </button>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
+
+                          {/* Email composer */}
+                          {introActionRequestId === req.id && introActionType && (() => {
+                            const contact = introSelectedContact || myContactsAtCompany[0];
+                            const recipientLabel = introActionType === 'ask-details'
+                              ? `To: ${req.requester.email || req.requester.name}`
+                              : introActionType === 'ask-permission' && contact
+                              ? `To: ${contact.email || contact.name}`
+                              : `To: ${contact?.email || ''}, ${req.requester.email || ''}`;
+                            const ccLabel = `CC: ${currentUser?.email || 'you'}`;
+                            return (
+                            <div className="u-intro-email">
+                              <div className="u-intro-email-recipients">
+                                <span className="u-intro-email-recipient">{recipientLabel}</span>
+                                <span className="u-intro-email-cc">{ccLabel}</span>
+                              </div>
+                              <label className="u-intro-email-label">Subject</label>
+                              <input
+                                className="u-intro-email-subject"
+                                value={introEmailSubject}
+                                onChange={e => setIntroEmailSubject(e.target.value)}
+                              />
+                              <label className="u-intro-email-label">Message</label>
+                              <textarea
+                                className="u-intro-email-body"
+                                rows={8}
+                                value={introEmailBody}
+                                onChange={e => setIntroEmailBody(e.target.value)}
+                              />
+                              <div className="u-intro-email-actions">
+                                <button
+                                  className="u-intro-email-send"
+                                  disabled={introSending}
+                                  onClick={async () => {
+                                    if (introSending) return;
+                                    if ((introActionType === 'make-intro' || introActionType === 'ask-permission') && !contact) {
+                                      setIntroToast('No contact selected');
+                                      setTimeout(() => setIntroToast(null), 3000);
+                                      return;
+                                    }
+                                    setIntroSending(true);
+                                    try {
+                                      if (introActionType === 'make-intro' && contact) {
+                                        await emailApi.sendDoubleIntro({
+                                          requesterEmail: req.requester.email || '',
+                                          requesterName: req.requester.name,
+                                          contactEmail: contact.email,
+                                          contactName: contact.name,
+                                          targetCompany: companyName,
+                                        });
+                                        const offerResp = await offersApi.create({ requestId: req.id, message: `Intro to ${contact.name}` });
+                                        const newOffer = { id: offerResp.id, status: offerResp.status, createdAt: new Date().toISOString(), introducer: { id: currentUser?.id || '', name: currentUser?.name || '', avatar: currentUser?.avatar || null } };
+                                        setIncomingRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'accepted', offers: [...(r.offers || []), newOffer] } as typeof r : r));
+                                        if (inlinePanel?.type === 'intro-detail' && inlinePanel.introRequest?.id === req.id) {
+                                          setInlinePanel({ ...inlinePanel, introRequest: { ...inlinePanel.introRequest, status: 'accepted', offers: [...(inlinePanel.introRequest.offers || []), newOffer] } });
+                                        }
+                                      } else if (introActionType === 'ask-details') {
+                                        await emailApi.sendContact({
+                                          recipientEmail: req.requester.email || '',
+                                          recipientName: req.requester.name,
+                                          subject: introEmailSubject,
+                                          body: introEmailBody,
+                                          requestId: req.id,
+                                          action: 'ask-details',
+                                        });
+                                        const now = new Date().toISOString();
+                                        setIncomingRequests(prev => prev.map(r => r.id === req.id ? { ...r, detailsRequestedAt: now, detailsRequestedById: currentUser?.id, detailsRequestedByName: currentUser?.name } as typeof r : r));
+                                        if (inlinePanel?.type === 'intro-detail' && inlinePanel.introRequest?.id === req.id) {
+                                          setInlinePanel({ ...inlinePanel, introRequest: { ...inlinePanel.introRequest, detailsRequestedAt: now, detailsRequestedById: currentUser?.id, detailsRequestedByName: currentUser?.name } });
+                                        }
+                                      } else if (introActionType === 'ask-permission' && contact) {
+                                        await emailApi.sendContact({
+                                          recipientEmail: contact.email,
+                                          recipientName: contact.name,
+                                          subject: introEmailSubject,
+                                          body: introEmailBody,
+                                          requestId: req.id,
+                                          action: 'ask-permission',
+                                          contactName: contact.name,
+                                        });
+                                        const now = new Date().toISOString();
+                                        const newCheck = { at: now, name: contact.name, byId: currentUser?.id || '' };
+                                        setIncomingRequests(prev => prev.map(r => {
+                                          if (r.id !== req.id) return r;
+                                          const prevChecks = Array.isArray((r as any).checkedWithContacts) ? (r as any).checkedWithContacts : [];
+                                          return { ...r, checkedWithContactAt: now, checkedWithContactName: contact.name, checkedWithContactById: currentUser?.id, checkedWithContacts: [...prevChecks, newCheck] } as typeof r;
+                                        }));
+                                        if (inlinePanel?.type === 'intro-detail' && inlinePanel.introRequest?.id === req.id) {
+                                          const prevChecks = Array.isArray(inlinePanel.introRequest.checkedWithContacts) ? inlinePanel.introRequest.checkedWithContacts : [];
+                                          setInlinePanel({ ...inlinePanel, introRequest: { ...inlinePanel.introRequest, checkedWithContactAt: now, checkedWithContactName: contact.name, checkedWithContactById: currentUser?.id, checkedWithContacts: [...prevChecks, newCheck] } });
+                                        }
+                                      }
+                                      setIntroActionRequestId(null);
+                                      setIntroActionType(null);
+                                      setIntroSelectedContact(null);
+                                      setIntroToast('Email sent!');
+                                      setTimeout(() => setIntroToast(null), 3000);
+                                    } catch (err) {
+                                      console.error('Failed to send intro email:', err);
+                                      setIntroToast('Failed to send email');
+                                      setTimeout(() => setIntroToast(null), 3000);
+                                    } finally {
+                                      setIntroSending(false);
+                                    }
+                                  }}
+                                >
+                                  {introSending ? 'Sending...' : 'Send with Introo'}
+                                </button>
+                                {introActionType !== 'ask-details' && (
+                                  <button
+                                    className="u-intro-mailto-btn"
+                                    title="Status won't be tracked automatically when using your email app"
+                                    onClick={() => {
+                                      const toEmail = introActionType === 'ask-permission' && contact
+                                        ? (contact.email || '')
+                                        : [contact?.email, req.requester.email].filter(Boolean).join(',');
+                                      const cc = currentUser?.email || '';
+                                      const mailto = `mailto:${toEmail}?cc=${encodeURIComponent(cc)}&subject=${encodeURIComponent(introEmailSubject)}&body=${encodeURIComponent(introEmailBody)}`;
+                                      window.open(mailto, '_blank');
+                                      setIntroToast('Opened in email app — status won\'t update automatically');
+                                      setTimeout(() => setIntroToast(null), 4000);
+                                    }}
+                                  >
+                                    Open in email app
+                                  </button>
+                                )}
+                                <button className="u-intro-cancel" onClick={() => { setIntroActionType(null); }}>Back</button>
+                              </div>
+                            </div>
+                            );
+                          })()}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {inlinePanel.type === 'intro-request' && inlinePanel.company && (() => {
               const co = inlinePanel.company;
@@ -6102,8 +7173,9 @@ export function AIHomePage() {
                             companyDomain: co.domain,
                             companyId: co.id,
                           };
+                          let created: any;
                           if (selected?.type === 'space') {
-                            await requestsApi.create({
+                            created = await requestsApi.create({
                               rawText: introRequestText.trim(),
                               spaceId: selected.id,
                               normalizedQuery,
@@ -6111,15 +7183,35 @@ export function AIHomePage() {
                           } else if (selected?.type === 'connection') {
                             normalizedQuery.connectionPeerId = selected.peerId;
                             normalizedQuery.connectionPeerName = selected.label;
-                            await requestsApi.create({
+                            created = await requestsApi.create({
                               rawText: introRequestText.trim(),
                               connectionPeerId: selected.peerId,
                               normalizedQuery,
                             });
                           }
-                          setIntroRequestSent(true);
                           refreshIntroData();
                           fetchSpacesList();
+                          if (created) {
+                            setNetworkTab('intros');
+                            setInlinePanel({
+                              type: 'intro-detail',
+                              company: co,
+                              introRequest: {
+                                id: created.id,
+                                rawText: created.rawText,
+                                status: created.status,
+                                createdAt: created.createdAt,
+                                direction: 'sent' as const,
+                                normalizedQuery: created.normalizedQuery || normalizedQuery,
+                                requester: created.requester || { id: currentUser?.id || '', name: currentUser?.name || '', avatar: currentUser?.avatar || null },
+                                space: created.space || null,
+                                connectionPeerName: selected?.type === 'connection' ? selected.label : undefined,
+                                offers: created.offers || [],
+                              },
+                            });
+                            setIntroToast('Request sent!');
+                            setTimeout(() => setIntroToast(null), 3000);
+                          }
                         } catch (err) {
                           console.error('Failed to send intro request:', err);
                           alert('Failed to send request. Please try again.');

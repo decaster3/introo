@@ -30,6 +30,10 @@ model User {
   contacts           Contact[]
   introOffers        IntroOffer[]        @relation("Introducer")
   introRequests      IntroRequest[]      @relation("Requester")
+  declinedRequests   IntroRequest[]      @relation("Decliner")
+  detailsRequestedFor IntroRequest[]    @relation("DetailsRequester")
+  contactCheckedFor  IntroRequest[]    @relation("ContactChecker")
+  adminReviewedRequests IntroRequest[] @relation("AdminReviewer")
   spaceMemberships   SpaceMember[]
   ownedSpaces        Space[]             @relation("SpaceOwner")
   relationships      Relationship[]
@@ -71,7 +75,8 @@ model Space {
   description String?
   emoji       String         @default("🫛")
   isPrivate   Boolean        @default(true)
-  inviteCode  String         @unique @default(cuid())
+  inviteCode      String         @unique @default(cuid())
+  introReviewMode String         @default("end_to_end")
   ownerId     String
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
@@ -240,12 +245,28 @@ model IntroRequest {
   bidAmount       Float        @default(0)
   currency        String       @default("USD")
   status          String       @default("open")
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
-  spaceId         String?      @map("podId")
-  offers          IntroOffer[]
-  space           Space?       @relation(fields: [spaceId], references: [id])
-  requester       User         @relation("Requester", fields: [requesterId], references: [id], onDelete: Cascade)
+  declineReason          String?
+  declinedById           String?
+  detailsRequestedAt     DateTime?
+  detailsRequestedById   String?
+  checkedWithContactAt   DateTime?
+  checkedWithContactName String?
+  checkedWithContactById String?
+  checkedWithContacts    Json?
+  adminStatus            String?
+  adminReviewedById      String?
+  adminReviewedAt        DateTime?
+  adminRejectReason      String?
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+  spaceId                String?      @map("podId")
+  offers                 IntroOffer[]
+  space                  Space?       @relation(fields: [spaceId], references: [id])
+  requester              User         @relation("Requester", fields: [requesterId], references: [id], onDelete: Cascade)
+  declinedBy             User?        @relation("Decliner", fields: [declinedById], references: [id], onDelete: SetNull)
+  detailsRequestedBy     User?        @relation("DetailsRequester", fields: [detailsRequestedById], references: [id], onDelete: SetNull)
+  checkedWithContactBy   User?        @relation("ContactChecker", fields: [checkedWithContactById], references: [id], onDelete: SetNull)
+  adminReviewedBy        User?        @relation("AdminReviewer", fields: [adminReviewedById], references: [id], onDelete: SetNull)
 
   @@index([requesterId])
   @@index([spaceId], map: "intro_requests_podId_idx")

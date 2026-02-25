@@ -53,8 +53,34 @@ router.post('/', authMiddleware, validate(schemas.createOffer), async (req, res)
       return;
     }
 
+    if (request.adminStatus === 'pending_review') {
+      res.status(400).json({ error: 'Request is still pending admin review' });
+      return;
+    }
+
     if (request.requesterId === userId) {
       res.status(400).json({ error: 'Cannot offer intro to your own request' });
+      return;
+    }
+
+    // Verify user is authorized (space member or connection peer)
+    const offerNq = (request.normalizedQuery as Record<string, unknown>) || {};
+    const offerConnPeerId = offerNq.connectionPeerId as string | undefined;
+    if (request.spaceId) {
+      const membership = await prisma.spaceMember.findUnique({
+        where: { spaceId_userId: { spaceId: request.spaceId, userId } },
+      });
+      if (!membership || membership.status !== 'approved') {
+        res.status(403).json({ error: 'You must be a member of the space' });
+        return;
+      }
+    } else if (offerConnPeerId) {
+      if (offerConnPeerId !== userId) {
+        res.status(403).json({ error: 'You are not authorized to make an offer on this request' });
+        return;
+      }
+    } else {
+      res.status(403).json({ error: 'You are not authorized to make an offer on this request' });
       return;
     }
 

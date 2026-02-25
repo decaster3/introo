@@ -64,9 +64,6 @@ export function ProfilePanel({
 
   return (
     <div className="u-panel-space">
-      <button className="u-panel-breadcrumb" onClick={() => onNavigate({ type: 'network-manage' })}>
-        ← Network
-      </button>
       <div className="u-panel-space-hero">
         <PersonAvatar email={currentUser.email} name={currentUser.name} avatarUrl={currentUser.avatar} size={56} />
         <div>

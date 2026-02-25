@@ -117,6 +117,8 @@ export const spacesApi = {
   removeMember: (spaceId: string, memberId: string) => request<{ success: boolean }>(`/api/spaces/${spaceId}/members/${memberId}`, {
     method: 'DELETE',
   }),
+  update: (id: string, data: { name?: string; description?: string; emoji?: string; isPrivate?: boolean; introReviewMode?: string }) =>
+    request<Space>(`/api/spaces/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
 };
 
 // Enrichment
@@ -189,6 +191,11 @@ export const requestsApi = {
   markDone: (id: string) =>
     request<IntroRequestResponse>(`/api/requests/${id}/done`, {
       method: 'PATCH',
+    }),
+  adminReview: (id: string, action: 'approve' | 'reject', reason?: string) =>
+    request<IntroRequestResponse>(`/api/requests/${id}/admin-review`, {
+      method: 'PATCH',
+      body: JSON.stringify({ action, reason }),
     }),
 };
 
@@ -284,7 +291,7 @@ export const emailApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  sendContact: (data: { recipientEmail: string; recipientName?: string; subject: string; body: string; requestId?: string; action?: string }) =>
+  sendContact: (data: { recipientEmail: string; recipientName?: string; subject: string; body: string; requestId?: string; action?: string; contactName?: string }) =>
     request<{ success: boolean; emailId?: string }>('/api/email/contact', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -306,8 +313,22 @@ export interface IntroRequestResponse {
   status: string;
   spaceId: string | null;
   createdAt: string;
-  requester: { id: string; name: string; avatar: string | null };
+  declineReason?: string | null;
+  declinedByName?: string;
+  detailsRequestedAt?: string | null;
+  detailsRequestedById?: string;
+  detailsRequestedByName?: string;
+  checkedWithContactAt?: string | null;
+  checkedWithContactName?: string;
+  checkedWithContactById?: string;
+  checkedWithContacts?: { at: string; name: string | null; byId: string }[];
+  adminStatus?: string | null;
+  adminReviewedAt?: string | null;
+  adminRejectReason?: string | null;
+  requester: { id: string; name: string; email?: string; avatar: string | null };
   space: { id: string; name: string; emoji: string } | null;
+  connectionPeerName?: string;
+  offers?: { id: string; status: string; createdAt: string; introducer: { id: string; name: string; avatar: string | null } }[];
 }
 
 // Additional types for API responses

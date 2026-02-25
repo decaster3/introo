@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { sendNotificationEmail, sendSpaceInviteEmail } from '../services/email.js';
+import { notifyConnectors } from '../lib/notifyConnectors.js';
 import prisma from '../lib/prisma.js';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -159,19 +160,79 @@ router.get('/:id', async (req, res) => {
           .filter(Boolean)
       );
 
-      space.requests = space.requests.filter(r =>
-        r.requesterId === userId ||
-        r.offers.some(o => o.introducerId === userId) ||
-        notifiedRequestIds.has(r.id)
-      );
+      space.requests = space.requests.filter(r => {
+        if (r.adminStatus === 'pending_review' && r.requesterId !== userId) return false;
+        return r.requesterId === userId ||
+          r.offers.some(o => o.introducerId === userId) ||
+          notifiedRequestIds.has(r.id);
+      });
     }
 
-    // If user is owner, also include pending members count
+    // If user is owner, also include pending members count and connector info for pending_review requests
     if (isOwner) {
-      const pendingCount = await prisma.spaceMember.count({
-        where: { spaceId: id, status: 'pending' },
+      const pendingReviewRequests = space.requests.filter(r => r.adminStatus === 'pending_review');
+
+      const [pendingCount, allMembers] = await Promise.all([
+        prisma.spaceMember.count({ where: { spaceId: id, status: 'pending' } }),
+        pendingReviewRequests.length > 0
+          ? prisma.spaceMember.findMany({
+              where: { spaceId: id, status: 'approved' },
+              select: { userId: true, user: { select: { id: true, name: true } } },
+            })
+          : Promise.resolve([]),
+      ]);
+
+      // Resolve company domains to IDs in batch
+      const domainsToResolve = new Set<string>();
+      for (const r of pendingReviewRequests) {
+        const nq = (r.normalizedQuery as Record<string, unknown>) || {};
+        if (!nq.companyId && nq.companyDomain) domainsToResolve.add(nq.companyDomain as string);
+      }
+      const domainToId = new Map<string, string>();
+      if (domainsToResolve.size > 0) {
+        const companies = await prisma.company.findMany({
+          where: { domain: { in: Array.from(domainsToResolve) } },
+          select: { id: true, domain: true },
+        });
+        companies.forEach(c => domainToId.set(c.domain, c.id));
+      }
+
+      // Collect all company IDs we need contacts for
+      const companyIds = new Set<string>();
+      for (const r of pendingReviewRequests) {
+        const nq = (r.normalizedQuery as Record<string, unknown>) || {};
+        const cid = (nq.companyId as string) || domainToId.get(nq.companyDomain as string) || '';
+        if (cid) companyIds.add(cid);
+      }
+
+      // Fetch all relevant contacts in one query
+      const memberUserIds = allMembers.map(m => m.userId);
+      const allContacts = companyIds.size > 0 && memberUserIds.length > 0
+        ? await prisma.contact.findMany({
+            where: { userId: { in: memberUserIds }, companyId: { in: Array.from(companyIds) }, isApproved: true },
+            select: { userId: true, name: true, companyId: true },
+          })
+        : [];
+
+      const enrichedRequests = space.requests.map((r) => {
+        if (r.adminStatus !== 'pending_review') return r;
+        const nq = (r.normalizedQuery as Record<string, unknown>) || {};
+        const resolvedCompanyId = (nq.companyId as string) || domainToId.get(nq.companyDomain as string) || '';
+        if (!resolvedCompanyId) return { ...r, potentialConnectors: [] };
+
+        const relevantContacts = allContacts.filter(c => c.companyId === resolvedCompanyId && c.userId !== r.requesterId);
+        const connectorMap = new Map<string, { id: string; name: string; contacts: string[] }>();
+        for (const c of relevantContacts) {
+          const member = allMembers.find(m => m.userId === c.userId);
+          if (!member) continue;
+          const existing = connectorMap.get(c.userId);
+          if (existing) { existing.contacts.push(c.name || 'Unknown'); }
+          else { connectorMap.set(c.userId, { id: c.userId, name: member.user.name || 'Unknown', contacts: [c.name || 'Unknown'] }); }
+        }
+        return { ...r, potentialConnectors: Array.from(connectorMap.values()) };
       });
-      res.json({ ...space, pendingCount });
+
+      res.json({ ...space, requests: enrichedRequests, pendingCount });
       return;
     }
 
@@ -241,7 +302,7 @@ router.patch('/:id', async (req, res) => {
   try {
     const userId = (req as AuthenticatedRequest).user!.id;
     const { id } = req.params;
-    const { name, description, emoji, isPrivate } = req.body;
+    const { name, description, emoji, isPrivate, introReviewMode } = req.body;
 
     // Check ownership
     const space = await prisma.space.findFirst({
@@ -261,6 +322,10 @@ router.patch('/:id', async (req, res) => {
       res.status(400).json({ error: 'Description is too long (max 1000 characters)' });
       return;
     }
+    if (introReviewMode && !['end_to_end', 'admin_review'].includes(introReviewMode)) {
+      res.status(400).json({ error: 'Invalid intro review mode' });
+      return;
+    }
 
     const updated = await prisma.space.update({
       where: { id },
@@ -269,6 +334,7 @@ router.patch('/:id', async (req, res) => {
         description: description?.trim(),
         emoji: emoji || space.emoji,
         isPrivate: isPrivate ?? space.isPrivate,
+        introReviewMode: introReviewMode ?? space.introReviewMode,
       },
       include: {
         owner: {
@@ -284,6 +350,70 @@ router.patch('/:id', async (req, res) => {
         },
       },
     });
+
+    // If switching to end_to_end, auto-approve all pending_review requests and notify connectors
+    if (introReviewMode === 'end_to_end') {
+      const pendingRequests = await prisma.introRequest.findMany({
+        where: { spaceId: id, adminStatus: 'pending_review', status: 'open' },
+        include: {
+          requester: { select: { id: true, name: true } },
+          space: { select: { id: true, name: true, emoji: true } },
+        },
+      });
+
+      if (pendingRequests.length > 0) {
+        await prisma.introRequest.updateMany({
+          where: { spaceId: id, adminStatus: 'pending_review', status: 'open' },
+          data: { adminStatus: 'approved', adminReviewedById: userId, adminReviewedAt: new Date() },
+        });
+
+        for (const pr of pendingRequests) {
+          const nq = (pr.normalizedQuery as Record<string, unknown>) || {};
+          const companyName = (nq.companyName as string) || 'a company';
+          const spaceName = pr.space?.name || 'your space';
+
+          // Notify requester that their request was approved
+          try {
+            const approvedNotif = { type: 'intro_approved', title: `Approved: ${companyName}`, body: `Your intro request to ${companyName} in ${spaceName} was approved. Space members are now reviewing it.` };
+            await prisma.notification.create({
+              data: {
+                userId: pr.requesterId,
+                ...approvedNotif,
+                data: {
+                  requestId: pr.id,
+                  companyName,
+                  companyDomain: (nq.companyDomain as string) || null,
+                  spaceId: id,
+                  spaceName,
+                  spaceEmoji: pr.space?.emoji || null,
+                },
+              },
+            });
+            sendNotificationEmail(pr.requesterId, approvedNotif).catch(() => {});
+          } catch (err) {
+            console.error('Failed to notify requester for auto-approved request:', err);
+          }
+
+          // Notify connectors
+          try {
+            await notifyConnectors({
+              requestId: pr.id,
+              spaceId: id,
+              requesterId: pr.requesterId,
+              requesterName: pr.requester.name || 'Someone',
+              rawText: pr.rawText,
+              companyId: nq.companyId as string,
+              companyDomain: nq.companyDomain as string,
+              companyName,
+              spaceName,
+              spaceEmoji: pr.space?.emoji,
+            });
+          } catch (err) {
+            console.error('Failed to notify connectors for auto-approved request:', err);
+          }
+        }
+      }
+    }
 
     res.json(updated);
   } catch (error: unknown) {

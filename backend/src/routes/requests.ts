@@ -3,6 +3,7 @@ import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { validate, schemas } from '../middleware/validation.js';
 import { getPaginationParams, createPaginatedResponse } from '../lib/pagination.js';
 import { sendNotificationEmail } from '../services/email.js';
+import { notifyConnectors } from '../lib/notifyConnectors.js';
 import prisma from '../lib/prisma.js';
 
 const router = Router();
@@ -16,11 +17,14 @@ router.get('/user/incoming', authMiddleware, async (req, res) => {
     const requests = await prisma.introRequest.findMany({
       where: {
         normalizedQuery: { path: ['connectionPeerId'], equals: userId },
-        requesterId: { not: userId }, // not my own requests
+        requesterId: { not: userId },
       },
       include: {
         requester: {
           select: { id: true, name: true, avatar: true, email: true },
+        },
+        space: {
+          select: { id: true, name: true, emoji: true },
         },
         offers: {
           include: {
@@ -29,11 +33,31 @@ router.get('/user/incoming', authMiddleware, async (req, res) => {
             },
           },
         },
+        declinedBy: {
+          select: { id: true, name: true },
+        },
+        detailsRequestedBy: {
+          select: { id: true, name: true },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    res.json(requests);
+    const enriched = await Promise.all(requests.map(async (r) => {
+      const nq = (r.normalizedQuery as Record<string, unknown>) || {};
+      const connPeerId = nq.connectionPeerId as string | undefined;
+      let connectionPeerName: string | undefined;
+      if (connPeerId) {
+        const peer = await prisma.user.findUnique({ where: { id: connPeerId }, select: { name: true } });
+        connectionPeerName = peer?.name || undefined;
+      }
+      const declinedByName = r.declinedBy?.name || undefined;
+      const detailsRequestedByName = r.detailsRequestedBy?.name || undefined;
+      const detailsRequestedById = r.detailsRequestedById || undefined;
+      return { ...r, connectionPeerName, declinedByName, detailsRequestedByName, detailsRequestedById, declinedBy: undefined, detailsRequestedBy: undefined };
+    }));
+
+    res.json(enriched);
   } catch (error: unknown) {
     console.error('Error fetching incoming requests:', error);
     res.status(500).json({ error: 'Failed to fetch incoming requests' });
@@ -48,6 +72,12 @@ router.get('/user/mine', authMiddleware, async (req, res) => {
     const requests = await prisma.introRequest.findMany({
       where: { requesterId: userId },
       include: {
+        requester: {
+          select: { id: true, name: true, avatar: true },
+        },
+        space: {
+          select: { id: true, name: true, emoji: true },
+        },
         offers: {
           include: {
             introducer: {
@@ -55,23 +85,52 @@ router.get('/user/mine', authMiddleware, async (req, res) => {
             },
           },
         },
+        declinedBy: {
+          select: { id: true, name: true },
+        },
+        detailsRequestedBy: {
+          select: { id: true, name: true },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    res.json(requests);
+    const enriched = await Promise.all(requests.map(async (r) => {
+      const nq = (r.normalizedQuery as Record<string, unknown>) || {};
+      const connPeerId = nq.connectionPeerId as string | undefined;
+      let connectionPeerName: string | undefined;
+      if (connPeerId) {
+        const peer = await prisma.user.findUnique({ where: { id: connPeerId }, select: { name: true } });
+        connectionPeerName = peer?.name || undefined;
+      }
+      // For Space requests, hide who declined (privacy). For 1-1, include the name.
+      // Details requester name is always shown (they actively engaged with the request).
+      const declinedByName = (r.declinedBy && !r.spaceId) ? r.declinedBy.name : undefined;
+      const detailsRequestedByName = r.detailsRequestedBy?.name || undefined;
+      const detailsRequestedById = r.detailsRequestedById || undefined;
+      return { ...r, connectionPeerName, declinedByName, detailsRequestedByName, detailsRequestedById, declinedBy: undefined, detailsRequestedBy: undefined };
+    }));
+
+    res.json(enriched);
   } catch (error: unknown) {
     res.status(500).json({ error: 'Failed to fetch requests' });
   }
 });
 
-// Get all open requests (with pagination)
+// Get requests relevant to the current user (with pagination)
 router.get('/', authMiddleware, async (req, res) => {
   try {
+    const userId = (req as AuthenticatedRequest).user!.id;
     const pagination = getPaginationParams(req);
     const { status } = req.query;
-    
-    const where: Record<string, unknown> = {};
+
+    const where: Record<string, unknown> = {
+      OR: [
+        { requesterId: userId },
+        { normalizedQuery: { path: ['connectionPeerId'], equals: userId } },
+        { space: { members: { some: { userId, status: 'approved' } } } },
+      ],
+    };
     if (status && typeof status === 'string') {
       where.status = status;
     }
@@ -168,6 +227,7 @@ router.post('/', authMiddleware, validate(schemas.createRequest), async (req, re
     const { rawText, normalizedQuery, bidAmount, currency, spaceId, connectionPeerId } = req.body;
 
     // If spaceId is provided, verify user is an approved member of the space
+    let spaceData: { introReviewMode: string; ownerId: string } | null = null;
     if (spaceId) {
       const membership = await prisma.spaceMember.findUnique({
         where: { spaceId_userId: { spaceId, userId } },
@@ -176,7 +236,15 @@ router.post('/', authMiddleware, validate(schemas.createRequest), async (req, re
         res.status(403).json({ error: 'You must be an approved member of this space to create a request' });
         return;
       }
+      const space = await prisma.space.findUnique({
+        where: { id: spaceId },
+        select: { introReviewMode: true, ownerId: true },
+      });
+      spaceData = space;
     }
+
+    const isAdminReview = spaceData?.introReviewMode === 'admin_review';
+    const isOwnerRequest = spaceData?.ownerId === userId;
 
     // Merge connectionPeerId into normalizedQuery so we can query it later
     const mergedQuery = { ...(normalizedQuery || {}), ...(connectionPeerId ? { connectionPeerId } : {}) };
@@ -190,6 +258,8 @@ router.post('/', authMiddleware, validate(schemas.createRequest), async (req, re
         currency: currency || 'USD',
         status: 'open',
         spaceId: spaceId || null,
+        adminStatus: isAdminReview ? (isOwnerRequest ? 'approved' : 'pending_review') : null,
+        ...(isAdminReview && isOwnerRequest ? { adminReviewedById: userId, adminReviewedAt: new Date() } : {}),
       },
       include: {
         requester: {
@@ -201,83 +271,52 @@ router.post('/', authMiddleware, validate(schemas.createRequest), async (req, re
       },
     });
 
-    // Create notifications ONLY for connectors — space members who have
-    // approved contacts at the target company (not all space members).
-    if (spaceId) {
+    // For admin_review spaces, notify only the space owner (unless owner created the request)
+    if (spaceId && isAdminReview && spaceData && !isOwnerRequest) {
       try {
-        const companyDomain = (normalizedQuery as Record<string, unknown>)?.companyDomain as string;
-        const companyId = (normalizedQuery as Record<string, unknown>)?.companyId as string;
         const companyName = (normalizedQuery as Record<string, unknown>)?.companyName as string || 'a company';
         const requesterName = request.requester.name || 'Someone';
         const spaceName = request.space?.name || 'your space';
-
-        // Get all approved space members except the requester
-        const spaceMembers = await prisma.spaceMember.findMany({
-          where: {
-            spaceId,
-            status: 'approved',
-            userId: { not: userId },
+        const reviewNotif = { type: 'intro_review', title: `Review request: ${companyName}`, body: `${requesterName} requested an intro to ${companyName} in ${spaceName}. This request needs your approval.` };
+        await prisma.notification.create({
+          data: {
+            userId: spaceData.ownerId,
+            ...reviewNotif,
+            data: {
+              requestId: request.id,
+              spaceId,
+              spaceName,
+              spaceEmoji: request.space?.emoji || null,
+              companyName,
+              requesterId: userId,
+              requesterName,
+              rawText,
+            },
           },
-          select: { userId: true },
         });
+        sendNotificationEmail(spaceData.ownerId, reviewNotif).catch(() => {});
+      } catch (notifError) {
+        console.error('Failed to create admin review notification:', notifError);
+      }
+    }
 
-        const memberUserIds = spaceMembers.map(m => m.userId);
-
-        if (memberUserIds.length > 0) {
-          // Find which of those members actually have approved contacts at the target company
-          const connectorIds = new Set<string>();
-
-          if (companyId) {
-            const contacts = await prisma.contact.findMany({
-              where: {
-                userId: { in: memberUserIds },
-                companyId,
-                isApproved: true,
-              },
-              select: { userId: true },
-            });
-            contacts.forEach(c => connectorIds.add(c.userId));
-          } else if (companyDomain) {
-            // Fallback: match by company domain
-            const company = await prisma.company.findUnique({ where: { domain: companyDomain } });
-            if (company) {
-              const contacts = await prisma.contact.findMany({
-                where: {
-                  userId: { in: memberUserIds },
-                  companyId: company.id,
-                  isApproved: true,
-                },
-                select: { userId: true },
-              });
-              contacts.forEach(c => connectorIds.add(c.userId));
-            }
-          }
-
-          if (connectorIds.size > 0) {
-            const introNotif = { type: 'intro_request', title: `Intro request: ${companyName}`, body: `${requesterName} is looking for an intro to ${companyName}. "${rawText}"` };
-            await prisma.notification.createMany({
-              data: Array.from(connectorIds).map(connectorUserId => ({
-                userId: connectorUserId,
-                ...introNotif,
-                data: {
-                  requestId: request.id,
-                  spaceId,
-                  spaceName,
-                  spaceEmoji: request.space?.emoji || null,
-                  companyName,
-                  companyDomain: companyDomain || null,
-                  companyId: companyId || null,
-                  requesterId: userId,
-                  requesterName,
-                  rawText,
-                },
-              })),
-            });
-            for (const connectorUserId of connectorIds) {
-              sendNotificationEmail(connectorUserId, introNotif).catch(() => {});
-            }
-          }
-        }
+    // Notify connectors (space members with contacts at target company).
+    // Skip for admin_review spaces unless the owner created the request (auto-approved).
+    if (spaceId && (!isAdminReview || isOwnerRequest)) {
+      try {
+        const nq = (normalizedQuery as Record<string, unknown>) || {};
+        await notifyConnectors({
+          requestId: request.id,
+          spaceId,
+          requesterId: userId,
+          requesterName: request.requester.name || 'Someone',
+          rawText,
+          companyId: nq.companyId as string,
+          companyDomain: nq.companyDomain as string,
+          companyName: (nq.companyName as string) || 'a company',
+          spaceName: request.space?.name || 'your space',
+          spaceEmoji: request.space?.emoji,
+        });
       } catch (notifError) {
         console.error('Failed to create notifications:', notifError);
       }
@@ -392,7 +431,14 @@ router.patch('/:id/decline', authMiddleware, async (req, res) => {
       return;
     }
 
-    // Must be a member of the space
+    if (existing.adminStatus === 'pending_review') {
+      res.status(400).json({ error: 'Request is still pending admin review' });
+      return;
+    }
+
+    // Must be a member of the space, or the connectionPeer for 1-1 requests
+    const declineNq = (existing.normalizedQuery as Record<string, unknown>) || {};
+    const declineConnPeerId = declineNq.connectionPeerId as string | undefined;
     if (existing.spaceId) {
       const membership = await prisma.spaceMember.findUnique({
         where: { spaceId_userId: { spaceId: existing.spaceId, userId } },
@@ -401,12 +447,24 @@ router.patch('/:id/decline', authMiddleware, async (req, res) => {
         res.status(403).json({ error: 'You must be a member of the space' });
         return;
       }
+    } else if (declineConnPeerId) {
+      if (declineConnPeerId !== userId) {
+        res.status(403).json({ error: 'You are not authorized to decline this request' });
+        return;
+      }
+    } else {
+      res.status(403).json({ error: 'You are not authorized to decline this request' });
+      return;
     }
 
     // Update request status to declined
     const updated = await prisma.introRequest.update({
       where: { id: req.params.id },
-      data: { status: 'declined' },
+      data: {
+        status: 'declined',
+        declineReason: reason || null,
+        declinedById: userId,
+      },
     });
 
     // Create anonymous notification for the requester
@@ -485,7 +543,14 @@ router.patch('/:id/done', authMiddleware, async (req, res) => {
       return;
     }
 
-    // Must be a member of the space (same check as /decline)
+    if (existing.adminStatus === 'pending_review') {
+      res.status(400).json({ error: 'Request is still pending admin review' });
+      return;
+    }
+
+    // Must be a member of the space, or the connectionPeer for 1-1 requests
+    const doneNq = (existing.normalizedQuery as Record<string, unknown>) || {};
+    const doneConnPeerId = doneNq.connectionPeerId as string | undefined;
     if (existing.spaceId) {
       const membership = await prisma.spaceMember.findUnique({
         where: { spaceId_userId: { spaceId: existing.spaceId, userId } },
@@ -494,6 +559,14 @@ router.patch('/:id/done', authMiddleware, async (req, res) => {
         res.status(403).json({ error: 'You must be a member of the space' });
         return;
       }
+    } else if (doneConnPeerId) {
+      if (doneConnPeerId !== userId) {
+        res.status(403).json({ error: 'You are not authorized to mark this request as done' });
+        return;
+      }
+    } else {
+      res.status(403).json({ error: 'You are not authorized to mark this request as done' });
+      return;
     }
 
     const result = await prisma.$transaction(async (tx) => {
@@ -520,7 +593,18 @@ router.patch('/:id/done', authMiddleware, async (req, res) => {
         data: { status: 'rejected' },
       });
 
-      return updated;
+      return { updated, offer };
+    });
+
+    const withOffers = await prisma.introRequest.findUnique({
+      where: { id: req.params.id },
+      include: {
+        requester: { select: { id: true, name: true, avatar: true } },
+        space: { select: { id: true, name: true, emoji: true } },
+        offers: {
+          include: { introducer: { select: { id: true, name: true, avatar: true } } },
+        },
+      },
     });
 
     // Notify requester
@@ -538,6 +622,10 @@ router.patch('/:id/done', authMiddleware, async (req, res) => {
           data: {
             requestId: req.params.id,
             companyName,
+            companyDomain: (nq.companyDomain as string) || null,
+            spaceId: existing.spaceId || null,
+            spaceName: existing.space?.name || null,
+            spaceEmoji: (existing.space as any)?.emoji || null,
             introducerId: userId,
             introducerName,
           },
@@ -548,10 +636,164 @@ router.patch('/:id/done', authMiddleware, async (req, res) => {
       console.error('Failed to create intro_done notification:', notifErr);
     }
 
-    res.json(result);
+    res.json(withOffers || result.updated);
   } catch (error: unknown) {
     console.error('Mark done error:', error);
     res.status(500).json({ error: 'Failed to mark request as done' });
+  }
+});
+
+// Admin review request (space owner only)
+router.patch('/:id/admin-review', authMiddleware, async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+    const { action, reason } = req.body || {};
+
+    if (!action || !['approve', 'reject'].includes(action)) {
+      res.status(400).json({ error: 'Invalid action. Must be "approve" or "reject"' });
+      return;
+    }
+
+    const existing = await prisma.introRequest.findUnique({
+      where: { id: req.params.id },
+      include: {
+        requester: { select: { id: true, name: true, avatar: true, email: true } },
+        space: { select: { id: true, name: true, emoji: true, ownerId: true, introReviewMode: true } },
+      },
+    });
+
+    if (!existing) {
+      res.status(404).json({ error: 'Request not found' });
+      return;
+    }
+
+    if (!existing.spaceId || !existing.space) {
+      res.status(400).json({ error: 'Only space requests can be admin-reviewed' });
+      return;
+    }
+
+    if (existing.space.ownerId !== userId) {
+      res.status(403).json({ error: 'Only the space owner can review requests' });
+      return;
+    }
+
+    if (existing.adminStatus !== 'pending_review') {
+      res.status(400).json({ error: `Request is not pending review (current: ${existing.adminStatus || 'none'})` });
+      return;
+    }
+
+    if (action === 'approve') {
+      const updated = await prisma.introRequest.update({
+        where: { id: req.params.id },
+        data: {
+          adminStatus: 'approved',
+          adminReviewedById: userId,
+          adminReviewedAt: new Date(),
+        },
+        include: {
+          requester: { select: { id: true, name: true, avatar: true, email: true } },
+          space: { select: { id: true, name: true, emoji: true } },
+          offers: { include: { introducer: { select: { id: true, name: true, avatar: true } } } },
+        },
+      });
+
+      const nq = (existing.normalizedQuery as Record<string, unknown>) || {};
+      const companyName = (nq.companyName as string) || 'a company';
+      const spaceName = existing.space.name || 'your space';
+
+      // Notify the requester that their request was approved
+      try {
+        const approvedNotif = { type: 'intro_approved', title: `Approved: ${companyName}`, body: `Your intro request to ${companyName} in ${spaceName} was approved. Space members are now reviewing it.` };
+        await prisma.notification.create({
+          data: {
+            userId: existing.requesterId,
+            ...approvedNotif,
+            data: {
+              requestId: existing.id,
+              companyName,
+              companyDomain: (nq.companyDomain as string) || null,
+              spaceId: existing.spaceId,
+              spaceName,
+              spaceEmoji: existing.space.emoji || null,
+            },
+          },
+        });
+        sendNotificationEmail(existing.requesterId, approvedNotif).catch(() => {});
+      } catch (notifErr) {
+        console.error('Failed to notify requester after admin approval:', notifErr);
+      }
+
+      // Notify connectors
+      try {
+        await notifyConnectors({
+          requestId: existing.id,
+          spaceId: existing.spaceId!,
+          requesterId: existing.requesterId,
+          requesterName: existing.requester.name || 'Someone',
+          rawText: existing.rawText,
+          companyId: nq.companyId as string,
+          companyDomain: nq.companyDomain as string,
+          companyName,
+          spaceName,
+          spaceEmoji: existing.space.emoji,
+        });
+      } catch (notifError) {
+        console.error('Failed to notify connectors after admin approval:', notifError);
+      }
+
+      res.json(updated);
+    } else {
+      // Reject
+      const updated = await prisma.introRequest.update({
+        where: { id: req.params.id },
+        data: {
+          adminStatus: 'rejected',
+          status: 'declined',
+          adminReviewedById: userId,
+          adminReviewedAt: new Date(),
+          adminRejectReason: reason || null,
+          declinedById: userId,
+          declineReason: reason || 'Declined by space admin',
+        },
+        include: {
+          requester: { select: { id: true, name: true, avatar: true, email: true } },
+          space: { select: { id: true, name: true, emoji: true } },
+          offers: { include: { introducer: { select: { id: true, name: true, avatar: true } } } },
+        },
+      });
+
+      // Notify requester
+      try {
+        const nq = (existing.normalizedQuery as Record<string, unknown>) || {};
+        const companyName = (nq.companyName as string) || 'a company';
+        let notifBody = `Your intro request to ${companyName} was not approved by the space admin.`;
+        if (reason) notifBody += ` Reason: "${reason}"`;
+        const rejectNotif = { type: 'intro_declined', title: `Not approved: ${companyName}`, body: notifBody };
+        await prisma.notification.create({
+          data: {
+            userId: existing.requesterId,
+            ...rejectNotif,
+            data: {
+              requestId: existing.id,
+              companyName,
+              companyDomain: (nq.companyDomain as string) || null,
+              spaceId: existing.spaceId,
+              spaceName: existing.space.name || null,
+              spaceEmoji: existing.space.emoji || null,
+              reason: reason || null,
+            },
+          },
+        });
+        sendNotificationEmail(existing.requesterId, rejectNotif).catch(() => {});
+      } catch (notifErr) {
+        console.error('Failed to notify requester after admin rejection:', notifErr);
+      }
+
+      res.json(updated);
+    }
+  } catch (error: unknown) {
+    console.error('Admin review error:', error);
+    res.status(500).json({ error: 'Failed to review request' });
   }
 });
 
@@ -575,19 +817,18 @@ router.delete('/:id', authMiddleware, async (req, res) => {
       return;
     }
 
-    // Delete associated offers first
-    await prisma.introOffer.deleteMany({
-      where: { requestId: req.params.id },
-    });
+    await prisma.$transaction(async (tx) => {
+      await tx.introOffer.deleteMany({
+        where: { requestId: req.params.id },
+      });
 
-    // Clean up notifications referencing this request
-    await prisma.notification.deleteMany({
-      where: { data: { path: ['requestId'], equals: req.params.id } },
-    });
+      await tx.notification.deleteMany({
+        where: { data: { path: ['requestId'], equals: req.params.id } },
+      });
 
-    // Delete the request
-    await prisma.introRequest.delete({
-      where: { id: req.params.id },
+      await tx.introRequest.delete({
+        where: { id: req.params.id },
+      });
     });
 
     res.json({ success: true, message: 'Request deleted' });

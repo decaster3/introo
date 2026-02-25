@@ -124,6 +124,50 @@ router.post('/contact', async (req, res) => {
       return;
     }
 
+    // Block actions on requests that are not open or still pending admin review
+    if (requestId && (action === 'ask-details' || action === 'ask-permission')) {
+      const reqCheck = await prisma.introRequest.findUnique({
+        where: { id: requestId },
+        select: { status: true, adminStatus: true, requesterId: true, spaceId: true, normalizedQuery: true },
+      });
+      if (!reqCheck) {
+        res.status(404).json({ error: 'Request not found' });
+        return;
+      }
+      if (reqCheck.status !== 'open') {
+        res.status(400).json({ error: `Request is already ${reqCheck.status}` });
+        return;
+      }
+      if (reqCheck.adminStatus === 'pending_review') {
+        res.status(400).json({ error: 'Request is still pending admin review' });
+        return;
+      }
+      if (reqCheck.requesterId === user.id) {
+        res.status(400).json({ error: 'Cannot perform this action on your own request' });
+        return;
+      }
+      // Verify caller is authorized (space member or connection peer)
+      const emailNq = (reqCheck.normalizedQuery as Record<string, unknown>) || {};
+      const emailConnPeerId = emailNq.connectionPeerId as string | undefined;
+      if (reqCheck.spaceId) {
+        const membership = await prisma.spaceMember.findUnique({
+          where: { spaceId_userId: { spaceId: reqCheck.spaceId, userId: user.id } },
+        });
+        if (!membership || membership.status !== 'approved') {
+          res.status(403).json({ error: 'You must be a member of the space' });
+          return;
+        }
+      } else if (emailConnPeerId) {
+        if (emailConnPeerId !== user.id) {
+          res.status(403).json({ error: 'You are not authorized to act on this request' });
+          return;
+        }
+      } else {
+        res.status(403).json({ error: 'You are not authorized to act on this request' });
+        return;
+      }
+    }
+
     const result = await sendContactEmail({
       senderName: user.name,
       senderEmail: user.email,
@@ -141,9 +185,13 @@ router.post('/contact', async (req, res) => {
     // If this is a "details requested" email for an intro request, notify the requester
     if (action === 'ask-details' && requestId) {
       try {
+        await prisma.introRequest.update({
+          where: { id: requestId },
+          data: { detailsRequestedAt: new Date(), detailsRequestedById: user.id },
+        });
         const introReq = await prisma.introRequest.findUnique({
           where: { id: requestId },
-          select: { requesterId: true, normalizedQuery: true },
+          select: { requesterId: true, normalizedQuery: true, spaceId: true, space: { select: { name: true, emoji: true } } },
         });
         if (introReq && introReq.requesterId !== user.id) {
           const nq = (introReq.normalizedQuery as Record<string, unknown>) || {};
@@ -161,6 +209,9 @@ router.post('/contact', async (req, res) => {
                 requestId,
                 companyName,
                 companyDomain: (nq.companyDomain as string) || null,
+                spaceId: introReq.spaceId || null,
+                spaceName: introReq.space?.name || null,
+                spaceEmoji: introReq.space?.emoji || null,
                 connectorId: user.id,
                 connectorName: user.name,
               },
@@ -170,6 +221,35 @@ router.post('/contact', async (req, res) => {
         }
       } catch (err) {
         console.error('Failed to create details_requested notification:', err);
+      }
+    }
+
+    if (action === 'ask-permission' && requestId) {
+      try {
+        const { contactName } = req.body;
+        const now = new Date();
+        const name = contactName || recipientName || null;
+        const existing = await prisma.introRequest.findUnique({
+          where: { id: requestId },
+          select: { checkedWithContacts: true, checkedWithContactAt: true, checkedWithContactName: true, checkedWithContactById: true },
+        });
+        let prev: any[] = [];
+        if (Array.isArray(existing?.checkedWithContacts) && (existing.checkedWithContacts as any[]).length > 0) {
+          prev = existing.checkedWithContacts as any[];
+        } else if (existing?.checkedWithContactAt) {
+          prev = [{ at: (existing.checkedWithContactAt as Date).toISOString(), name: existing.checkedWithContactName || null, byId: existing.checkedWithContactById || '' }];
+        }
+        await prisma.introRequest.update({
+          where: { id: requestId },
+          data: {
+            checkedWithContactAt: now,
+            checkedWithContactName: name,
+            checkedWithContactById: user.id,
+            checkedWithContacts: [...prev, { at: now.toISOString(), name, byId: user.id }],
+          },
+        });
+      } catch (err) {
+        console.error('Failed to update checkedWithContact:', err);
       }
     }
 
