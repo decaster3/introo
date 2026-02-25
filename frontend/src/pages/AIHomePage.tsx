@@ -76,6 +76,31 @@ function abbreviateName(fullName: string): string {
   return `${parts[0]} ${parts[parts.length - 1][0]}.`;
 }
 
+// ─── Sidebar section (stable identity — defined outside AIHomePage) ──────────
+
+function SidebarSection({ id, icon, title, children, openSections, toggleSection, activeSectionIds }: {
+  id: string; icon: string; title: string; children: React.ReactNode;
+  openSections: Record<string, boolean>;
+  toggleSection: (key: string) => void;
+  activeSectionIds: Set<string>;
+}) {
+  return (
+    <div className={`sb-section ${openSections[id] ? 'open' : ''}`}>
+      <button className="sb-section-header" onClick={() => toggleSection(id)}>
+        <span className="sb-section-icon">{icon}</span>
+        <span className="sb-section-title">{title}</span>
+        {!openSections[id] && activeSectionIds.has(id) && (
+          <span className="sb-section-active-dot" />
+        )}
+        <svg className="sb-section-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+      {openSections[id] && <div className="sb-section-body">{children}</div>}
+    </div>
+  );
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function AIHomePage() {
@@ -713,9 +738,9 @@ export function AIHomePage() {
           co.spaceContacts.push({ ...contact, spaceId: contact.spaceId });
           co.spaceCount++;
           co.totalCount++;
-        }
-        if (contact.spaceId && !co.spaceIds.includes(contact.spaceId)) {
-          co.spaceIds.push(contact.spaceId);
+          if (contact.spaceId && !co.spaceIds.includes(contact.spaceId)) {
+            co.spaceIds.push(contact.spaceId);
+          }
         }
       });
       if (co.myCount > 0 && co.spaceCount > 0) co.source = 'both';
@@ -2142,24 +2167,7 @@ export function AIHomePage() {
   }, [strengthFilter, tagInclude, tagExclude, sidebarFilters, groupByField, tableSorts, peopleGroupByField, peopleSorts]);
 
   // ─── Sidebar section helper ────────────────────────────────────────────────
-
-  const SidebarSection = useCallback(({ id, icon, title, children }: {
-    id: string; icon: string; title: string; children: React.ReactNode;
-  }) => (
-    <div className={`sb-section ${openSections[id] ? 'open' : ''}`}>
-      <button className="sb-section-header" onClick={() => toggleSection(id)}>
-        <span className="sb-section-icon">{icon}</span>
-        <span className="sb-section-title">{title}</span>
-        {!openSections[id] && activeSectionIds.has(id) && (
-          <span className="sb-section-active-dot" />
-        )}
-        <svg className="sb-section-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="m6 9 6 6 6-6" />
-        </svg>
-      </button>
-      {openSections[id] && <div className="sb-section-body">{children}</div>}
-    </div>
-  ), [openSections, toggleSection, activeSectionIds]);
+  // SidebarSection is now a stable component defined outside AIHomePage.
 
   // ─── Render ─────────────────────────────────────────────────────────────────
 
@@ -2293,7 +2301,7 @@ export function AIHomePage() {
           <div className="sb-scroll">
 
             {/* ── Sort & Group (collapsible section) ── */}
-            <SidebarSection id="sort-group" icon="⇅" title="Sort & Group">
+            <SidebarSection id="sort-group" icon="⇅" title="Sort & Group" openSections={openSections} toggleSection={toggleSection} activeSectionIds={activeSectionIds}>
               <div className="sb-sg-body">
                 {/* Group */}
                 <div className="sb-sg-inline">
@@ -2382,7 +2390,7 @@ export function AIHomePage() {
             </SidebarSection>
 
             {/* ── Source & Network ── */}
-            <SidebarSection id="source" icon="📂" title="Source & Network">
+            <SidebarSection id="source" icon="📂" title="Source & Network" openSections={openSections} toggleSection={toggleSection} activeSectionIds={activeSectionIds}>
               <div className="sb-chips">
                 {([
                   { key: 'all', label: 'All', count: stats.total },
@@ -2478,7 +2486,7 @@ export function AIHomePage() {
             </SidebarSection>
 
             {/* ── Tags filter ── */}
-            <SidebarSection id="tags" icon="🏷" title="Tags">
+            <SidebarSection id="tags" icon="🏷" title="Tags" openSections={openSections} toggleSection={toggleSection} activeSectionIds={activeSectionIds}>
               {allTags.length > 0 && (() => {
                 const unselected = allTags.filter(t => !tagInclude.includes(t) && !tagExclude.includes(t));
                 return (
@@ -2574,7 +2582,7 @@ export function AIHomePage() {
             </SidebarSection>
 
             {/* ── Business description (AI keyword search) ── */}
-            <SidebarSection id="description" icon="🔍" title="Business description">
+            <SidebarSection id="description" icon="🔍" title="Business description" openSections={openSections} toggleSection={toggleSection} activeSectionIds={activeSectionIds}>
               {/* AI search input */}
               <div className="sb-kw-section">
                 <div className="sb-kw-section-header">
@@ -2675,7 +2683,7 @@ export function AIHomePage() {
             </SidebarSection>
 
             {/* ── Strength (existing filter) ── */}
-            <SidebarSection id="strength" icon="💪" title="Connection strength">
+            <SidebarSection id="strength" icon="💪" title="Connection strength" openSections={openSections} toggleSection={toggleSection} activeSectionIds={activeSectionIds}>
               <div className="sb-chips">
                 {([
                   { key: 'all', label: 'Any' },
@@ -2695,7 +2703,7 @@ export function AIHomePage() {
             </SidebarSection>
 
             {/* ── Connected since (year/month tags) ── */}
-            <SidebarSection id="connected-time" icon="📅" title="Connected since">
+            <SidebarSection id="connected-time" icon="📅" title="Connected since" openSections={openSections} toggleSection={toggleSection} activeSectionIds={activeSectionIds}>
               <div className="sb-chips-group">
                 <span className="sb-chips-label">Year</span>
                 <div className="sb-chips">
@@ -2750,7 +2758,7 @@ export function AIHomePage() {
             </SidebarSection>
 
             {/* ── Last contact date (year/month tags) ── */}
-            <SidebarSection id="last-contact-time" icon="🕐" title="Last contact date">
+            <SidebarSection id="last-contact-time" icon="🕐" title="Last contact date" openSections={openSections} toggleSection={toggleSection} activeSectionIds={activeSectionIds}>
               <div className="sb-chips-group">
                 <span className="sb-chips-label">Year</span>
                 <div className="sb-chips">
@@ -2805,7 +2813,7 @@ export function AIHomePage() {
             </SidebarSection>
 
             {/* ── Employee count ── */}
-            <SidebarSection id="employees" icon="👥" title="Employee count">
+            <SidebarSection id="employees" icon="👥" title="Employee count" openSections={openSections} toggleSection={toggleSection} activeSectionIds={activeSectionIds}>
               <div className="sb-chips">
                 {[
                   { label: '1-10', value: '1-10' },
@@ -2838,7 +2846,7 @@ export function AIHomePage() {
             </SidebarSection>
 
             {/* ── Location ── */}
-            <SidebarSection id="location" icon="📍" title="Location">
+            <SidebarSection id="location" icon="📍" title="Location" openSections={openSections} toggleSection={toggleSection} activeSectionIds={activeSectionIds}>
               <label className="sb-field-label">Country</label>
               <select
                 className="sb-select"
@@ -2860,7 +2868,7 @@ export function AIHomePage() {
             </SidebarSection>
 
             {/* ── Funding ── */}
-            <SidebarSection id="funding" icon="💰" title="Funding">
+            <SidebarSection id="funding" icon="💰" title="Funding" openSections={openSections} toggleSection={toggleSection} activeSectionIds={activeSectionIds}>
               <label className="sb-field-label">Last round</label>
               <div className="sb-chips">
                 {[
@@ -2903,7 +2911,7 @@ export function AIHomePage() {
             </SidebarSection>
 
             {/* ── Founded ── */}
-            <SidebarSection id="founded" icon="📅" title="Founded">
+            <SidebarSection id="founded" icon="📅" title="Founded" openSections={openSections} toggleSection={toggleSection} activeSectionIds={activeSectionIds}>
               <div className="sb-year-row">
                 <div className="sb-year-field">
                   <label className="sb-field-label">From</label>
