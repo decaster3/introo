@@ -6333,6 +6333,139 @@ body {
   font-size: 0.85rem;
 }
 
+/* ── Profile card (distinct from space cards) ────── */
+.u-profile-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  background: linear-gradient(135deg, rgba(91,141,239,0.08) 0%, rgba(124,58,237,0.06) 100%);
+  border: 1px solid rgba(91,141,239,0.15);
+  border-radius: 0.75rem;
+  cursor: pointer;
+  transition: all 0.18s;
+}
+.u-profile-card:hover {
+  background: linear-gradient(135deg, rgba(91,141,239,0.14) 0%, rgba(124,58,237,0.1) 100%);
+  border-color: rgba(91,141,239,0.3);
+}
+
+/* ── Network aggregate stats ─────────────────────── */
+.u-network-stats {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  background: rgba(255,255,255,0.025);
+  border-radius: 0.5rem;
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.4);
+}
+.u-network-stats-sep {
+  color: rgba(255,255,255,0.12);
+}
+.u-network-stats-val {
+  color: rgba(255,255,255,0.65);
+  font-weight: 600;
+}
+
+/* ── Collapsible section header ──────────────────── */
+.u-panel-section-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  padding: 0.15rem 0;
+  user-select: none;
+}
+.u-panel-section-row:hover .u-panel-section-h {
+  color: var(--text-secondary);
+}
+.u-panel-section-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+.u-panel-section-chevron--open {
+  transform: rotate(0deg);
+}
+.u-panel-section-chevron--closed {
+  transform: rotate(-90deg);
+}
+.u-panel-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: auto;
+}
+.u-panel-section-icon-btn {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.12s;
+  font-size: 0.75rem;
+  padding: 0;
+}
+.u-panel-section-icon-btn:hover {
+  background: rgba(255,255,255,0.08);
+  color: var(--text-primary);
+}
+
+/* ── Badge system: action vs informational ───────── */
+.u-panel-badge--role {
+  background: rgba(148,163,184,0.1);
+  color: rgba(255,255,255,0.4);
+  font-size: 0.6rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.u-panel-badge--action {
+  background: rgba(251,191,36,0.12);
+  color: #fbbf24;
+}
+
+/* ── Connection freshness ────────────────────────── */
+.u-conn-freshness {
+  font-size: 0.65rem;
+  color: rgba(255,255,255,0.25);
+  font-style: italic;
+}
+
+/* ── Help icon in section header ─────────────────── */
+.u-section-help-btn {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: none;
+  color: rgba(255,255,255,0.25);
+  cursor: pointer;
+  font-size: 0.55rem;
+  font-weight: 700;
+  transition: all 0.12s;
+  padding: 0;
+  text-decoration: none;
+  flex-shrink: 0;
+}
+.u-section-help-btn:hover {
+  background: rgba(91,141,239,0.1);
+  border-color: rgba(91,141,239,0.3);
+  color: var(--accent-primary);
+}
+
 /* ── Company Panel ────────────────────────────────── */
 
 .u-panel-company {

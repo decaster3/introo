@@ -237,6 +237,8 @@ export function AIHomePage() {
   const [myIntroRequests, setMyIntroRequests] = useState<Awaited<ReturnType<typeof requestsApi.getMine>>>([]);
   const [spaceRequests, setSpaceRequests] = useState<Record<string, { id: string; rawText: string; status: string; createdAt: string; normalizedQuery: Record<string, unknown>; requester: { id: string; name: string; email?: string; avatar: string | null } }[]>>({});
   const [networkTab, setNetworkTab] = useState<'network' | 'intros'>('network');
+  const [spacesCollapsed, setSpacesCollapsed] = useState(false);
+  const [connectionsCollapsed, setConnectionsCollapsed] = useState(false);
   const [pastReceivedCollapsed, setPastReceivedCollapsed] = useState(true);
   const [pastSentCollapsed, setPastSentCollapsed] = useState(true);
   const [spacePastReceivedCollapsed, setSpacePastReceivedCollapsed] = useState(true);
@@ -5285,10 +5287,10 @@ export function AIHomePage() {
                 })()}
 
                 {networkTab === 'network' && <>
-                {/* My Profile Card (compact) */}
+                {/* Profile Card — distinct gradient style */}
                 {currentUser && (
-                  <div className="u-panel-space-card" onClick={() => setInlinePanel({ type: 'profile' })} style={{ cursor: 'pointer' }}>
-                    <PersonAvatar email={currentUser.email} name={currentUser.name} avatarUrl={currentUser.avatar} size={36} />
+                  <div className="u-profile-card" onClick={() => setInlinePanel({ type: 'profile' })}>
+                    <PersonAvatar email={currentUser.email} name={currentUser.name} avatarUrl={currentUser.avatar} size={42} />
                     <div className="u-panel-space-card-info" style={{ minWidth: 0 }}>
                       <span className="u-panel-space-card-name">{currentUser.name}</span>
                       <span className="u-panel-space-card-stats">
@@ -5304,11 +5306,47 @@ export function AIHomePage() {
                   </div>
                 )}
 
-                {/* Spaces section */}
+                {/* Aggregate network stats */}
+                {(() => {
+                  const acceptedConns = connections.filter(c => c.status === 'accepted').length;
+                  const totalCompanies = new Set([
+                    ...mergedCompanies.map(c => c.domain),
+                    ...connectionCompanies.map(cc => cc.domain),
+                  ]).size;
+                  return (
+                    <div className="u-network-stats">
+                      <span><span className="u-network-stats-val">{spaces.length}</span> {spaces.length === 1 ? 'space' : 'spaces'}</span>
+                      <span className="u-network-stats-sep">·</span>
+                      <span><span className="u-network-stats-val">{acceptedConns}</span> {acceptedConns === 1 ? 'connection' : 'connections'}</span>
+                      <span className="u-network-stats-sep">·</span>
+                      <span><span className="u-network-stats-val">{totalCompanies.toLocaleString()}</span> companies</span>
+                    </div>
+                  );
+                })()}
+
+                {/* ── Spaces section (collapsible) ── */}
                 <div className="u-panel-section">
-                  <h4 className="u-panel-section-h">Spaces</h4>
+                  <div className="u-panel-section-row" onClick={() => setSpacesCollapsed(v => !v)}>
+                    <svg className={`u-panel-section-chevron ${spacesCollapsed ? 'u-panel-section-chevron--closed' : 'u-panel-section-chevron--open'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                    <h4 className="u-panel-section-h" style={{ margin: 0 }}>Spaces</h4>
+                    <div className="u-panel-section-actions" onClick={e => e.stopPropagation()}>
+                      <a className="u-section-help-btn" href="/docs#spaces" target="_blank" rel="noopener noreferrer" title="How Spaces work">?</a>
+                      <button className="u-panel-section-icon-btn" title="Create space" onClick={() => { setShowCreateSpace(v => !v); setShowJoinSpace(false); setSpacesCollapsed(false); }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
+                      </button>
+                      <button className="u-panel-section-icon-btn" title="Join space" onClick={() => { setShowJoinSpace(v => !v); setShowCreateSpace(false); setJoinCode(''); setJoinStatus(null); setSpacesCollapsed(false); }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4M10 17l5-5-5-5M13.8 12H3"/></svg>
+                      </button>
+                    </div>
+                  </div>
+
+                  {!spacesCollapsed && <>
                   <div className="u-panel-spaces-list">
-                    {spaces.map(s => {
+                    {[...spaces]
+                      .sort((a, b) => (b.openRequestCount || 0) - (a.openRequestCount || 0))
+                      .map(s => {
                       const isOwner = s.ownerId === currentUser?.id;
                       const companyCount = mergedCompanies.filter(c => c.spaceIds.includes(s.id)).length;
                       const reqCount = s.openRequestCount || 0;
@@ -5320,11 +5358,11 @@ export function AIHomePage() {
                             <span className="u-panel-space-card-stats">{s.memberCount} members · {companyCount} companies</span>
                           </div>
                           {reqCount > 0 && (
-                            <span className="u-panel-space-notif">
+                            <span className="u-panel-space-notif u-panel-badge--action">
                               {reqCount} {reqCount === 1 ? 'request' : 'requests'}
                             </span>
                           )}
-                          {isOwner && <span className="u-panel-badge">owner</span>}
+                          {isOwner && <span className="u-panel-badge u-panel-badge--role">owner</span>}
                         </div>
                       );
                     })}
@@ -5358,7 +5396,6 @@ export function AIHomePage() {
                     )}
                   </div>
 
-                  {/* Pending spaces — invitations to accept or requests awaiting approval */}
                   {pendingSpaces.length > 0 && (
                     <div style={{ marginTop: '0.5rem' }}>
                       <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '0.35rem' }}>Invitations</span>
@@ -5378,7 +5415,6 @@ export function AIHomePage() {
                     </div>
                   )}
 
-                  {/* Pending members wanting to join my spaces */}
                   {Object.keys(pendingMembers).length > 0 && (
                     <div style={{ marginTop: '0.5rem' }}>
                       <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: '0.35rem' }}>Requests to join</span>
@@ -5400,16 +5436,6 @@ export function AIHomePage() {
                     </div>
                   )}
 
-                  <div className="sb-spaces-actions" style={{ marginTop: '0.5rem' }}>
-                    <button className="sb-space-action-btn primary" onClick={() => { setShowCreateSpace(v => !v); setShowJoinSpace(false); }}>
-                      {showCreateSpace ? 'Cancel' : '+ Create'}
-                    </button>
-                    <button className="sb-space-action-btn" onClick={() => { setShowJoinSpace(v => !v); setShowCreateSpace(false); setJoinCode(''); setJoinStatus(null); }}>
-                      {showJoinSpace ? 'Cancel' : 'Join'}
-                    </button>
-                  </div>
-
-                  {/* Inline create space form */}
                   {showCreateSpace && (
                     <div className="sb-space-form-row" style={{ marginTop: '0.5rem' }}>
                       <input
@@ -5432,7 +5458,6 @@ export function AIHomePage() {
                     </div>
                   )}
 
-                  {/* Inline join space form */}
                   {showJoinSpace && (
                     <div className="sb-space-form-row" style={{ marginTop: '0.5rem' }}>
                       <input
@@ -5459,16 +5484,30 @@ export function AIHomePage() {
                       {joinStatus.message}
                     </div>
                   )}
-                  <a className="u-panel-docs-cta" href="/docs#spaces" target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
-                    <span className="u-panel-docs-cta-icon">📖</span>
-                    <span className="u-panel-docs-cta-text">Learn how Spaces work</span>
-                    <span className="u-panel-docs-cta-arrow">→</span>
-                  </a>
+
+                  {spaces.length === 0 && (
+                    <a className="u-panel-docs-cta" href="/docs#spaces" target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+                      <span className="u-panel-docs-cta-icon">📖</span>
+                      <span className="u-panel-docs-cta-text">Learn how Spaces work</span>
+                      <span className="u-panel-docs-cta-arrow">→</span>
+                    </a>
+                  )}
+                  </>}
                 </div>
 
-                {/* 1:1 Connections section */}
+                {/* ── 1:1 Connections section (collapsible) ── */}
                 <div className="u-panel-section">
-                  <h4 className="u-panel-section-h">1:1 Connections</h4>
+                  <div className="u-panel-section-row" onClick={() => setConnectionsCollapsed(v => !v)}>
+                    <svg className={`u-panel-section-chevron ${connectionsCollapsed ? 'u-panel-section-chevron--closed' : 'u-panel-section-chevron--open'}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                    <h4 className="u-panel-section-h" style={{ margin: 0 }}>1:1 Connections</h4>
+                    <div className="u-panel-section-actions" onClick={e => e.stopPropagation()}>
+                      <a className="u-section-help-btn" href="/docs#connections" target="_blank" rel="noopener noreferrer" title="How 1:1 Connections work">?</a>
+                    </div>
+                  </div>
+
+                  {!connectionsCollapsed && <>
                   <div className="u-panel-spaces-list">
                     {connections.filter(c => c.status === 'accepted').map(c => {
                       const connReqCount = incomingRequests.filter(r => r.requester.id === c.peer.id && r.status === 'open' && !dismissedRequestIds.has(r.id)).length;
@@ -5480,9 +5519,10 @@ export function AIHomePage() {
                           <div className="u-panel-space-card-info">
                             <span className="u-panel-space-card-name">{c.peer.name}</span>
                             <span className="u-panel-space-card-stats">{connCompanies.length} companies · {connContactCount} contacts</span>
+                            <span className="u-conn-freshness">Connected {getTimeAgo(c.createdAt)}</span>
                           </div>
                           {connReqCount > 0 && (
-                            <span className="u-panel-space-notif">{connReqCount} {connReqCount === 1 ? 'request' : 'requests'}</span>
+                            <span className="u-panel-space-notif u-panel-badge--action">{connReqCount} {connReqCount === 1 ? 'request' : 'requests'}</span>
                           )}
                         </div>
                       );
@@ -5490,7 +5530,6 @@ export function AIHomePage() {
                     {connections.filter(c => c.status === 'accepted').length === 0 && <div className="u-panel-spaces-empty">No connections yet</div>}
                   </div>
 
-                  {/* Pending requests + Invited (not yet signed up) */}
                   {(connections.filter(c => c.status === 'pending').length > 0 || pendingInvites.length > 0) && (
                     <div style={{ marginTop: '0.5rem' }}>
                       <span style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.4)', display: 'block', marginBottom: '0.35rem' }}>Pending</span>
@@ -5538,11 +5577,15 @@ export function AIHomePage() {
                     <button className="sb-space-action-btn primary" style={{ marginTop: '0.35rem', width: '100%' }} onClick={() => sendConnectionRequest(connectEmail)} disabled={!connectEmail.trim()}>+ Connect</button>
                     <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.3)', marginTop: '0.35rem', display: 'block', lineHeight: 1.4 }}>Works with anyone — if they're not on Introo yet, we'll send them an invite.</span>
                   </div>
-                  <a className="u-panel-docs-cta" href="/docs#connections" target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
-                    <span className="u-panel-docs-cta-icon">📖</span>
-                    <span className="u-panel-docs-cta-text">Learn how 1:1 Connections work</span>
-                    <span className="u-panel-docs-cta-arrow">→</span>
-                  </a>
+
+                  {connections.filter(c => c.status === 'accepted').length === 0 && (
+                    <a className="u-panel-docs-cta" href="/docs#connections" target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>
+                      <span className="u-panel-docs-cta-icon">📖</span>
+                      <span className="u-panel-docs-cta-text">Learn how 1:1 Connections work</span>
+                      <span className="u-panel-docs-cta-arrow">→</span>
+                    </a>
+                  )}
+                  </>}
                 </div>
                 </>}
 
