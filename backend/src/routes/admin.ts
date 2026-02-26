@@ -21,6 +21,7 @@ router.get('/stats', async (_req, res) => {
       totalIntroRequests,
       successfulIntroRequests,
       totalIntroOffers,
+      usersWithIntroRequest,
       usersWithSuccessfulIntro,
     ] = await Promise.all([
       prisma.user.count(),
@@ -42,6 +43,15 @@ router.get('/stats', async (_req, res) => {
       prisma.introOffer.count(),
       prisma.$queryRaw<{ cnt: bigint }[]>`
         SELECT COUNT(DISTINCT uid) AS cnt FROM (
+          SELECT ir."requesterId" AS uid FROM intro_requests ir
+          UNION
+          SELECT pm."userId" AS uid FROM pod_members pm
+            JOIN intro_requests ir2 ON ir2."podId" = pm."podId" AND ir2."requesterId" != pm."userId"
+            WHERE pm.status = 'approved'
+        ) t
+      `.then(r => Number(r[0]?.cnt ?? 0)),
+      prisma.$queryRaw<{ cnt: bigint }[]>`
+        SELECT COUNT(DISTINCT uid) AS cnt FROM (
           SELECT ir."requesterId" AS uid FROM intro_requests ir WHERE ir.status IN ('accepted', 'completed')
           UNION
           SELECT io."introducerId" AS uid FROM intro_offers io
@@ -50,7 +60,8 @@ router.get('/stats', async (_req, res) => {
       `.then(r => Number(r[0]?.cnt ?? 0)),
     ]);
 
-    const connectionOnly = usersWithConnection - usersWithSuccessfulIntro;
+    const introCreatedOnly = usersWithIntroRequest - usersWithSuccessfulIntro;
+    const connectionOnly = usersWithConnection - usersWithIntroRequest;
     const enrichedOnly = usersWithEnrichedContacts - usersWithConnection;
     const calendarOnly = usersWithCalendar - usersWithEnrichedContacts;
     const signedUpOnly = totalUsers - usersWithCalendar;
@@ -61,6 +72,7 @@ router.get('/stats', async (_req, res) => {
       usersWithCalendar,
       usersWithEnrichedContacts,
       usersWithConnection,
+      usersWithIntroRequest,
       usersWithSuccessfulIntro,
       funnelCounts: {
         invited: pendingInvites,
@@ -68,7 +80,8 @@ router.get('/stats', async (_req, res) => {
         calendar_connected: calendarOnly,
         contacts_enriched: enrichedOnly,
         first_connection: connectionOnly,
-        intro_done: usersWithSuccessfulIntro,
+        intro_created: introCreatedOnly,
+        intro_success: usersWithSuccessfulIntro,
       },
       totalIntroRequests,
       successfulIntroRequests,
@@ -91,9 +104,11 @@ function deriveFunnelStatus(user: {
   calendarAccounts: { id: string }[];
   enrichedContactCount: number;
   hasConnection: boolean;
+  hasIntroRequest: boolean;
   hasSuccessfulIntro: boolean;
 }): string {
-  if (user.hasSuccessfulIntro) return 'intro_done';
+  if (user.hasSuccessfulIntro) return 'intro_success';
+  if (user.hasIntroRequest) return 'intro_created';
   if (user.hasConnection) return 'first_connection';
   if (user.enrichedContactCount > 0) return 'contacts_enriched';
   if (user.calendarAccounts.length > 0) return 'calendar_connected';
@@ -238,8 +253,9 @@ router.get('/users', async (req, res) => {
     let result = users.map(u => {
       const enrichedContactCount = enrichedMap.get(u.id) || 0;
       const hasConnection = connSet.has(u.id) || (spaceMemberMap.get(u.id) || 0) > 0;
+      const hasIntroRequest = (u._count.introRequests > 0) || ((introReceivedMap.get(u.id) || 0) > 0);
       const hasSuccessfulIntro = ((successfulSentMap.get(u.id) || 0) + (introReceivedSuccessMap.get(u.id) || 0)) > 0;
-      const status = deriveFunnelStatus({ calendarAccounts: u.calendarAccounts, enrichedContactCount, hasConnection, hasSuccessfulIntro });
+      const status = deriveFunnelStatus({ calendarAccounts: u.calendarAccounts, enrichedContactCount, hasConnection, hasIntroRequest, hasSuccessfulIntro });
       return {
         id: u.id,
         name: u.name,
@@ -264,7 +280,7 @@ router.get('/users', async (req, res) => {
     });
 
     // Filter by funnel status
-    if (statusFilter && ['signed_up', 'calendar_connected', 'contacts_enriched', 'first_connection', 'intro_done'].includes(statusFilter)) {
+    if (statusFilter && ['signed_up', 'calendar_connected', 'contacts_enriched', 'first_connection', 'intro_created', 'intro_success'].includes(statusFilter)) {
       result = result.filter(u => u.status === statusFilter);
     }
 

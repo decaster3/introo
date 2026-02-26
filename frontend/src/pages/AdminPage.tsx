@@ -11,7 +11,8 @@ const USER_FUNNEL_STEPS = [
   { key: 'calendar_connected', label: 'Calendar', color: '#60a5fa' },
   { key: 'contacts_enriched', label: 'Enriched', color: '#c084fc' },
   { key: 'first_connection', label: '1-1 / Space', color: '#4ade80' },
-  { key: 'intro_done', label: 'Intro', color: '#38bdf8' },
+  { key: 'intro_created', label: 'Intro Created', color: '#38bdf8' },
+  { key: 'intro_success', label: 'Intro Success', color: '#a78bfa' },
 ] as const;
 
 const STATUS_INDEX: Record<string, number> = {
@@ -20,7 +21,8 @@ const STATUS_INDEX: Record<string, number> = {
   calendar_connected: 2,
   contacts_enriched: 3,
   first_connection: 4,
-  intro_done: 5,
+  intro_created: 5,
+  intro_success: 6,
 };
 
 type DisplayUser = AdminUser | {
@@ -127,7 +129,8 @@ interface CohortRow {
   calendar: number;
   enriched: number;
   connected: number;
-  introDone: number;
+  introCreated: number;
+  introSuccess: number;
   introsSent: number;
   introsOK: number;
 }
@@ -138,7 +141,8 @@ const COHORT_COLS = [
   { key: 'calendar', label: 'Calendar', color: '#60a5fa', rateBase: 'total' },
   { key: 'enriched', label: 'Enriched', color: '#c084fc', rateBase: 'total' },
   { key: 'connected', label: '1-1 / Space', color: '#4ade80', rateBase: 'total' },
-  { key: 'introDone', label: 'Intro', color: '#38bdf8', rateBase: 'total' },
+  { key: 'introCreated', label: 'Intro Created', color: '#38bdf8', rateBase: 'total' },
+  { key: 'introSuccess', label: 'Intro Success', color: '#a78bfa', rateBase: 'total' },
 ] as const;
 
 function buildCohorts(users: AdminUser[], pendingInvites: AdminPendingInvite[]): CohortRow[] {
@@ -172,7 +176,8 @@ function buildCohorts(users: AdminUser[], pendingInvites: AdminPendingInvite[]):
         calendar: cohort.filter(u => u.calendarConnected).length,
         enriched: cohort.filter(u => u.enrichedContactCount > 0).length,
         connected: cohort.filter(u => u.connectionsCount > 0).length,
-        introDone: cohort.filter(u => (u.introRequestsSuccessful + u.introRequestsReceivedSuccessful) > 0).length,
+        introCreated: cohort.filter(u => (u.introRequestsSent + u.introRequestsReceived) > 0).length,
+        introSuccess: cohort.filter(u => (u.introRequestsSuccessful + u.introRequestsReceivedSuccessful) > 0).length,
         introsSent: cohort.reduce((s, u) => s + u.introRequestsSent, 0),
         introsOK: cohort.reduce((s, u) => s + u.introRequestsSuccessful, 0),
       };
