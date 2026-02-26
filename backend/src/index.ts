@@ -22,6 +22,7 @@ import tagsRoutes from './routes/tags.js';
 import aiRoutes from './routes/ai.js';
 import emailRoutes from './routes/email.js';
 import viewsRoutes from './routes/views.js';
+import adminRoutes from './routes/admin.js';
 import { sendWeeklyDigest, sendDailyBriefing } from './services/email.js';
 import type { BriefingMeeting, BriefingAttendee } from './services/email.js';
 import prisma from './lib/prisma.js';
@@ -140,6 +141,7 @@ app.use('/api/tags', tagsRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/email', emailRoutes);
 app.use('/api/views', viewsRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Debug endpoint - development only
 if (!isProduction) {
@@ -458,8 +460,30 @@ async function dailyMorningBriefing() {
   }
 }
 
+// Ensure ADMIN_EMAILS users have admin role on startup
+async function ensureAdminUsers() {
+  const adminEmails = (process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map(e => e.trim().toLowerCase())
+    .filter(Boolean);
+  if (adminEmails.length === 0) return;
+
+  for (const email of adminEmails) {
+    try {
+      const user = await prisma.user.findUnique({ where: { email }, select: { id: true, role: true } });
+      if (user && user.role !== 'admin') {
+        await prisma.user.update({ where: { id: user.id }, data: { role: 'admin' } });
+        console.log(`[admin] Promoted ${email} to admin`);
+      }
+    } catch (err) {
+      console.error(`[admin] Failed to promote ${email}:`, (err as Error).message);
+    }
+  }
+}
+
 // Start server
-verifyDatabaseConnection().then(() => {
+verifyDatabaseConnection().then(async () => {
+  await ensureAdminUsers();
   server = app.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
 

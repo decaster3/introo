@@ -24,6 +24,7 @@ model User {
   calendarSyncedAt   DateTime?
   timezone           String?
   lastBriefingDate   String?
+  role               String              @default("user")
   emailPreferences   Json                @default("{\"intros\":true,\"notifications\":true,\"digests\":true}")
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt

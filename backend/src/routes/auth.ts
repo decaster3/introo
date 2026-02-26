@@ -29,7 +29,7 @@ router.get('/google', (req, res, next) => {
   
   passport.authenticate('google', {
     accessType: 'offline',
-    prompt: 'select_account',
+    prompt: 'consent',
   } as any)(req, res, next);
 });
 
@@ -288,7 +288,7 @@ router.patch('/me', authMiddleware, async (req, res) => {
     const user = await prisma.user.update({
       where: { id: userId },
       data: updateData,
-      select: { id: true, email: true, name: true, avatar: true, title: true, company: true, companyDomain: true, linkedinUrl: true, headline: true, city: true, country: true, timezone: true },
+      select: { id: true, email: true, name: true, role: true, avatar: true, title: true, company: true, companyDomain: true, linkedinUrl: true, headline: true, city: true, country: true, timezone: true },
     });
 
     invalidateUserCache(userId);

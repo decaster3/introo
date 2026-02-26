@@ -7,6 +7,7 @@ import {
   LoginPage,
   OnboardingPage,
   AIHomePage,
+  AdminPage,
   LandingPage,
   TermsPage,
   PrivacyPage,
@@ -29,6 +30,9 @@ function App() {
           {/* Onboarding */}
           <Route path="/onboarding" element={<OnboardingPage />} />
           
+          {/* Admin dashboard */}
+          <Route path="/admin" element={<AdminPage />} />
+
           {/* Main app — single window */}
           <Route path="/home" element={<AIHomePage />} />
 

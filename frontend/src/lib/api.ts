@@ -305,6 +305,65 @@ export const emailApi = {
     }),
 };
 
+// Admin
+export interface AdminUser {
+  id: string;
+  name: string;
+  email: string;
+  avatar: string | null;
+  role: string;
+  createdAt: string;
+  status: string;
+  calendarConnected: boolean;
+  contactsCount: number;
+  enrichedContactCount: number;
+  connectionsCount: number;
+  introRequestsSent: number;
+  introRequestsSuccessful: number;
+  introRequestsReceived: number;
+  introRequestsReceivedSuccessful: number;
+}
+
+export interface AdminStats {
+  totalUsers: number;
+  usersWithCalendar: number;
+  usersWithEnrichedContacts: number;
+  usersWithConnection: number;
+  pendingInvites: number;
+  totalIntroRequests: number;
+  successfulIntroRequests: number;
+  totalIntroOffers: number;
+}
+
+export interface AdminPendingInvite {
+  id: string;
+  email: string;
+  createdAt: string;
+  invitedBy: { id: string; name: string; email: string };
+  space: { id: string; name: string; emoji: string } | null;
+}
+
+export const adminApi = {
+  getStats: () => request<AdminStats>('/api/admin/stats'),
+  getUsers: (params?: { search?: string; status?: string; sort?: string; order?: string; page?: number; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.search) qs.set('search', params.search);
+    if (params?.status) qs.set('status', params.status);
+    if (params?.sort) qs.set('sort', params.sort);
+    if (params?.order) qs.set('order', params.order);
+    if (params?.page) qs.set('page', params.page.toString());
+    if (params?.limit) qs.set('limit', params.limit.toString());
+    const query = qs.toString() ? `?${qs.toString()}` : '';
+    return request<{ data: AdminUser[]; pagination: { total: number; page: number; limit: number; pages: number } }>(`/api/admin/users${query}`);
+  },
+  setUserRole: (userId: string, role: 'admin' | 'user') =>
+    request<{ user: { id: string; name: string; email: string; role: string } }>(`/api/admin/users/${userId}/role`, {
+      method: 'POST',
+      body: JSON.stringify({ role }),
+    }),
+  getPendingInvites: () => request<AdminPendingInvite[]>('/api/admin/pending-invites'),
+};
+
 export interface IntroRequestResponse {
   id: string;
   requesterId: string;

@@ -64,6 +64,7 @@ export interface AuthUser {
   id: string;
   email: string;
   name: string;
+  role: string;
   avatar?: string | null;
   title?: string | null;
   company?: string | null;
@@ -95,7 +96,7 @@ export function configurePassport() {
           'https://www.googleapis.com/auth/calendar.readonly',
         ],
         accessType: 'offline',
-        prompt: 'select_account',
+        prompt: 'consent',
       } as any,
       async (accessToken, refreshToken, profile, done) => {
         try {
@@ -276,7 +277,7 @@ export function invalidateUserCache(userId: string) {
   USER_CACHE.delete(userId);
 }
 
-const USER_SELECT = { id: true, email: true, name: true, avatar: true, title: true, company: true, companyDomain: true, linkedinUrl: true, headline: true, city: true, country: true, timezone: true } as const;
+const USER_SELECT = { id: true, email: true, name: true, role: true, avatar: true, title: true, company: true, companyDomain: true, linkedinUrl: true, headline: true, city: true, country: true, timezone: true } as const;
 
 export const authMiddleware: RequestHandler = async (req, res, next) => {
   const token = req.cookies?.token || req.headers.authorization?.replace('Bearer ', '');
@@ -326,6 +327,15 @@ export const authMiddleware: RequestHandler = async (req, res, next) => {
   }
 };
 
+export const adminMiddleware: RequestHandler = (req, res, next) => {
+  const user = (req as AuthenticatedRequest).user;
+  if (!user || user.role !== 'admin') {
+    res.status(403).json({ error: 'Admin access required' });
+    return;
+  }
+  next();
+};
+
 export const optionalAuthMiddleware: RequestHandler = async (req, res, next) => {
   const token = req.cookies?.token || req.headers.authorization?.replace('Bearer ', '');
 
@@ -335,7 +345,7 @@ export const optionalAuthMiddleware: RequestHandler = async (req, res, next) => 
       try {
         const user = await prisma.user.findUnique({
           where: { id: payload.userId },
-          select: { id: true, email: true, name: true, avatar: true, title: true, company: true, companyDomain: true, linkedinUrl: true, headline: true, city: true, country: true, timezone: true },
+          select: USER_SELECT,
         });
         if (user) {
           (req as AuthenticatedRequest).user = user;
