@@ -21,6 +21,7 @@ router.get('/stats', async (_req, res) => {
       totalIntroRequests,
       successfulIntroRequests,
       totalIntroOffers,
+      usersWithSuccessfulIntro,
     ] = await Promise.all([
       prisma.user.count(),
       prisma.calendarAccount.groupBy({ by: ['userId'], _count: true }).then(r => r.length),
@@ -39,14 +40,36 @@ router.get('/stats', async (_req, res) => {
       prisma.introRequest.count(),
       prisma.introRequest.count({ where: { status: 'done' } }),
       prisma.introOffer.count(),
+      prisma.$queryRaw<{ cnt: bigint }[]>`
+        SELECT COUNT(DISTINCT uid) AS cnt FROM (
+          SELECT ir."requesterId" AS uid FROM intro_requests ir WHERE ir.status = 'done'
+          UNION
+          SELECT io."introducerId" AS uid FROM intro_offers io
+            JOIN intro_requests ir2 ON ir2.id = io."requestId" AND ir2.status = 'done'
+        ) t
+      `.then(r => Number(r[0]?.cnt ?? 0)),
     ]);
+
+    const connectionOnly = usersWithConnection - usersWithSuccessfulIntro;
+    const enrichedOnly = usersWithEnrichedContacts - usersWithConnection;
+    const calendarOnly = usersWithCalendar - usersWithEnrichedContacts;
+    const signedUpOnly = totalUsers - usersWithCalendar;
 
     res.json({
       totalUsers,
+      pendingInvites,
       usersWithCalendar,
       usersWithEnrichedContacts,
       usersWithConnection,
-      pendingInvites,
+      usersWithSuccessfulIntro,
+      funnelCounts: {
+        invited: pendingInvites,
+        signed_up: signedUpOnly,
+        calendar_connected: calendarOnly,
+        contacts_enriched: enrichedOnly,
+        first_connection: connectionOnly,
+        intro_done: usersWithSuccessfulIntro,
+      },
       totalIntroRequests,
       successfulIntroRequests,
       totalIntroOffers,
@@ -68,7 +91,9 @@ function deriveFunnelStatus(user: {
   calendarAccounts: { id: string }[];
   enrichedContactCount: number;
   hasConnection: boolean;
+  hasSuccessfulIntro: boolean;
 }): string {
+  if (user.hasSuccessfulIntro) return 'intro_done';
   if (user.hasConnection) return 'first_connection';
   if (user.enrichedContactCount > 0) return 'contacts_enriched';
   if (user.calendarAccounts.length > 0) return 'calendar_connected';
@@ -178,7 +203,8 @@ router.get('/users', async (req, res) => {
     let result = users.map(u => {
       const enrichedContactCount = enrichedMap.get(u.id) || 0;
       const hasConnection = connSet.has(u.id) || (spaceMemberMap.get(u.id) || 0) > 0;
-      const status = deriveFunnelStatus({ calendarAccounts: u.calendarAccounts, enrichedContactCount, hasConnection });
+      const hasSuccessfulIntro = ((successfulSentMap.get(u.id) || 0) + (introReceivedSuccessMap.get(u.id) || 0)) > 0;
+      const status = deriveFunnelStatus({ calendarAccounts: u.calendarAccounts, enrichedContactCount, hasConnection, hasSuccessfulIntro });
       return {
         id: u.id,
         name: u.name,
@@ -199,7 +225,7 @@ router.get('/users', async (req, res) => {
     });
 
     // Filter by funnel status
-    if (statusFilter && ['signed_up', 'calendar_connected', 'contacts_enriched', 'first_connection'].includes(statusFilter)) {
+    if (statusFilter && ['signed_up', 'calendar_connected', 'contacts_enriched', 'first_connection', 'intro_done'].includes(statusFilter)) {
       result = result.filter(u => u.status === statusFilter);
     }
 

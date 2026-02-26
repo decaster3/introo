@@ -1,43 +1,175 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppState, useAppActions } from '../store';
 import { adminApi, type AdminUser, type AdminStats, type AdminPendingInvite } from '../lib/api';
 
-const FUNNEL_STAGES = [
-  { key: '', label: 'All' },
-  { key: 'signed_up', label: 'Signed Up' },
-  { key: 'calendar_connected', label: 'Calendar Connected' },
-  { key: 'contacts_enriched', label: 'Contacts Enriched' },
-  { key: 'first_connection', label: 'First Connection' },
+const COL_COUNT = 6;
+
+const USER_FUNNEL_STEPS = [
+  { key: 'invited', label: 'Invited', color: '#f97316' },
+  { key: 'signed_up', label: 'Signed Up', color: '#facc15' },
+  { key: 'calendar_connected', label: 'Calendar', color: '#60a5fa' },
+  { key: 'contacts_enriched', label: 'Enriched', color: '#c084fc' },
+  { key: 'first_connection', label: '1-1 / Space', color: '#4ade80' },
+  { key: 'intro_done', label: 'Intro', color: '#38bdf8' },
 ] as const;
 
-const STATUS_COLORS: Record<string, string> = {
-  signed_up: '#facc15',
-  calendar_connected: '#60a5fa',
-  contacts_enriched: '#c084fc',
-  first_connection: '#4ade80',
+const STATUS_INDEX: Record<string, number> = {
+  invited: 0,
+  signed_up: 1,
+  calendar_connected: 2,
+  contacts_enriched: 3,
+  first_connection: 4,
+  intro_done: 5,
 };
 
-const STATUS_LABELS: Record<string, string> = {
-  signed_up: 'Signed Up',
-  calendar_connected: 'Calendar',
-  contacts_enriched: 'Enriched',
-  first_connection: 'Connected',
+type DisplayUser = AdminUser | {
+  id: string;
+  name: string;
+  email: string;
+  avatar: string | null;
+  status: 'invited';
+  role: string;
+  createdAt: string;
+  calendarConnected: false;
+  contactsCount: 0;
+  enrichedContactCount: 0;
+  connectionsCount: 0;
+  introRequestsSent: 0;
+  introRequestsSuccessful: 0;
+  introRequestsReceived: 0;
+  introRequestsReceivedSuccessful: 0;
+  isPendingInvite: true;
+  invitedBy?: string;
 };
 
-type SortField = 'name' | 'email' | 'createdAt' | 'status' | 'introRequestsSent' | 'introRequestsSuccessful' | 'introRequestsReceived' | 'introRequestsReceivedSuccessful' | 'role';
+function pendingInviteToDisplayUser(inv: AdminPendingInvite): DisplayUser {
+  return {
+    id: `invite-${inv.id}`,
+    name: inv.email.split('@')[0],
+    email: inv.email,
+    avatar: null,
+    status: 'invited',
+    role: 'invited',
+    createdAt: inv.createdAt,
+    calendarConnected: false,
+    contactsCount: 0,
+    enrichedContactCount: 0,
+    connectionsCount: 0,
+    introRequestsSent: 0,
+    introRequestsSuccessful: 0,
+    introRequestsReceived: 0,
+    introRequestsReceivedSuccessful: 0,
+    isPendingInvite: true,
+    invitedBy: inv.invitedBy.name,
+  };
+}
 
-const COLUMNS: { key: SortField | 'actions'; label: string; sortable: boolean; width?: string }[] = [
-  { key: 'name', label: 'User', sortable: true, width: '200px' },
-  { key: 'status', label: 'Status', sortable: true, width: '120px' },
-  { key: 'createdAt', label: 'Signed Up', sortable: true, width: '110px' },
-  { key: 'introRequestsSent', label: 'Intros Sent', sortable: true, width: '100px' },
-  { key: 'introRequestsSuccessful', label: 'Sent OK', sortable: true, width: '80px' },
-  { key: 'introRequestsReceived', label: 'Intros Recv', sortable: true, width: '100px' },
-  { key: 'introRequestsReceivedSuccessful', label: 'Recv OK', sortable: true, width: '80px' },
-  { key: 'role', label: 'Role', sortable: true, width: '90px' },
-  { key: 'actions', label: '', sortable: false, width: '60px' },
-];
+function getUserCompletedSteps(user: DisplayUser): boolean[] {
+  const idx = STATUS_INDEX[user.status] ?? 0;
+  return USER_FUNNEL_STEPS.map((_, i) => i <= idx);
+}
+
+function getStatusDisplay(status: string): { label: string; color: string } {
+  const step = USER_FUNNEL_STEPS.find(s => s.key === status);
+  return step ? { label: step.label, color: step.color } : { label: status, color: '#888' };
+}
+
+const STATUS_FILTER_OPTIONS = USER_FUNNEL_STEPS.map(s => ({ key: s.key, label: s.label, color: s.color }));
+
+// -- Month helpers --
+
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTH_NAMES_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+function getMonthKey(dateStr: string): string {
+  const d = new Date(dateStr);
+  return `${d.getFullYear()}-${String(d.getMonth()).padStart(2, '0')}`;
+}
+
+function formatMonthLabel(key: string): string {
+  const [year, month] = key.split('-');
+  return `${MONTH_NAMES_FULL[parseInt(month, 10)]} ${year}`;
+}
+
+function formatMonthShort(key: string): string {
+  const [year, month] = key.split('-');
+  return `${MONTH_NAMES[parseInt(month, 10)]} ${year}`;
+}
+
+function groupUsersByMonth(users: DisplayUser[]): { key: string; label: string; users: DisplayUser[] }[] {
+  const map = new Map<string, DisplayUser[]>();
+  for (const u of users) {
+    const k = getMonthKey(u.createdAt);
+    if (!map.has(k)) map.set(k, []);
+    map.get(k)!.push(u);
+  }
+  return Array.from(map.entries())
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([key, users]) => ({ key, label: formatMonthLabel(key), users }));
+}
+
+// -- Cohort analysis --
+
+interface CohortRow {
+  month: string;
+  label: string;
+  invited: number;
+  total: number;
+  calendar: number;
+  enriched: number;
+  connected: number;
+  introDone: number;
+  introsSent: number;
+  introsOK: number;
+}
+
+const COHORT_COLS = [
+  { key: 'invited', label: 'Invited', color: '#f97316', rateBase: 'invited' },
+  { key: 'total', label: 'Signed Up', color: '#facc15', rateBase: 'invited' },
+  { key: 'calendar', label: 'Calendar', color: '#60a5fa', rateBase: 'total' },
+  { key: 'enriched', label: 'Enriched', color: '#c084fc', rateBase: 'total' },
+  { key: 'connected', label: '1-1 / Space', color: '#4ade80', rateBase: 'total' },
+  { key: 'introDone', label: 'Intro', color: '#38bdf8', rateBase: 'total' },
+] as const;
+
+function buildCohorts(users: AdminUser[], pendingInvites: AdminPendingInvite[]): CohortRow[] {
+  const userMap = new Map<string, AdminUser[]>();
+  for (const u of users) {
+    const k = getMonthKey(u.createdAt);
+    if (!userMap.has(k)) userMap.set(k, []);
+    userMap.get(k)!.push(u);
+  }
+
+  // Count pending (unconverted) invites by month
+  const inviteMap = new Map<string, number>();
+  for (const inv of pendingInvites) {
+    const k = getMonthKey(inv.createdAt);
+    inviteMap.set(k, (inviteMap.get(k) || 0) + 1);
+  }
+
+  // Merge all month keys
+  const allMonths = new Set([...userMap.keys(), ...inviteMap.keys()]);
+
+  return Array.from(allMonths)
+    .sort((a, b) => b.localeCompare(a))
+    .map(month => {
+      const cohort = userMap.get(month) || [];
+      const pendingCount = inviteMap.get(month) || 0;
+      return {
+        month,
+        label: formatMonthShort(month),
+        invited: cohort.length + pendingCount,
+        total: cohort.length,
+        calendar: cohort.filter(u => u.calendarConnected).length,
+        enriched: cohort.filter(u => u.enrichedContactCount > 0).length,
+        connected: cohort.filter(u => u.connectionsCount > 0).length,
+        introDone: cohort.filter(u => (u.introRequestsSuccessful + u.introRequestsReceivedSuccessful) > 0).length,
+        introsSent: cohort.reduce((s, u) => s + u.introRequestsSent, 0),
+        introsOK: cohort.reduce((s, u) => s + u.introRequestsSuccessful, 0),
+      };
+    });
+}
 
 export function AdminPage() {
   const { isAuthenticated, isLoading, currentUser } = useAppState();
@@ -46,13 +178,15 @@ export function AdminPage() {
 
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
-  const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 50, pages: 1 });
+  const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 200, pages: 1 });
   const [pendingInvites, setPendingInvites] = useState<AdminPendingInvite[]>([]);
-  const [showInvites, setShowInvites] = useState(false);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [sortField, setSortField] = useState<SortField>('createdAt');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [monthFilter, setMonthFilter] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const sortField = 'createdAt';
+  const sortOrder = 'desc';
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
@@ -67,46 +201,36 @@ export function AdminPage() {
     }
   }, [isLoading, isAuthenticated, isAdmin, navigate]);
 
-  const fetchData = useCallback(async (p?: { search?: string; status?: string; sort?: string; order?: string; page?: number }) => {
+  const fetchData = useCallback(async (p?: { search?: string; sort?: string; order?: string; page?: number }) => {
     try {
       setLoading(true);
       setError(null);
       const params = {
         search: p?.search ?? search,
-        status: p?.status ?? statusFilter,
         sort: p?.sort ?? sortField,
         order: p?.order ?? sortOrder,
         page: p?.page ?? pagination.page,
         limit: pagination.limit,
       };
-      const [statsRes, usersRes] = await Promise.all([
+      const [statsRes, usersRes, invitesRes] = await Promise.all([
         adminApi.getStats(),
         adminApi.getUsers(params),
+        adminApi.getPendingInvites(),
       ]);
       setStats(statsRes);
       setUsers(usersRes.data);
       setPagination(usersRes.pagination);
+      setPendingInvites(invitesRes);
     } catch (err: any) {
       setError(err.message || 'Failed to load admin data');
     } finally {
       setLoading(false);
     }
-  }, [search, statusFilter, sortField, sortOrder, pagination.page, pagination.limit]);
+  }, [search, sortField, sortOrder, pagination.page, pagination.limit]);
 
   useEffect(() => {
     if (isAdmin) fetchData();
   }, [isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const loadInvites = useCallback(async () => {
-    try {
-      const res = await adminApi.getPendingInvites();
-      setPendingInvites(res);
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    if (showInvites) loadInvites();
-  }, [showInvites, loadInvites]);
 
   const handleSearch = (val: string) => {
     setSearch(val);
@@ -116,16 +240,31 @@ export function AdminPage() {
     }, 300);
   };
 
-  const handleSort = (field: SortField) => {
-    const newOrder = field === sortField ? (sortOrder === 'asc' ? 'desc' : 'asc') : 'desc';
-    setSortField(field);
-    setSortOrder(newOrder);
-    fetchData({ sort: field, order: newOrder, page: 1 });
-  };
+  const cohorts = useMemo(() => buildCohorts(users, pendingInvites), [users, pendingInvites]);
 
-  const handleStatusFilter = (status: string) => {
-    setStatusFilter(status);
-    fetchData({ status, page: 1 });
+  const allDisplayUsers: DisplayUser[] = useMemo(() => {
+    const inviteUsers = pendingInvites.map(pendingInviteToDisplayUser);
+    return [...users, ...inviteUsers];
+  }, [users, pendingInvites]);
+
+  const filteredUsers = useMemo(() => {
+    let result = allDisplayUsers;
+    if (monthFilter) result = result.filter(u => getMonthKey(u.createdAt) === monthFilter);
+    if (statusFilter) result = result.filter(u => u.status === statusFilter);
+    if (dateFrom) {
+      const from = new Date(dateFrom);
+      result = result.filter(u => new Date(u.createdAt) >= from);
+    }
+    if (dateTo) {
+      const to = new Date(dateTo);
+      to.setHours(23, 59, 59, 999);
+      result = result.filter(u => new Date(u.createdAt) <= to);
+    }
+    return result;
+  }, [allDisplayUsers, monthFilter, statusFilter, dateFrom, dateTo]);
+
+  const handleCohortClick = (month: string) => {
+    setMonthFilter(prev => prev === month ? null : month);
   };
 
   const handlePageChange = (page: number) => {
@@ -169,17 +308,110 @@ export function AdminPage() {
 
       {error && <div className="admin-error">{error}</div>}
 
-      {/* Summary cards */}
-      {stats && (
-        <div className="admin-stats-grid">
-          <StatCard label="Total Users" value={stats.totalUsers} />
-          <StatCard label="Calendar Connected" value={stats.usersWithCalendar} accent="#60a5fa" />
-          <StatCard label="Contacts Enriched" value={stats.usersWithEnrichedContacts} accent="#c084fc" />
-          <StatCard label="First Connection" value={stats.usersWithConnection} accent="#4ade80" />
-          <StatCard label="Pending Invites" value={stats.pendingInvites} accent="#facc15" />
-          <StatCard label="Intros Requested" value={stats.totalIntroRequests} />
-          <StatCard label="Intros Successful" value={stats.successfulIntroRequests} accent="#4ade80" />
-          <StatCard label="Intro Offers" value={stats.totalIntroOffers} />
+      {/* Cohort analysis */}
+      {!loading && users.length > 0 && (
+        <div className="admin-cohort-section">
+          <div className="admin-cohort-header">
+            <span className="admin-cohort-title">Cohort Analysis</span>
+          </div>
+          <div className="admin-cohort-scroll">
+            <table className="admin-cohort-table">
+              <thead>
+                <tr>
+                  <th className="admin-cohort-month-col">Cohort</th>
+                  {COHORT_COLS.map(col => (
+                    <th key={col.key}>{col.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {cohorts.map(row => {
+                  const isActive = monthFilter === row.month;
+                  return (
+                    <tr
+                      key={row.month}
+                      className={`admin-cohort-row ${isActive ? 'active' : ''}`}
+                      onClick={() => handleCohortClick(row.month)}
+                    >
+                      <td className="admin-cohort-month-cell">
+                        <span className="admin-cohort-month-text">{row.label}</span>
+                      </td>
+                      {COHORT_COLS.map(col => {
+                        const val = row[col.key as keyof CohortRow] as number;
+                        const base = col.rateBase ? (row[col.rateBase as keyof CohortRow] as number) : 0;
+                        const hasRate = col.rateBase !== null && base > 0;
+                        const pct = hasRate ? Math.round((val / base) * 100) : 0;
+                        const barHeight = row.invited > 0 && col.rateBase !== null
+                          ? Math.max(18, Math.round((val / row.invited) * 100))
+                          : (row.invited > 0 ? Math.max(18, Math.round((val / row.invited) * 100)) : 18);
+                        return (
+                          <td key={col.key} className="admin-cohort-cell">
+                            <div className="admin-cohort-bar-wrap">
+                              <div
+                                className="admin-cohort-bar"
+                                style={{
+                                  height: `${barHeight}%`,
+                                  backgroundColor: `${col.color}30`,
+                                  borderColor: `${col.color}60`,
+                                }}
+                              >
+                                <span className="admin-cohort-val">{val}</span>
+                                {hasRate && (
+                                  <span className="admin-cohort-pct" style={{ color: col.color }}>{pct}%</span>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Intro activity by month */}
+      {!loading && cohorts.length > 0 && (
+        <div className="admin-intro-activity">
+          <div className="admin-intro-activity-header">
+            <span className="admin-intro-activity-title">Intro Requests by Month</span>
+            {stats && (
+              <span className="admin-intro-activity-total">
+                {stats.totalIntroRequests} total &middot; {stats.successfulIntroRequests} successful &middot; {stats.totalIntroOffers} offers
+              </span>
+            )}
+          </div>
+          <div className="admin-intro-activity-bars">
+            {cohorts.filter(r => r.introsSent > 0 || r.introsOK > 0).length === 0 ? (
+              <span className="admin-intro-activity-empty">No intro requests yet</span>
+            ) : cohorts.map(row => {
+              const maxSent = Math.max(...cohorts.map(r => r.introsSent), 1);
+              const sentWidth = Math.round((row.introsSent / maxSent) * 100);
+              const okWidth = row.introsSent > 0 ? Math.round((row.introsOK / row.introsSent) * 100) : 0;
+              return (
+                <div key={row.month} className="admin-intro-activity-row">
+                  <span className="admin-intro-activity-month">{row.label}</span>
+                  <div className="admin-intro-activity-track">
+                    <div className="admin-intro-activity-bar sent" style={{ width: `${sentWidth}%` }}>
+                      <div className="admin-intro-activity-bar ok" style={{ width: `${okWidth}%` }} />
+                    </div>
+                  </div>
+                  <span className="admin-intro-activity-nums">
+                    <span className="admin-intro-activity-ok">{row.introsOK}</span>
+                    <span className="admin-intro-activity-sep">/</span>
+                    <span>{row.introsSent}</span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="admin-intro-activity-legend">
+            <span className="admin-intro-activity-legend-item"><span className="admin-intro-legend-swatch sent" /> Requested</span>
+            <span className="admin-intro-activity-legend-item"><span className="admin-intro-legend-swatch ok" /> Successful</span>
+          </div>
         </div>
       )}
 
@@ -192,18 +424,45 @@ export function AdminPage() {
           value={search}
           onChange={e => handleSearch(e.target.value)}
         />
-        <div className="admin-filter-tabs">
-          {FUNNEL_STAGES.map(s => (
+
+        <div className="admin-filter-group">
+          <span className="admin-filter-label">Status</span>
+          <div className="admin-filter-pills">
             <button
-              key={s.key}
-              className={`admin-filter-tab ${statusFilter === s.key ? 'active' : ''}`}
-              onClick={() => handleStatusFilter(s.key)}
-            >
-              {s.key && <span className="admin-filter-dot" style={{ background: STATUS_COLORS[s.key] || 'var(--text-muted)' }} />}
-              {s.label}
-            </button>
-          ))}
+              className={`admin-filter-pill ${statusFilter === null ? 'active' : ''}`}
+              onClick={() => setStatusFilter(null)}
+            >All</button>
+            {STATUS_FILTER_OPTIONS.map(opt => (
+              <button
+                key={opt.key}
+                className={`admin-filter-pill ${statusFilter === opt.key ? 'active' : ''}`}
+                onClick={() => setStatusFilter(statusFilter === opt.key ? null : opt.key)}
+              >
+                <span className="admin-filter-dot" style={{ backgroundColor: opt.color }} />
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
+
+        <div className="admin-filter-group">
+          <span className="admin-filter-label">Created</span>
+          <div className="admin-filter-dates">
+            <input type="date" className="admin-date-input" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+            <span className="admin-date-sep">—</span>
+            <input type="date" className="admin-date-input" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+            {(dateFrom || dateTo) && (
+              <button className="admin-filter-clear" onClick={() => { setDateFrom(''); setDateTo(''); }}>&times;</button>
+            )}
+          </div>
+        </div>
+
+        {monthFilter && (
+          <button className="admin-filter-tab active" onClick={() => setMonthFilter(null)}>
+            {formatMonthShort(monthFilter)}
+            <span style={{ marginLeft: 4, opacity: 0.6 }}>&times;</span>
+          </button>
+        )}
       </div>
 
       {/* Users table */}
@@ -211,34 +470,29 @@ export function AdminPage() {
         <table className="admin-table">
           <thead>
             <tr>
-              {COLUMNS.map(col => (
-                <th
-                  key={col.key}
-                  style={{ width: col.width }}
-                  className={col.sortable ? 'sortable' : ''}
-                  onClick={() => col.sortable && col.key !== 'actions' && handleSort(col.key as SortField)}
-                >
-                  {col.label}
-                  {col.sortable && sortField === col.key && (
-                    <span className="admin-sort-arrow">{sortOrder === 'asc' ? ' \u25B2' : ' \u25BC'}</span>
-                  )}
-                </th>
-              ))}
+              <th style={{ width: '220px' }}>User</th>
+              <th style={{ width: '120px' }}>Status</th>
+              <th style={{ width: '400px' }}>Activation</th>
+              <th style={{ width: '180px' }}>Intros</th>
+              <th style={{ width: '80px' }}>Role</th>
+              <th style={{ width: '50px' }}></th>
             </tr>
           </thead>
           <tbody>
-            {loading && users.length === 0 ? (
-              <tr><td colSpan={COLUMNS.length} className="admin-table-empty">Loading...</td></tr>
-            ) : users.length === 0 ? (
-              <tr><td colSpan={COLUMNS.length} className="admin-table-empty">No users found</td></tr>
-            ) : users.map(user => (
-              <UserRow
-                key={user.id}
-                user={user}
-                expanded={expandedUser === user.id}
-                onToggleExpand={() => setExpandedUser(expandedUser === user.id ? null : user.id)}
+            {loading && filteredUsers.length === 0 ? (
+              <tr><td colSpan={COL_COUNT} className="admin-table-empty">Loading...</td></tr>
+            ) : filteredUsers.length === 0 ? (
+              <tr><td colSpan={COL_COUNT} className="admin-table-empty">No users found</td></tr>
+            ) : groupUsersByMonth(filteredUsers).map(group => (
+              <MonthGroup
+                key={group.key}
+                label={group.label}
+                count={group.users.length}
+                users={group.users}
+                expandedUser={expandedUser}
+                onToggleExpand={(id) => setExpandedUser(expandedUser === id ? null : id)}
                 onRoleToggle={handleRoleToggle}
-                isSelf={user.id === currentUser?.id}
+                currentUserId={currentUser?.id}
               />
             ))}
           </tbody>
@@ -254,66 +508,54 @@ export function AdminPage() {
         </div>
       )}
 
-      {/* Pending Invites */}
-      <div className="admin-section">
-        <button className="admin-section-toggle" onClick={() => setShowInvites(!showInvites)}>
-          <span>{showInvites ? '\u25BC' : '\u25B6'} Pending Invites ({stats?.pendingInvites ?? 0})</span>
-        </button>
-        {showInvites && (
-          <div className="admin-invites-list">
-            {pendingInvites.length === 0 ? (
-              <div className="admin-table-empty">No pending invites</div>
-            ) : (
-              <table className="admin-table admin-invites-table">
-                <thead>
-                  <tr>
-                    <th>Email</th>
-                    <th>Invited By</th>
-                    <th>Space</th>
-                    <th>Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pendingInvites.map(inv => (
-                    <tr key={inv.id}>
-                      <td>{inv.email}</td>
-                      <td>{inv.invitedBy.name}</td>
-                      <td>{inv.space ? `${inv.space.emoji} ${inv.space.name}` : '1:1'}</td>
-                      <td>{new Date(inv.createdAt).toLocaleDateString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
 
-function StatCard({ label, value, accent }: { label: string; value: number; accent?: string }) {
+function MonthGroup({ label, count, users, expandedUser, onToggleExpand, onRoleToggle, currentUserId }: {
+  label: string;
+  count: number;
+  users: DisplayUser[];
+  expandedUser: string | null;
+  onToggleExpand: (id: string) => void;
+  onRoleToggle: (id: string, role: string) => void;
+  currentUserId?: string;
+}) {
   return (
-    <div className="admin-stat-card">
-      <div className="admin-stat-value" style={accent ? { color: accent } : undefined}>{value}</div>
-      <div className="admin-stat-label">{label}</div>
-    </div>
+    <>
+      <tr className="admin-month-header">
+        <td colSpan={COL_COUNT}>
+          <span className="admin-month-label">{label}</span>
+          <span className="admin-month-count">{count}</span>
+        </td>
+      </tr>
+      {users.map(user => (
+        <UserRow
+          key={user.id}
+          user={user}
+          expanded={expandedUser === user.id}
+          onToggleExpand={() => onToggleExpand(user.id)}
+          onRoleToggle={onRoleToggle}
+          isSelf={user.id === currentUserId}
+        />
+      ))}
+    </>
   );
 }
 
 function UserRow({ user, expanded, onToggleExpand, onRoleToggle, isSelf }: {
-  user: AdminUser;
+  user: DisplayUser;
   expanded: boolean;
   onToggleExpand: () => void;
   onRoleToggle: (id: string, role: string) => void;
   isSelf: boolean;
 }) {
-  const statusColor = STATUS_COLORS[user.status] || 'var(--text-muted)';
-  const statusLabel = STATUS_LABELS[user.status] || user.status;
+  const steps = getUserCompletedSteps(user);
+  const isPending = 'isPendingInvite' in user && user.isPendingInvite;
 
   return (
     <>
-      <tr className={`admin-user-row ${expanded ? 'expanded' : ''}`} onClick={onToggleExpand}>
+      <tr className={`admin-user-row ${expanded ? 'expanded' : ''} ${isPending ? 'pending-invite' : ''}`} onClick={onToggleExpand}>
         <td>
           <div className="admin-user-cell">
             {user.avatar ? (
@@ -328,22 +570,64 @@ function UserRow({ user, expanded, onToggleExpand, onRoleToggle, isSelf }: {
           </div>
         </td>
         <td>
-          <span className="admin-status-badge" style={{ background: `${statusColor}22`, color: statusColor, borderColor: `${statusColor}44` }}>
-            {statusLabel}
-          </span>
+          {(() => {
+            const s = getStatusDisplay(user.status);
+            return (
+              <span className="admin-status-badge" style={{ '--status-color': s.color } as React.CSSProperties}>
+                <span className="admin-status-dot" style={{ backgroundColor: s.color }} />
+                {s.label}
+              </span>
+            );
+          })()}
         </td>
-        <td className="admin-date">{new Date(user.createdAt).toLocaleDateString()}</td>
-        <td className="admin-num">{user.introRequestsSent}</td>
-        <td className="admin-num">{user.introRequestsSuccessful}</td>
-        <td className="admin-num">{user.introRequestsReceived}</td>
-        <td className="admin-num">{user.introRequestsReceivedSuccessful}</td>
         <td>
-          <span className={`admin-role-badge ${user.role === 'admin' ? 'admin-role-admin' : ''}`}>
+          <div className="admin-user-funnel">
+            <div className="admin-user-funnel-dots">
+              {USER_FUNNEL_STEPS.map((step, i) => (
+                <div key={step.key} className="admin-user-funnel-step">
+                  <div
+                    className={`admin-user-funnel-dot ${steps[i] ? 'done' : ''}`}
+                    style={{ '--step-color': step.color } as React.CSSProperties}
+                    title={step.label}
+                  >
+                    {steps[i] && (
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
+                    )}
+                  </div>
+                  {i < USER_FUNNEL_STEPS.length - 1 && (
+                    <div className={`admin-user-funnel-line ${steps[i] ? 'done' : ''}`} />
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="admin-user-funnel-labels">
+              {USER_FUNNEL_STEPS.map((step, i) => (
+                <span key={step.key} className={`admin-user-funnel-label ${steps[i] ? 'done' : ''}`}>
+                  {step.label}
+                </span>
+              ))}
+            </div>
+          </div>
+        </td>
+        <td>
+          <div className="admin-user-intros">
+            <div className="admin-user-intro-row">
+              <span className="admin-user-intro-label">Sent</span>
+              <span className="admin-user-intro-nums">{user.introRequestsSuccessful}<span className="admin-user-intro-sep">/</span>{user.introRequestsSent}</span>
+            </div>
+            <div className="admin-user-intro-row">
+              <span className="admin-user-intro-label">Recv</span>
+              <span className="admin-user-intro-nums">{user.introRequestsReceivedSuccessful}<span className="admin-user-intro-sep">/</span>{user.introRequestsReceived}</span>
+            </div>
+          </div>
+        </td>
+        <td>
+          <span className={`admin-role-badge ${user.role === 'admin' ? 'admin-role-admin' : user.role === 'invited' ? 'admin-role-invited' : ''}`}>
             {user.role}
           </span>
         </td>
         <td onClick={e => e.stopPropagation()}>
-          {!isSelf && (
+          {!isSelf && !isPending && (
             <button
               className="admin-role-toggle-btn"
               onClick={() => onRoleToggle(user.id, user.role)}
@@ -356,14 +640,24 @@ function UserRow({ user, expanded, onToggleExpand, onRoleToggle, isSelf }: {
       </tr>
       {expanded && (
         <tr className="admin-detail-row">
-          <td colSpan={COLUMNS.length}>
+          <td colSpan={COL_COUNT}>
             <div className="admin-detail-grid">
-              <DetailItem label="Calendar" value={user.calendarConnected ? 'Connected' : 'Not connected'} ok={user.calendarConnected} />
-              <DetailItem label="Contacts" value={String(user.contactsCount)} />
-              <DetailItem label="Enriched" value={String(user.enrichedContactCount)} ok={user.enrichedContactCount > 0} />
-              <DetailItem label="Connections" value={String(user.connectionsCount)} ok={user.connectionsCount > 0} />
-              <DetailItem label="Intros Sent" value={`${user.introRequestsSuccessful} / ${user.introRequestsSent}`} />
-              <DetailItem label="Intros Recv" value={`${user.introRequestsReceivedSuccessful} / ${user.introRequestsReceived}`} />
+              {isPending && 'invitedBy' in user && (
+                <DetailItem label="Invited By" value={user.invitedBy || '—'} />
+              )}
+              <DetailItem label={isPending ? 'Invited' : 'Joined'} value={new Date(user.createdAt).toLocaleDateString()} />
+              {!isPending && (
+                <>
+                  <DetailItem label="Calendar" value={user.calendarConnected ? 'Connected' : 'No'} ok={user.calendarConnected} />
+                  <DetailItem label="Contacts" value={String(user.contactsCount)} />
+                  <DetailItem label="Enriched" value={String(user.enrichedContactCount)} ok={user.enrichedContactCount > 0} />
+                  <DetailItem label="Connections" value={String(user.connectionsCount)} ok={user.connectionsCount > 0} />
+                  <DetailItem label="Intros Requested" value={String(user.introRequestsSent)} />
+                  <DetailItem label="Intros Successful" value={String(user.introRequestsSuccessful)} ok={user.introRequestsSuccessful > 0} />
+                  <DetailItem label="Intros Received" value={String(user.introRequestsReceived)} />
+                  <DetailItem label="Received Successful" value={String(user.introRequestsReceivedSuccessful)} ok={user.introRequestsReceivedSuccessful > 0} />
+                </>
+              )}
             </div>
           </td>
         </tr>
