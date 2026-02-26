@@ -320,6 +320,14 @@ export const authMiddleware: RequestHandler = async (req, res, next) => {
     }
     USER_CACHE.set(payload.userId, { user, expiry: Date.now() + USER_CACHE_TTL });
 
+    // Track daily activity (fire-and-forget, runs once per cache refresh ~5min)
+    const today = new Date().toISOString().slice(0, 10);
+    prisma.userActivity.upsert({
+      where: { userId_date: { userId: payload.userId, date: today } },
+      update: { hits: { increment: 1 } },
+      create: { userId: payload.userId, date: today, hits: 1 },
+    }).catch(() => {});
+
     (req as AuthenticatedRequest).user = user;
     next();
   } catch (error) {

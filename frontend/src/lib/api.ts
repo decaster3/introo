@@ -316,12 +316,16 @@ export interface AdminUser {
   status: string;
   calendarConnected: boolean;
   contactsCount: number;
+  identifiedContactCount: number;
   enrichedContactCount: number;
   connectionsCount: number;
   introRequestsSent: number;
   introRequestsSuccessful: number;
   introRequestsReceived: number;
   introRequestsReceivedSuccessful: number;
+  activeDays7: number;
+  activeDays30: number;
+  lastActiveAt: string | null;
 }
 
 export interface AdminStats {

@@ -46,6 +46,7 @@ model User {
   tags               Tag[]
   pendingInvites     PendingInvite[]
   savedViews         SavedView[]
+  activity           UserActivity[]
 
   @@map("users")
 }
@@ -398,4 +399,16 @@ model Notification {
   @@index([isRead])
   @@index([createdAt])
   @@map("notifications")
+}
+
+model UserActivity {
+  id     String @id @default(cuid())
+  userId String
+  date   String // "YYYY-MM-DD", one row per user per day
+  hits   Int    @default(1)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@index([date])
+  @@map("user_activity")
 }

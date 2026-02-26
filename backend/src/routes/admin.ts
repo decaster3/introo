@@ -140,10 +140,15 @@ router.get('/users', async (req, res) => {
     // Batch-fetch enriched contact counts and intro-received counts
     const userIds = users.map(u => u.id);
 
-    const [enrichedCounts, connectionCounts, introReceivedRows, introReceivedSuccessRows] = await Promise.all([
+    const [enrichedCounts, identifiedCounts, connectionCounts, introReceivedRows, introReceivedSuccessRows] = await Promise.all([
       prisma.contact.groupBy({
         by: ['userId'],
         where: { userId: { in: userIds }, enrichedAt: { not: null } },
+        _count: true,
+      }),
+      prisma.contact.groupBy({
+        by: ['userId'],
+        where: { userId: { in: userIds }, companyId: { not: null } },
         _count: true,
       }),
       prisma.directConnection.groupBy({
@@ -172,6 +177,7 @@ router.get('/users', async (req, res) => {
     ]);
 
     const enrichedMap = new Map(enrichedCounts.map(e => [e.userId, e._count]));
+    const identifiedMap = new Map(identifiedCounts.map(e => [e.userId, e._count]));
 
     // Build accepted-connection set per user (both directions)
     const acceptedConns = await prisma.directConnection.findMany({
@@ -199,6 +205,36 @@ router.get('/users', async (req, res) => {
     });
     const successfulSentMap = new Map(successfulSentRows.map(r => [r.requesterId, r._count]));
 
+    // Activity tracking: days active in last 7 and 30 days, plus last active date
+    const today = new Date();
+    const date7ago = new Date(today); date7ago.setDate(date7ago.getDate() - 7);
+    const date30ago = new Date(today); date30ago.setDate(date30ago.getDate() - 30);
+    const d7 = date7ago.toISOString().slice(0, 10);
+    const d30 = date30ago.toISOString().slice(0, 10);
+
+    const [activity7, activity30, lastActive] = await Promise.all([
+      prisma.userActivity.groupBy({
+        by: ['userId'],
+        where: { userId: { in: userIds }, date: { gte: d7 } },
+        _count: true,
+      }),
+      prisma.userActivity.groupBy({
+        by: ['userId'],
+        where: { userId: { in: userIds }, date: { gte: d30 } },
+        _count: true,
+      }),
+      prisma.$queryRaw<{ userId: string; lastDate: string }[]>`
+        SELECT "userId", MAX(date) AS "lastDate"
+        FROM user_activity
+        WHERE "userId" = ANY(${userIds})
+        GROUP BY "userId"
+      `,
+    ]);
+
+    const activity7Map = new Map(activity7.map(a => [a.userId, a._count]));
+    const activity30Map = new Map(activity30.map(a => [a.userId, a._count]));
+    const lastActiveMap = new Map(lastActive.map(a => [a.userId, a.lastDate]));
+
     let result = users.map(u => {
       const enrichedContactCount = enrichedMap.get(u.id) || 0;
       const hasConnection = connSet.has(u.id) || (spaceMemberMap.get(u.id) || 0) > 0;
@@ -214,12 +250,16 @@ router.get('/users', async (req, res) => {
         status,
         calendarConnected: u.calendarAccounts.length > 0,
         contactsCount: u._count.contacts,
+        identifiedContactCount: identifiedMap.get(u.id) || 0,
         enrichedContactCount,
         connectionsCount: (connSet.has(u.id) ? 1 : 0) + (spaceMemberMap.get(u.id) || 0),
         introRequestsSent: u._count.introRequests,
         introRequestsSuccessful: successfulSentMap.get(u.id) || 0,
         introRequestsReceived: introReceivedMap.get(u.id) || 0,
         introRequestsReceivedSuccessful: introReceivedSuccessMap.get(u.id) || 0,
+        activeDays7: activity7Map.get(u.id) || 0,
+        activeDays30: activity30Map.get(u.id) || 0,
+        lastActiveAt: lastActiveMap.get(u.id) || null,
       };
     });
 

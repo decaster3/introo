@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAppState, useAppActions } from '../store';
 import { adminApi, type AdminUser, type AdminStats, type AdminPendingInvite } from '../lib/api';
 
-const COL_COUNT = 6;
+const COL_COUNT = 7;
 
 const USER_FUNNEL_STEPS = [
   { key: 'invited', label: 'Invited', color: '#f97316' },
@@ -33,12 +33,16 @@ type DisplayUser = AdminUser | {
   createdAt: string;
   calendarConnected: false;
   contactsCount: 0;
+  identifiedContactCount: 0;
   enrichedContactCount: 0;
   connectionsCount: 0;
   introRequestsSent: 0;
   introRequestsSuccessful: 0;
   introRequestsReceived: 0;
   introRequestsReceivedSuccessful: 0;
+  activeDays7: 0;
+  activeDays30: 0;
+  lastActiveAt: null;
   isPendingInvite: true;
   invitedBy?: string;
 };
@@ -54,12 +58,16 @@ function pendingInviteToDisplayUser(inv: AdminPendingInvite): DisplayUser {
     createdAt: inv.createdAt,
     calendarConnected: false,
     contactsCount: 0,
+    identifiedContactCount: 0,
     enrichedContactCount: 0,
     connectionsCount: 0,
     introRequestsSent: 0,
     introRequestsSuccessful: 0,
     introRequestsReceived: 0,
     introRequestsReceivedSuccessful: 0,
+    activeDays7: 0,
+    activeDays30: 0,
+    lastActiveAt: null,
     isPendingInvite: true,
     invitedBy: inv.invitedBy.name,
   };
@@ -474,6 +482,7 @@ export function AdminPage() {
               <th style={{ width: '120px' }}>Status</th>
               <th style={{ width: '400px' }}>Activation</th>
               <th style={{ width: '180px' }}>Intros</th>
+              <th style={{ width: '150px' }}>Activity</th>
               <th style={{ width: '80px' }}>Role</th>
               <th style={{ width: '50px' }}></th>
             </tr>
@@ -622,6 +631,29 @@ function UserRow({ user, expanded, onToggleExpand, onRoleToggle, isSelf }: {
           </div>
         </td>
         <td>
+          <div className="admin-user-activity">
+            <div className="admin-user-activity-row">
+              <span className="admin-user-activity-label">7d</span>
+              <div className="admin-user-activity-bar-track">
+                <div className="admin-user-activity-bar-fill" style={{ width: `${Math.round((user.activeDays7 / 7) * 100)}%` }} />
+              </div>
+              <span className="admin-user-activity-val">{user.activeDays7}/7</span>
+            </div>
+            <div className="admin-user-activity-row">
+              <span className="admin-user-activity-label">30d</span>
+              <div className="admin-user-activity-bar-track">
+                <div className="admin-user-activity-bar-fill" style={{ width: `${Math.round((user.activeDays30 / 30) * 100)}%` }} />
+              </div>
+              <span className="admin-user-activity-val">{user.activeDays30}/30</span>
+            </div>
+            {user.lastActiveAt && (
+              <div className="admin-user-activity-last">
+                Last: {new Date(user.lastActiveAt).toLocaleDateString()}
+              </div>
+            )}
+          </div>
+        </td>
+        <td>
           <span className={`admin-role-badge ${user.role === 'admin' ? 'admin-role-admin' : user.role === 'invited' ? 'admin-role-invited' : ''}`}>
             {user.role}
           </span>
@@ -650,6 +682,7 @@ function UserRow({ user, expanded, onToggleExpand, onRoleToggle, isSelf }: {
                 <>
                   <DetailItem label="Calendar" value={user.calendarConnected ? 'Connected' : 'No'} ok={user.calendarConnected} />
                   <DetailItem label="Contacts" value={String(user.contactsCount)} />
+                  <DetailItem label="Identified" value={String(user.identifiedContactCount)} ok={user.identifiedContactCount > 0} />
                   <DetailItem label="Enriched" value={String(user.enrichedContactCount)} ok={user.enrichedContactCount > 0} />
                   <DetailItem label="Connections" value={String(user.connectionsCount)} ok={user.connectionsCount > 0} />
                   <DetailItem label="Intros Requested" value={String(user.introRequestsSent)} />
