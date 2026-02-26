@@ -87,6 +87,11 @@ function getStatusDisplay(status: string): { label: string; color: string } {
 
 const STATUS_FILTER_OPTIONS = USER_FUNNEL_STEPS.map(s => ({ key: s.key, label: s.label, color: s.color }));
 
+const FUNNEL_EMAILS: Record<number, string> = {
+  0: 'Invitation email sent',
+  1: 'Welcome email sent',
+};
+
 // -- Month helpers --
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -666,7 +671,13 @@ function UserRow({ user, expanded, onToggleExpand, onRoleToggle, isSelf }: {
                     )}
                   </div>
                   {i < USER_FUNNEL_STEPS.length - 1 && (
-                    <div className={`admin-user-funnel-line ${steps[i] ? 'done' : ''}`} />
+                    <div className={`admin-user-funnel-line ${steps[i] ? 'done' : ''}`}>
+                      {FUNNEL_EMAILS[i] && steps[i] && (
+                        <div className="admin-funnel-email" title={FUNNEL_EMAILS[i]}>
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 4L12 13 2 4"/></svg>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               ))}

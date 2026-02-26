@@ -11926,10 +11926,30 @@ body {
   height: 2px;
   background: var(--border-medium);
   flex-shrink: 0;
+  position: relative;
 }
 
 .admin-user-funnel-line.done {
   background: var(--step-color, var(--border-medium));
+}
+
+.admin-funnel-email {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bg-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: help;
+  color: var(--text-muted);
+}
+.admin-funnel-email:hover {
+  color: var(--text-primary);
 }
 
 .admin-user-funnel-labels {
