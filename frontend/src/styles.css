@@ -6884,10 +6884,12 @@ body {
   display: none;
 }
 
+.u-mobile-tabs { display: none; }
+
 @media (max-width: 768px) {
   html, body { font-size: 16px; }
   .ob-float { display: none !important; }
-  .u-filter-toggle-compact { display: none !important; }
+  .u-filter-toggle-compact { display: inline-flex !important; }
 
   /* Sidebar becomes a slide-over drawer */
   .sb {
@@ -6923,62 +6925,129 @@ body {
     -webkit-backdrop-filter: blur(2px);
   }
 
-  /* Show the mobile filter FAB */
-  .sb-mobile-toggle {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
+  /* Hide old floating FAB — replaced by bottom tabs */
+  .sb-mobile-toggle { display: none !important; }
+
+  /* ── Mobile bottom tab bar ── */
+  .u-mobile-tabs {
+    display: flex !important;
     position: fixed;
-    bottom: 1rem; left: 1rem;
-    z-index: 50;
-    padding: 0.55rem 1rem;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-medium);
-    border-radius: 999px;
-    color: var(--text-primary);
-    font-size: 0.78rem;
+    bottom: 0; left: 0; right: 0;
+    z-index: 300;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-subtle);
+    padding: 0.35rem 0 calc(0.35rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .u-mobile-tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.4rem 0;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.62rem;
     font-weight: 600;
     cursor: pointer;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.35);
-    transition: background 0.15s, border-color 0.15s;
+    position: relative;
+    transition: color 0.15s;
   }
-  .sb-mobile-toggle:hover {
-    background: var(--bg-secondary);
-    border-color: var(--accent-primary);
+
+  .u-mobile-tab:hover,
+  .u-mobile-tab--active {
+    color: var(--accent-primary);
   }
-  .sb-mobile-toggle .sb-mobile-badge {
-    display: inline-flex;
+
+  .u-mobile-tab-icon {
+    font-size: 1.25rem;
+    line-height: 1;
+  }
+
+  .u-mobile-tab-badge {
+    position: absolute;
+    top: 0.15rem;
+    right: calc(50% - 1rem);
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: #ef4444;
+    color: #fff;
+    font-size: 0.55rem;
+    font-weight: 700;
+    display: flex;
     align-items: center;
     justify-content: center;
-    min-width: 18px;
-    height: 18px;
-    padding: 0 5px;
-    border-radius: 999px;
-    background: var(--accent-primary);
-    color: #fff;
-    font-size: 0.65rem;
-    font-weight: 700;
+    line-height: 1;
   }
+
+  .u-scroll-area { padding-bottom: 4.5rem; }
+
+  .u-primary-btn.u-fab { bottom: 5rem; }
 
   .sb-reopen { display: none; }
   .u-layout { flex-direction: column; }
 
-  .u-canvas { padding: 0 1rem; }
-  .u-canvas.has-panel { padding-right: 1rem; }
+  .u-canvas {
+    padding: 0 !important;
+    height: auto;
+    overflow-y: visible;
+  }
+  .u-canvas.has-panel { padding-right: 0 !important; }
 
-  .u-topbar { flex-wrap: wrap; }
+  .u-scroll-area {
+    overflow-y: visible;
+    flex: none;
+  }
+
+  .u-table-wrap {
+    border: none;
+    border-radius: 0;
+    background: none;
+    max-height: none;
+  }
+
+  .u-tile {
+    border-left: none;
+    border-right: none;
+    border-radius: 0;
+  }
+
+  .u-topbar { flex-wrap: wrap; position: sticky; top: 0; z-index: 100; background: var(--bg-primary); padding-left: 0.75rem; padding-right: 0.75rem; }
 
   .u-omni { order: 1; flex: 1 1 100%; }
-  .u-topbar-right { order: 2; flex: 1 1 100%; justify-content: flex-end; }
+  .u-topbar-right { display: none !important; }
+
+  .u-source-seg-wrap { padding-left: 0.75rem; padding-right: 0.75rem; }
+  .u-results-bar { padding-left: 0.75rem; padding-right: 0.75rem; }
+  .u-filter-bar-below { padding-left: 0.75rem; padding-right: 0.75rem; }
 
   .u-grid {
     grid-template-columns: 1fr;
   }
 
   .u-panel {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
     width: 100%;
     max-width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    z-index: 250;
+    border-left: none;
+    animation: none;
+    padding: 1rem;
+    padding-bottom: calc(3.5rem + env(safe-area-inset-bottom, 0px));
   }
+
+  .u-canvas.has-panel .u-scroll-area { display: none; }
+  .u-canvas.has-panel .u-topbar { display: none; }
+  .u-canvas.has-panel .u-source-seg-wrap { display: none; }
+  .u-canvas.has-panel .u-results-bar { display: none; }
+  .u-canvas.has-panel .u-filter-bar-below { display: none; }
 
   .u-primary-btn.u-fab {
     position: fixed;
