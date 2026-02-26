@@ -11959,9 +11959,9 @@ body {
   flex-shrink: 0;
 }
 .admin-user-activity-last {
-  font-size: 0.62rem;
-  color: var(--text-muted);
-  margin-top: 0.05rem;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-top: 0.1rem;
 }
 
 /* Month group header */
