@@ -3149,7 +3149,7 @@ export function AIHomePage() {
 
             <div className="u-topbar-right">
               <button
-                className={`u-network-btn ${inlinePanel?.type === 'network-manage' ? 'active' : ''}`}
+                className="u-network-btn"
                 onClick={() => setInlinePanel(inlinePanel?.type === 'network-manage' ? null : { type: 'network-manage' })}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -6217,12 +6217,17 @@ export function AIHomePage() {
               const requestedDateStr = createdDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
               const requestedTimeStr = createdDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
-              const myContactsAtCompany = matchedCompany?.myContacts || [];
+              const myContactsAtCompany = (matchedCompany?.myContacts && matchedCompany.myContacts.length > 0)
+                ? matchedCompany.myContacts
+                : companyDomain
+                  ? contacts.filter(c => c.companyDomain === companyDomain)
+                  : [];
               const isOpen = req.status === 'open';
               const isDone = req.status === 'accepted';
               const isDeclined = req.status === 'declined';
               const isPendingReview = req.adminStatus === 'pending_review';
               const isAdminRejected = req.adminStatus === 'rejected';
+              const is1to1Received = !isSent && !req.space && !!(nq.connectionPeerId);
               const hasDetailsRequested = !!req.detailsRequestedAt;
               const checkedContacts: { at: string; name: string | null; byId: string }[] = Array.isArray(req.checkedWithContacts) && req.checkedWithContacts.length > 0
                 ? req.checkedWithContacts
@@ -6236,7 +6241,7 @@ export function AIHomePage() {
                 if (isOpen && hasDetailsRequested) return { cls: 'inprogress', label: 'Waiting for details' };
                 if (isOpen && hasCheckedWithContact && !isSent) return { cls: 'inprogress', label: 'Checking with contact' };
                 if (isOpen && isSent) return { cls: 'inprogress', label: 'In progress' };
-                if (isOpen && !isSent && myContactsAtCompany.length > 0) return { cls: 'action', label: 'Needs your review' };
+                if (isOpen && !isSent && (myContactsAtCompany.length > 0 || is1to1Received)) return { cls: 'action', label: 'Needs your review' };
                 if (isOpen) return { cls: 'inprogress', label: 'In progress' };
                 if (isDone) return { cls: 'accepted', label: 'Done' };
                 if (isDeclined && isAdminRejected) return { cls: 'declined', label: 'Not approved' };
@@ -6601,7 +6606,7 @@ export function AIHomePage() {
                   })()}
 
                   {/* Actions */}
-                  {isOpen && (isSent || (!isPendingReview && myContactsAtCompany.length > 0)) && (
+                  {isOpen && (isSent || (!isPendingReview && (myContactsAtCompany.length > 0 || is1to1Received))) && (
                     <div className="u-intro-detail-actions">
                       {isSent ? (
                         <button
@@ -6625,43 +6630,81 @@ export function AIHomePage() {
                         </button>
                       ) : (
                         <>
-                          {introActionRequestId === req.id ? (
-                            <div className="u-intro-actions-row">
-                              <button
-                                className="u-action-btn"
-                                onClick={() => { setIntroActionRequestId(null); setIntroActionType(null); setIntroSelectedContact(null); }}
-                              >
-                                ← Back
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="u-intro-actions-row">
-                              <button
-                                className="u-primary-btn"
-                                onClick={() => {
-                                  setIntroActionRequestId(req.id);
-                                  setIntroActionType(null);
-                                  setIntroEmailSubject('');
-                                  setIntroEmailBody('');
-                                  setIntroSelectedContact(myContactsAtCompany.length === 1 ? myContactsAtCompany[0] : null);
-                                }}
-                              >
-                                Make Intro
-                              </button>
-                              <button
-                                className="u-action-btn"
-                                onClick={() => { setConfirmingDoneRequestId(req.id); setDecliningRequestId(null); }}
-                              >
-                                Mark Done
-                              </button>
-                              <button
-                                className="u-action-btn u-action-btn--danger"
-                                onClick={() => { setDecliningRequestId(req.id); setDeclineReason(''); setConfirmingDoneRequestId(null); }}
-                              >
-                                Decline
-                              </button>
-                            </div>
-                          )}
+                          {/* Option cards shown directly */}
+                          {!introActionType && (() => {
+                            const contact = introSelectedContact || myContactsAtCompany[0];
+                            const cn = contact?.name || 'your contact';
+                            const rn = req.requester.name;
+                            const rf = rn.split(' ')[0];
+                            const multipleContacts = myContactsAtCompany.length > 1;
+                            const needsContactPick = (type: string) => multipleContacts && !introSelectedContact && type !== 'ask-details';
+
+                            const handleOptionClick = (type: 'make-intro' | 'ask-details' | 'ask-permission') => {
+                              if (needsContactPick(type)) {
+                                setIntroActionRequestId(req.id);
+                                setIntroActionType(type);
+                                return;
+                              }
+                              const c = introSelectedContact || myContactsAtCompany[0];
+                              const cName = c?.name || 'your contact';
+                              const cFirst = cName.split(' ')[0];
+                              setIntroActionRequestId(req.id);
+                              setIntroActionType(type);
+                              if (!introSelectedContact && myContactsAtCompany.length === 1) setIntroSelectedContact(myContactsAtCompany[0]);
+                              if (type === 'make-intro') {
+                                setIntroEmailSubject(`Introduction: ${rn} ↔ ${cName} (${companyName})`);
+                                setIntroEmailBody(`Hi ${cFirst} and ${rf},\n\nI'd love to connect you two.\n\n${cFirst} — ${rf} is interested in connecting with someone at ${companyName}, and I thought you'd be a great person to talk to.\n\n${rf} — ${cFirst} is at ${companyName}. I think you'll have a lot to discuss.\n\nFeel free to reply all to continue the conversation right here in this thread.\n\nBest,\n${currentUser?.name || ''}`);
+                              } else if (type === 'ask-details') {
+                                setIntroEmailSubject(`About your intro request to ${companyName}`);
+                                setIntroEmailBody(`Hi ${rf},\n\nI saw your request for an intro to someone at ${companyName}.${c ? ` I know ${cFirst} there and may be able to help.` : ''}\n\nBefore I reach out, could you share a bit more about what you're looking for? For example:\n- What's the context for this intro?\n- What would you like to discuss with them?\n- Any specific goals or topics?\n\nJust want to make sure the intro is as useful as possible for both of you. Reply to this email and let me know.\n\nBest,\n${currentUser?.name || ''}`);
+                              } else {
+                                setIntroEmailSubject(`Would you be open to an intro? (${companyName})`);
+                                setIntroEmailBody(`Hi ${cFirst},\n\nI have someone in my network who's looking to connect with someone at ${companyName}. I thought of you and wanted to check — would you be open to an introduction?\n\nNo pressure at all — just reply to this email and let me know.\n\nBest,\n${currentUser?.name || ''}`);
+                              }
+                            };
+
+                            return (
+                              <div className="u-intro-suboptions">
+                                <div className="u-intro-option-cards">
+                                  <button className="u-intro-option-card u-intro-option-card--primary" onClick={() => handleOptionClick('make-intro')}>
+                                    <span className="u-intro-option-icon">{companyDomain ? <CompanyLogo domain={companyDomain} name={companyName} size={20} /> : '🤝'}</span>
+                                    <div className="u-intro-option-text">
+                                      <span className="u-intro-option-label">Connect {rf} with {multipleContacts ? `someone at ${companyName}` : `${cn} at ${companyName}`}</span>
+                                      <span className="u-intro-option-desc">Email both parties with a warm introduction</span>
+                                    </div>
+                                  </button>
+                                  <button className="u-intro-option-card" onClick={() => handleOptionClick('ask-details')}>
+                                    <span className="u-intro-option-icon">💬</span>
+                                    <div className="u-intro-option-text">
+                                      <span className="u-intro-option-label">Ask {rf} for more context</span>
+                                      <span className="u-intro-option-desc">Email {rn} to clarify what they're looking for</span>
+                                    </div>
+                                  </button>
+                                  <button className="u-intro-option-card" onClick={() => handleOptionClick('ask-permission')}>
+                                    <span className="u-intro-option-icon">{companyDomain ? <CompanyLogo domain={companyDomain} name={companyName} size={20} /> : '✋'}</span>
+                                    <div className="u-intro-option-text">
+                                      <span className="u-intro-option-label">Check with {multipleContacts ? `contact at ${companyName}` : `${cn} at ${companyName}`}</span>
+                                      <span className="u-intro-option-desc">{multipleContacts ? `Ask your contact if they're open to the intro` : `Email ${cn} to ask if they're open to the intro`}</span>
+                                    </div>
+                                  </button>
+                                </div>
+                                <div className="u-intro-actions-row" style={{ marginTop: '0.5rem' }}>
+                                  <button
+                                    className="u-action-btn"
+                                    onClick={() => { setConfirmingDoneRequestId(req.id); setDecliningRequestId(null); }}
+                                  >
+                                    Mark Done
+                                  </button>
+                                  <button
+                                    className="u-action-btn u-action-btn--danger"
+                                    onClick={() => { setDecliningRequestId(req.id); setDeclineReason(''); setConfirmingDoneRequestId(null); }}
+                                  >
+                                    Decline
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })()}
 
                           {/* Confirm decline */}
                           {decliningRequestId === req.id && (
@@ -6705,75 +6748,44 @@ export function AIHomePage() {
                             </div>
                           )}
 
-                          {/* Expanded sub-options (contact pick or action cards) */}
-                          {introActionRequestId === req.id && !introActionType && (
+                          {/* Contact picker (when multiple contacts and action needs one) */}
+                          {introActionRequestId === req.id && introActionType && introActionType !== 'ask-details' && myContactsAtCompany.length > 1 && !introSelectedContact && (
                             <div className="u-intro-suboptions">
-                              {myContactsAtCompany.length > 1 && !introSelectedContact ? (
-                                <div className="u-intro-contact-pick">
-                                  <span className="u-intro-contact-pick-label">Who do you want to introduce?</span>
-                                  {myContactsAtCompany.map(c => (
-                                    <button key={c.id} className="u-intro-contact-pick-item" onClick={() => setIntroSelectedContact(c)}>
-                                      <PersonAvatar email={c.email} name={c.name} size={28} />
-                                      <div className="u-intro-contact-pick-info">
-                                        <span className="u-intro-contact-pick-name">{c.name}</span>
-                                        {c.title && <span className="u-intro-contact-pick-title">{c.title}</span>}
-                                      </div>
-                                    </button>
-                                  ))}
-                                </div>
-                              ) : (() => {
-                                const hasContact = !!(introSelectedContact || myContactsAtCompany[0]);
-                                const cn = introSelectedContact?.name || myContactsAtCompany[0]?.name || 'your contact';
-                                const cf = cn.split(' ')[0];
-                                const rn = req.requester.name;
-                                const rf = rn.split(' ')[0];
-                                return (
-                                  <div className="u-intro-option-cards">
-                                    {hasContact && (
-                                    <button className="u-intro-option-card u-intro-option-card--primary" onClick={() => {
-                                      setIntroActionType('make-intro');
-                                      setIntroEmailSubject(`Introduction: ${rn} ↔ ${cn} (${companyName})`);
-                                      setIntroEmailBody(`Hi ${cf} and ${rf},\n\nI'd love to connect you two.\n\n${cf} — ${rf} is interested in connecting with someone at ${companyName}, and I thought you'd be a great person to talk to.\n\n${rf} — ${cf} is at ${companyName}. I think you'll have a lot to discuss.\n\nFeel free to reply all to continue the conversation right here in this thread.\n\nBest,\n${currentUser?.name || ''}`);
-                                    }}>
-                                      <span className="u-intro-option-icon">{companyDomain ? <CompanyLogo domain={companyDomain} name={companyName} size={20} /> : '🤝'}</span>
-                                      <div className="u-intro-option-text">
-                                        <span className="u-intro-option-label">Connect {rf} with {cf} at {companyName}</span>
-                                        <span className="u-intro-option-desc">Email both parties with a warm introduction</span>
-                                      </div>
-                                    </button>
-                                    )}
-                                    <button className="u-intro-option-card" onClick={() => {
-                                      setIntroActionType('ask-details');
-                                      setIntroEmailSubject(`About your intro request to ${companyName}`);
-                                      setIntroEmailBody(`Hi ${rf},\n\nI saw your request for an intro to someone at ${companyName}.${hasContact ? ` I know ${cf} there and may be able to help.` : ''}\n\nBefore I reach out, could you share a bit more about what you're looking for? For example:\n- What's the context for this intro?\n- What would you like to discuss with them?\n- Any specific goals or topics?\n\nJust want to make sure the intro is as useful as possible for both of you. Reply to this email and let me know.\n\nBest,\n${currentUser?.name || ''}`);
-                                    }}>
-                                      <span className="u-intro-option-icon">💬</span>
-                                      <div className="u-intro-option-text">
-                                        <span className="u-intro-option-label">Ask {rf} for more context</span>
-                                        <span className="u-intro-option-desc">Email {rn} to clarify what they're looking for</span>
-                                      </div>
-                                    </button>
-                                    {hasContact && (
-                                    <button className="u-intro-option-card" onClick={() => {
-                                      setIntroActionType('ask-permission');
+                              <div className="u-intro-contact-pick">
+                                <span className="u-intro-contact-pick-label">
+                                  {introActionType === 'make-intro' ? 'Who do you want to introduce?' : 'Which contact do you want to check with?'}
+                                </span>
+                                {myContactsAtCompany.map(c => {
+                                  const cName = c.name || 'Contact';
+                                  const cFirst = cName.split(' ')[0];
+                                  const rn = req.requester.name;
+                                  const rf = rn.split(' ')[0];
+                                  return (
+                                  <button key={c.id} className="u-intro-contact-pick-item" onClick={() => {
+                                    setIntroSelectedContact(c);
+                                    if (introActionType === 'make-intro') {
+                                      setIntroEmailSubject(`Introduction: ${rn} ↔ ${cName} (${companyName})`);
+                                      setIntroEmailBody(`Hi ${cFirst} and ${rf},\n\nI'd love to connect you two.\n\n${cFirst} — ${rf} is interested in connecting with someone at ${companyName}, and I thought you'd be a great person to talk to.\n\n${rf} — ${cFirst} is at ${companyName}. I think you'll have a lot to discuss.\n\nFeel free to reply all to continue the conversation right here in this thread.\n\nBest,\n${currentUser?.name || ''}`);
+                                    } else {
                                       setIntroEmailSubject(`Would you be open to an intro? (${companyName})`);
-                                      setIntroEmailBody(`Hi ${cf},\n\nI have someone in my network who's looking to connect with someone at ${companyName}. I thought of you and wanted to check — would you be open to an introduction?\n\nNo pressure at all — just reply to this email and let me know.\n\nBest,\n${currentUser?.name || ''}`);
-                                    }}>
-                                      <span className="u-intro-option-icon">{companyDomain ? <CompanyLogo domain={companyDomain} name={companyName} size={20} /> : '✋'}</span>
-                                      <div className="u-intro-option-text">
-                                        <span className="u-intro-option-label">Check with {cf} at {companyName}</span>
-                                        <span className="u-intro-option-desc">Email {cn} to ask if they're open to the intro</span>
-                                      </div>
-                                    </button>
-                                    )}
-                                  </div>
-                                );
-                              })()}
+                                      setIntroEmailBody(`Hi ${cFirst},\n\nI have someone in my network who's looking to connect with someone at ${companyName}. I thought of you and wanted to check — would you be open to an introduction?\n\nNo pressure at all — just reply to this email and let me know.\n\nBest,\n${currentUser?.name || ''}`);
+                                    }
+                                  }}>
+                                    <PersonAvatar email={c.email} name={c.name} size={28} />
+                                    <div className="u-intro-contact-pick-info">
+                                      <span className="u-intro-contact-pick-name">{c.name}</span>
+                                      {c.title && <span className="u-intro-contact-pick-title">{c.title}</span>}
+                                    </div>
+                                  </button>
+                                  );
+                                })}
+                              </div>
+                              <button className="u-intro-cancel" style={{ marginTop: '0.5rem' }} onClick={() => { setIntroActionType(null); }}>Back</button>
                             </div>
                           )}
 
                           {/* Email composer */}
-                          {introActionRequestId === req.id && introActionType && (() => {
+                          {introActionRequestId === req.id && introActionType && (introActionType === 'ask-details' || introSelectedContact || myContactsAtCompany.length <= 1) && (() => {
                             const contact = introSelectedContact || myContactsAtCompany[0];
                             const recipientLabel = introActionType === 'ask-details'
                               ? `To: ${req.requester.email || req.requester.name}`
