@@ -635,21 +635,27 @@ function UserRow({ user, expanded, onToggleExpand, onRoleToggle, isSelf }: {
             <div className="admin-user-activity-row">
               <span className="admin-user-activity-label">7d</span>
               <div className="admin-user-activity-bar-track">
-                <div className="admin-user-activity-bar-fill" style={{ width: `${Math.round((user.activeDays7 / 7) * 100)}%` }} />
+                {user.activeDays7 > 0 && (
+                  <div className="admin-user-activity-bar-fill" style={{ width: `${Math.round((user.activeDays7 / 7) * 100)}%` }} />
+                )}
               </div>
-              <span className="admin-user-activity-val">{user.activeDays7}/7</span>
+              <span className={`admin-user-activity-val ${user.activeDays7 === 0 ? 'zero' : ''}`}>{user.activeDays7}/7</span>
             </div>
             <div className="admin-user-activity-row">
               <span className="admin-user-activity-label">30d</span>
               <div className="admin-user-activity-bar-track">
-                <div className="admin-user-activity-bar-fill" style={{ width: `${Math.round((user.activeDays30 / 30) * 100)}%` }} />
+                {user.activeDays30 > 0 && (
+                  <div className="admin-user-activity-bar-fill" style={{ width: `${Math.round((user.activeDays30 / 30) * 100)}%` }} />
+                )}
               </div>
-              <span className="admin-user-activity-val">{user.activeDays30}/30</span>
+              <span className={`admin-user-activity-val ${user.activeDays30 === 0 ? 'zero' : ''}`}>{user.activeDays30}/30</span>
             </div>
-            {user.lastActiveAt && (
+            {user.lastActiveAt ? (
               <div className="admin-user-activity-last">
                 Last: {new Date(user.lastActiveAt).toLocaleDateString()}
               </div>
+            ) : (
+              <div className="admin-user-activity-last zero">Never</div>
             )}
           </div>
         </td>
