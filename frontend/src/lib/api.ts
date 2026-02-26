@@ -366,6 +366,11 @@ export const adminApi = {
       body: JSON.stringify({ role }),
     }),
   getPendingInvites: () => request<AdminPendingInvite[]>('/api/admin/pending-invites'),
+  getActivityChart: () => request<{
+    wau: { week: string; count: number }[];
+    mau: { month: string; count: number }[];
+    dau: { date: string; count: number }[];
+  }>('/api/admin/activity-chart'),
 };
 
 export interface IntroRequestResponse {

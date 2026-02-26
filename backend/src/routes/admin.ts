@@ -367,4 +367,66 @@ router.get('/pending-invites', async (req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// GET /api/admin/activity-chart  — WAU/MAU over time
+// ---------------------------------------------------------------------------
+router.get('/activity-chart', async (_req, res) => {
+  try {
+    // Get all activity records from last 6 months
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const cutoff = sixMonthsAgo.toISOString().slice(0, 10);
+
+    const rows = await prisma.userActivity.findMany({
+      where: { date: { gte: cutoff } },
+      select: { userId: true, date: true },
+      orderBy: { date: 'asc' },
+    });
+
+    // Build WAU: for each week (ISO week ending Sunday), count distinct users
+    const wauMap = new Map<string, Set<string>>();
+    // Build MAU: for each month, count distinct users
+    const mauMap = new Map<string, Set<string>>();
+    // Build DAU: for each day, count distinct users
+    const dauMap = new Map<string, Set<string>>();
+
+    for (const r of rows) {
+      // DAU
+      if (!dauMap.has(r.date)) dauMap.set(r.date, new Set());
+      dauMap.get(r.date)!.add(r.userId);
+
+      // MAU by month key
+      const monthKey = r.date.slice(0, 7); // "YYYY-MM"
+      if (!mauMap.has(monthKey)) mauMap.set(monthKey, new Set());
+      mauMap.get(monthKey)!.add(r.userId);
+
+      // WAU by week (Monday-based)
+      const d = new Date(r.date);
+      const day = d.getDay();
+      const monday = new Date(d);
+      monday.setDate(d.getDate() - ((day + 6) % 7));
+      const weekKey = monday.toISOString().slice(0, 10);
+      if (!wauMap.has(weekKey)) wauMap.set(weekKey, new Set());
+      wauMap.get(weekKey)!.add(r.userId);
+    }
+
+    const wau = Array.from(wauMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([week, users]) => ({ week, count: users.size }));
+
+    const mau = Array.from(mauMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([month, users]) => ({ month, count: users.size }));
+
+    const dau = Array.from(dauMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, users]) => ({ date, count: users.size }));
+
+    res.json({ wau, mau, dau });
+  } catch (error) {
+    console.error('[admin] activity-chart error:', error);
+    res.status(500).json({ error: 'Failed to fetch activity chart' });
+  }
+});
+
 export default router;

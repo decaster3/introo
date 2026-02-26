@@ -200,6 +200,7 @@ export function AdminPage() {
   const [dateTo, setDateTo] = useState('');
   const sortField = 'createdAt';
   const sortOrder = 'desc';
+  const [activityChart, setActivityChart] = useState<{ wau: { week: string; count: number }[]; mau: { month: string; count: number }[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
@@ -225,15 +226,17 @@ export function AdminPage() {
         page: p?.page ?? pagination.page,
         limit: pagination.limit,
       };
-      const [statsRes, usersRes, invitesRes] = await Promise.all([
+      const [statsRes, usersRes, invitesRes, chartRes] = await Promise.all([
         adminApi.getStats(),
         adminApi.getUsers(params),
         adminApi.getPendingInvites(),
+        adminApi.getActivityChart(),
       ]);
       setStats(statsRes);
       setUsers(usersRes.data);
       setPagination(usersRes.pagination);
       setPendingInvites(invitesRes);
+      setActivityChart(chartRes);
     } catch (err: any) {
       setError(err.message || 'Failed to load admin data');
     } finally {
@@ -320,6 +323,60 @@ export function AdminPage() {
       </header>
 
       {error && <div className="admin-error">{error}</div>}
+
+      {/* Active Users Chart */}
+      {!loading && activityChart && (activityChart.wau.length > 0 || activityChart.mau.length > 0) && (
+        <div className="admin-au-section">
+          <div className="admin-au-header">
+            <span className="admin-au-title">Active Users</span>
+          </div>
+          <div className="admin-au-charts">
+            {activityChart.mau.length > 0 && (
+              <div className="admin-au-chart">
+                <div className="admin-au-chart-label">Monthly Active Users (MAU)</div>
+                <div className="admin-au-bars">
+                  {(() => {
+                    const max = Math.max(...activityChart.mau.map(m => m.count), 1);
+                    return activityChart.mau.map(m => (
+                      <div key={m.month} className="admin-au-bar-col">
+                        <span className="admin-au-bar-val">{m.count}</span>
+                        <div className="admin-au-bar-track">
+                          <div className="admin-au-bar-fill mau" style={{ height: `${Math.max(4, Math.round((m.count / max) * 100))}%` }} />
+                        </div>
+                        <span className="admin-au-bar-label">{m.month.slice(5)}/{m.month.slice(2, 4)}</span>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </div>
+            )}
+            {activityChart.wau.length > 0 && (
+              <div className="admin-au-chart">
+                <div className="admin-au-chart-label">Weekly Active Users (WAU)</div>
+                <div className="admin-au-bars">
+                  {(() => {
+                    const max = Math.max(...activityChart.wau.map(w => w.count), 1);
+                    const recent = activityChart.wau.slice(-12);
+                    return recent.map(w => {
+                      const d = new Date(w.week);
+                      const label = `${d.getMonth() + 1}/${d.getDate()}`;
+                      return (
+                        <div key={w.week} className="admin-au-bar-col">
+                          <span className="admin-au-bar-val">{w.count}</span>
+                          <div className="admin-au-bar-track">
+                            <div className="admin-au-bar-fill wau" style={{ height: `${Math.max(4, Math.round((w.count / max) * 100))}%` }} />
+                          </div>
+                          <span className="admin-au-bar-label">{label}</span>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Cohort analysis */}
       {!loading && users.length > 0 && (

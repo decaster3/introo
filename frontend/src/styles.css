@@ -11251,8 +11251,80 @@ body {
 }
 
 /* Cohort analysis */
+/* Active Users chart */
+.admin-au-section {
+  padding: 3rem 2rem;
+}
+.admin-au-header {
+  margin-bottom: 1.25rem;
+}
+.admin-au-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.admin-au-charts {
+  display: flex;
+  gap: 3rem;
+}
+.admin-au-chart {
+  flex: 1;
+  min-width: 0;
+}
+.admin-au-chart-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+  font-weight: 500;
+}
+.admin-au-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.35rem;
+  height: 120px;
+}
+.admin-au-bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+}
+.admin-au-bar-val {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.admin-au-bar-track {
+  width: 100%;
+  height: 80px;
+  display: flex;
+  align-items: flex-end;
+}
+.admin-au-bar-fill {
+  width: 100%;
+  border-radius: 3px 3px 0 0;
+  transition: height 0.3s ease;
+}
+.admin-au-bar-fill.mau {
+  background: rgba(96, 165, 250, 0.5);
+}
+.admin-au-bar-fill.wau {
+  background: rgba(74, 222, 128, 0.5);
+}
+.admin-au-bar-label {
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 .admin-cohort-section {
-  padding: 2rem 2rem 1.75rem;
+  padding: 3rem 2rem;
+  border-top: 1px solid var(--border-subtle);
 }
 
 .admin-cohort-header {
@@ -11384,7 +11456,7 @@ body {
 
 /* Intro activity */
 .admin-intro-activity {
-  padding: 2rem 2rem 1.75rem;
+  padding: 3rem 2rem;
   border-top: 1px solid var(--border-subtle);
 }
 .admin-intro-activity-header {
@@ -11490,7 +11562,7 @@ body {
 
 /* Controls */
 .admin-controls {
-  padding: 2rem 2rem 1.25rem;
+  padding: 3rem 2rem 1.5rem;
   border-top: 1px solid var(--border-subtle);
   display: flex;
   flex-wrap: wrap;
