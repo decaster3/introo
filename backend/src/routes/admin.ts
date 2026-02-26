@@ -38,14 +38,14 @@ router.get('/stats', async (_req, res) => {
       `.then(r => Number(r[0]?.cnt ?? 0)),
       prisma.pendingInvite.count({ where: { status: 'pending' } }),
       prisma.introRequest.count(),
-      prisma.introRequest.count({ where: { status: 'done' } }),
+      prisma.introRequest.count({ where: { status: { in: ['accepted', 'completed'] } } }),
       prisma.introOffer.count(),
       prisma.$queryRaw<{ cnt: bigint }[]>`
         SELECT COUNT(DISTINCT uid) AS cnt FROM (
-          SELECT ir."requesterId" AS uid FROM intro_requests ir WHERE ir.status = 'done'
+          SELECT ir."requesterId" AS uid FROM intro_requests ir WHERE ir.status IN ('accepted', 'completed')
           UNION
           SELECT io."introducerId" AS uid FROM intro_offers io
-            JOIN intro_requests ir2 ON ir2.id = io."requestId" AND ir2.status = 'done'
+            JOIN intro_requests ir2 ON ir2.id = io."requestId" AND ir2.status IN ('accepted', 'completed')
         ) t
       `.then(r => Number(r[0]?.cnt ?? 0)),
     ]);
@@ -166,7 +166,7 @@ router.get('/users', async (req, res) => {
         SELECT pm."userId", COUNT(DISTINCT ir.id) AS cnt
         FROM pod_members pm
         JOIN intro_requests ir ON ir."podId" = pm."podId" AND ir."requesterId" != pm."userId"
-        WHERE pm."userId" = ANY(${userIds}) AND pm.status = 'approved' AND ir.status = 'done'
+        WHERE pm."userId" = ANY(${userIds}) AND pm.status = 'approved' AND ir.status IN ('accepted', 'completed')
         GROUP BY pm."userId"
       `,
     ]);
@@ -192,10 +192,9 @@ router.get('/users', async (req, res) => {
     });
     const spaceMemberMap = new Map(spaceMemberCounts.map(s => [s.userId, s._count]));
 
-    // Successful intro requests sent (status = 'done')
     const successfulSentRows = await prisma.introRequest.groupBy({
       by: ['requesterId'],
-      where: { requesterId: { in: userIds }, status: 'done' },
+      where: { requesterId: { in: userIds }, status: { in: ['accepted', 'completed'] } },
       _count: true,
     });
     const successfulSentMap = new Map(successfulSentRows.map(r => [r.requesterId, r._count]));
