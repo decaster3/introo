@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { calendarApi, authApi, type CalendarAccountInfo } from '../../lib/api';
 import { PersonAvatar } from '../../components';
 import { resetOnboarding } from '../../components/OnboardingTour';
+import { resetChecklist } from '../../components/OnboardingChecklist';
 import type { User } from '../../types';
 
 interface SettingsPanelProps {
@@ -235,12 +236,12 @@ export function SettingsPanel({
         </a>
         <button
           className="u-settings-help-item"
-          onClick={() => { resetOnboarding(); window.location.reload(); }}
+          onClick={() => { resetOnboarding(); resetChecklist(); window.location.reload(); }}
         >
           <span className="u-settings-help-icon">🎯</span>
           <div className="u-settings-help-text">
-            <span className="u-settings-help-name">Replay product tour</span>
-            <span className="u-settings-help-desc">Step-by-step walkthrough of the app</span>
+            <span className="u-settings-help-name">Reset onboarding checklist</span>
+            <span className="u-settings-help-desc">Show the getting-started checklist again</span>
           </div>
           <span className="u-settings-help-arrow">→</span>
         </button>

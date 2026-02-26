@@ -5,7 +5,7 @@ import type { Contact } from '../store/types';
 import { relationshipsApi } from '../lib/api';
 
 export function OnboardingPage() {
-  const { currentUser, contacts } = useAppState();
+  const { contacts } = useAppState();
   const dispatch = useAppDispatch();
   const { syncCalendar } = useAppActions();
   const navigate = useNavigate();
@@ -15,9 +15,9 @@ export function OnboardingPage() {
   const [parsedContacts, setParsedContacts] = useState<Contact[]>([]);
   const [step, setStep] = useState<'connect' | 'review' | 'complete'>('connect');
 
-  // If already has contacts, redirect
+  // If already has contacts, go straight to home
   if (contacts && contacts.length > 0 && step === 'connect') {
-    navigate('/dashboard');
+    navigate('/home');
     return null;
   }
 
@@ -87,42 +87,16 @@ export function OnboardingPage() {
   };
 
   const handleAddContacts = () => {
-    // Save to localStorage
-    const savedContacts = localStorage.getItem('spaces_contacts');
-    let existingContacts: Contact[] = [];
-    try {
-      existingContacts = savedContacts ? JSON.parse(savedContacts) : [];
-    } catch (e) {
-      console.warn('Failed to parse saved contacts, resetting:', e);
-    }
-    const allContacts = [...existingContacts, ...parsedContacts];
-    localStorage.setItem('spaces_contacts', JSON.stringify(allContacts));
-
-    // Update state
     parsedContacts.forEach(contact => {
       dispatch({ type: 'ADD_CONTACT', payload: contact });
     });
 
     setStep('complete');
-    setTimeout(() => navigate('/network'), 1500);
+    setTimeout(() => navigate('/home'), 1500);
   };
 
   const handleSkip = () => {
-    // Add a single placeholder contact so they can proceed
-    const placeholderContact: Contact = {
-      id: `placeholder-${Date.now()}`,
-      email: currentUser?.email || 'user@example.com',
-      name: currentUser?.name || 'You',
-      title: null,
-      isApproved: true,
-      meetingsCount: 0,
-      lastSeenAt: new Date().toISOString(),
-      company: null,
-    };
-    
-    localStorage.setItem('spaces_contacts', JSON.stringify([placeholderContact]));
-    dispatch({ type: 'ADD_CONTACT', payload: placeholderContact });
-    navigate('/network');
+    navigate('/home');
   };
 
   if (step === 'complete') {

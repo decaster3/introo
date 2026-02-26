@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware, AuthenticatedRequest } from '../middleware/auth.js';
 import { syncCalendarForUser, getCalendarSyncStatus, syncCalendarAccount, getCalendarAccounts } from '../services/calendar.js';
+import { runEnrichmentForUser } from './enrichment.js';
 import prisma from '../lib/prisma.js';
 
 const router = Router();
@@ -64,6 +65,9 @@ router.post('/accounts/:accountId/sync', async (req, res) => {
     console.log('Starting calendar sync for account:', accountId);
     const result = await syncCalendarAccount(userId, accountId);
     console.log('Calendar sync completed:', result);
+
+    runEnrichmentForUser(userId);
+
     res.json({
       success: true,
       ...result,
@@ -102,6 +106,9 @@ router.post('/sync', async (req, res) => {
     console.log('Starting calendar sync for user:', userId);
     const result = await syncCalendarForUser(userId);
     console.log('Calendar sync completed:', result);
+
+    runEnrichmentForUser(userId);
+
     res.json({
       success: true,
       ...result,

@@ -3,7 +3,8 @@ import { Navigate } from 'react-router-dom';
 import { useAppState, useAppActions } from '../store';
 import { API_BASE, calendarApi, requestsApi, spacesApi, notificationsApi, offersApi, tagsApi, emailApi, viewsApi, enrichmentApi, relationshipsApi, type CalendarAccountInfo, type IntroRequestResponse } from '../lib/api';
 import { calculateStrength, type SpaceCompany, type DisplayContact, type MergedCompany, type ViewFilters, type SavedView, type ViewSortRule, type InlinePanel } from '../types';
-import { PersonAvatar, CompanyLogo, OnboardingTour } from '../components';
+import { PersonAvatar, CompanyLogo, OnboardingChecklist } from '../components';
+import type { ChecklistProgress, ChecklistActions } from '../components';
 import { ProfilePanel, SettingsPanel, NotificationsPanel } from '../components/panels';
 import { useProfile } from '../hooks/useProfile';
 import { useEnrichment } from '../hooks/useEnrichment';
@@ -221,7 +222,7 @@ export function AIHomePage() {
   const [contactsExpanded, setContactsExpanded] = useState(false);
   const [aboutExpanded, setAboutExpanded] = useState(false);
   const [inlinePanel, setInlinePanel] = useState<InlinePanel | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 768);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<'filters' | 'views'>('filters');
   const [editingViewId, setEditingViewId] = useState<string | null>(null);
   const [editingViewName, setEditingViewName] = useState('');
@@ -256,8 +257,6 @@ export function AIHomePage() {
   const [introToast, setIntroToast] = useState<string | null>(null);
 
   // ─── Onboarding activation state ────────────────────────────────────────────
-  const [showNetworkSplash, setShowNetworkSplash] = useState(false);
-  const [networkSplashData, setNetworkSplashData] = useState<{ contacts: number; companies: number; strong: number; topIndustry: string } | null>(null);
   const [, setCompanyPanelViewCount] = useState(0);
   const [showTagTip, setShowTagTip] = useState(false);
   const [showViewPrompt, setShowViewPrompt] = useState(false);
@@ -321,6 +320,21 @@ export function AIHomePage() {
     sendConnectionRequest, acceptConnection, rejectConnection, removeConnection,
     cancelInvite,
   } = useConnectionManagement(refreshNotifications);
+
+  // Accept-connection confirmation modal
+  const [acceptModalConnectionId, setAcceptModalConnectionId] = useState<string | null>(null);
+  const acceptModalConnection = acceptModalConnectionId
+    ? connections.find(c => c.id === acceptModalConnectionId) ?? null
+    : null;
+  const handleAcceptWithModal = useCallback((id: string) => {
+    setAcceptModalConnectionId(id);
+  }, []);
+  const confirmAcceptConnection = useCallback(() => {
+    if (acceptModalConnectionId) {
+      acceptConnection(acceptModalConnectionId);
+      setAcceptModalConnectionId(null);
+    }
+  }, [acceptModalConnectionId, acceptConnection]);
 
   // Calendar state
   const [calendarSyncing, setCalendarSyncing] = useState(false);
@@ -1652,31 +1666,6 @@ export function AIHomePage() {
 
   // ─── Onboarding activation effects ──────────────────────────────────────────
 
-  // #1 Network splash: show after first sync completes
-  const prevLoadingPhaseRef = useRef(loadingPhase);
-  useEffect(() => {
-    const prev = prevLoadingPhaseRef.current;
-    prevLoadingPhaseRef.current = loadingPhase;
-    if ((prev === 'syncing' || prev === 'enriching') && loadingPhase === 'ready' && !localStorage.getItem('introo_splash_seen')) {
-      // Compute splash stats
-      const strong = mergedCompanies.filter(c => c.hasStrongConnection).length;
-      const industryCounts: Record<string, number> = {};
-      mergedCompanies.forEach(c => {
-        if (c.industry) {
-          industryCounts[c.industry] = (industryCounts[c.industry] || 0) + 1;
-        }
-      });
-      const topIndustry = Object.entries(industryCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
-      setNetworkSplashData({
-        contacts: contacts.length,
-        companies: mergedCompanies.length,
-        strong,
-        topIndustry,
-      });
-      setShowNetworkSplash(true);
-      localStorage.setItem('introo_splash_seen', 'true');
-    }
-  }, [loadingPhase]);
 
 
   // #6 Tag tip: show after viewing 3+ company panels
@@ -2194,6 +2183,71 @@ export function AIHomePage() {
   // ─── Sidebar section helper ────────────────────────────────────────────────
   // SidebarSection is now a stable component defined outside AIHomePage.
 
+  // ─── Onboarding checklist: progress auto-detection ─────────────────────────
+
+  // Track localStorage-based flags via side effects
+  useEffect(() => {
+    if (inlinePanel?.type === 'company' || inlinePanel?.type === 'person') {
+      localStorage.setItem('introo_explored_company', 'true');
+    }
+  }, [inlinePanel?.type]);
+
+  useEffect(() => {
+    if (enrichStats && enrichStats.contacts.enriched > 0) {
+      localStorage.setItem('introo_enriched_contacts', 'true');
+    }
+  }, [enrichStats]);
+
+  useEffect(() => {
+    const sf = sidebarFilters;
+    const hasSidebarFilter =
+      sf.categories.length > 0 || sf.aiKeywords.length > 0 || sf.excludeKeywords.length > 0 ||
+      sf.employeeRanges.length > 0 || sf.country || sf.city ||
+      sf.fundingRounds.length > 0 || sf.fundingRecency !== 'any' ||
+      sf.foundedFrom || sf.foundedTo || sf.revenueRanges.length > 0 ||
+      sf.technologies.length > 0 || sf.connectedYears.length > 0 || sf.connectedMonths.length > 0 ||
+      sf.lastContactYears.length > 0 || sf.lastContactMonths.length > 0 ||
+      sf.description;
+    const hasExplicitFilter =
+      hasSidebarFilter || strengthFilter !== 'all' ||
+      tagInclude.length > 0 || tagExclude.length > 0;
+    if (hasExplicitFilter) {
+      localStorage.setItem('introo_applied_filter', 'true');
+    }
+  }, [sidebarFilters, strengthFilter, tagInclude, tagExclude]);
+
+  const checklistProgress: ChecklistProgress = useMemo(() => ({
+    connectCalendar: isCalendarConnected,
+    enrichContacts: !!localStorage.getItem('introo_enriched_contacts'),
+    openCard: !!localStorage.getItem('introo_explored_company'),
+    applyFilter: !!localStorage.getItem('introo_applied_filter'),
+    saveView: savedViews.length > 0,
+    acceptConnection: connections.filter(c => c.status === 'accepted').length > 0,
+    inviteFriend: connections.length > 0 || pendingInvites.length > 0,
+    requestIntro: (myIntroRequests || []).length > 0,
+  }), [isCalendarConnected, savedViews.length, connections, pendingInvites.length, spaces.length, myIntroRequests]);
+
+  const checklistActions: ChecklistActions = useMemo(() => ({
+    connectCalendar: () => setInlinePanel({ type: 'settings' }),
+    enrichContacts: () => { startEnrichment(); },
+    openCard: () => {
+      const first = displayCompanies[0] || mergedCompanies[0];
+      if (first) setInlinePanel({ type: 'company', company: first });
+    },
+    applyFilter: () => { setSidebarOpen(true); setSidebarTab('filters'); },
+    saveView: () => { setSidebarOpen(true); setSidebarTab('views'); },
+    acceptConnection: () => setInlinePanel({ type: 'network-manage' }),
+    inviteFriend: () => setInlinePanel({ type: 'network-manage' }),
+    requestIntro: () => {
+      const reachable = mergedCompanies.find(c => c.spaceCount > 0);
+      if (reachable) {
+        openIntroPanel(reachable);
+      } else {
+        setInlinePanel({ type: 'network-manage' });
+      }
+    },
+  }), [displayCompanies, mergedCompanies, startEnrichment, openIntroPanel]);
+
   // ─── Render ─────────────────────────────────────────────────────────────────
 
   // Redirect to login if not authenticated (after all hooks have run)
@@ -2209,44 +2263,6 @@ export function AIHomePage() {
         <div className={`u-toast ${introToast.includes('Failed') ? 'u-toast--error' : 'u-toast--success'}`}>
           {introToast}
         </div>
-      )}
-
-      {/* #1 Network stats splash screen after first sync */}
-      {showNetworkSplash && networkSplashData && (
-        <div className="ob-splash-overlay" onClick={() => setShowNetworkSplash(false)}>
-          <div className="ob-splash" onClick={e => e.stopPropagation()}>
-            <div className="ob-splash-orb" />
-            <h2 className="ob-splash-title">Your network is ready</h2>
-            <div className="ob-splash-stats">
-              <div className="ob-splash-stat">
-                <span className="ob-splash-stat-num">{networkSplashData.contacts}</span>
-                <span className="ob-splash-stat-label">contacts</span>
-              </div>
-              <div className="ob-splash-stat">
-                <span className="ob-splash-stat-num">{networkSplashData.companies}</span>
-                <span className="ob-splash-stat-label">companies</span>
-              </div>
-              {networkSplashData.strong > 0 && (
-                <div className="ob-splash-stat">
-                  <span className="ob-splash-stat-num">{networkSplashData.strong}</span>
-                  <span className="ob-splash-stat-label">strong ties</span>
-                </div>
-              )}
-            </div>
-            {networkSplashData.topIndustry && (
-              <p className="ob-splash-insight">Your strongest vertical: <strong>{networkSplashData.topIndustry}</strong></p>
-            )}
-            <button className="ob-splash-btn" onClick={() => setShowNetworkSplash(false)}>
-              Explore your network
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M5 12h14M12 5l7 7-7 7" /></svg>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Interactive onboarding tour — shown once for new users, after splash is dismissed */}
-      {!storeLoading && !loading && contacts.length > 0 && !showNetworkSplash && (
-        <OnboardingTour />
       )}
 
       <div className="u-layout">
@@ -2416,7 +2432,8 @@ export function AIHomePage() {
 
             {/* ── Source & Network ── */}
             <SidebarSection id="source" icon="📂" title="Source & Network" openSections={openSections} toggleSection={toggleSection} activeSectionIds={activeSectionIds}>
-              <div className="sb-chips">
+              {/* Source selector — segmented control */}
+              <div className="sb-source-seg">
                 {([
                   { key: 'all', label: 'All', count: stats.total },
                   { key: 'mine', label: 'Mine', count: stats.myCompanies },
@@ -2424,10 +2441,11 @@ export function AIHomePage() {
                 ] as const).map(f => (
                   <button
                     key={f.key}
-                    className={`sb-chip sb-chip--${f.key} ${sourceFilter === f.key ? 'active' : ''}`}
+                    className={`sb-source-seg-btn ${sourceFilter === f.key ? 'sb-source-seg-btn--active' : ''}`}
                     onClick={() => { setSourceFilter(f.key); setAccountFilter('all'); setSpaceFilter('all'); setConnectionFilter('all'); }}
                   >
-                    {f.label} <span className="sb-chip-count">{f.count}</span>
+                    {f.label}
+                    <span className="sb-source-seg-count">{f.count}</span>
                   </button>
                 ))}
               </div>
@@ -2457,55 +2475,61 @@ export function AIHomePage() {
 
               {/* Spaces */}
               {spaces.length > 0 && (
-                <div className="sb-spaces-list">
-                  <span className="sb-chips-label">Spaces</span>
-                  {spaces.map(s => (
-                    <button
-                      key={s.id}
-                      className={`sb-space-pill ${spaceFilter === s.id ? 'active' : ''}`}
-                      onClick={() => { const deselecting = spaceFilter === s.id; setSpaceFilter(deselecting ? 'all' : s.id); setSourceFilter(deselecting ? 'all' : 'spaces'); setAccountFilter('all'); setConnectionFilter('all'); }}
-                      onDoubleClick={() => setInlinePanel({ type: 'space', spaceId: s.id })}
-                      title={`${s.name} — ${s.memberCount || 0} members. Double-click for details.`}
-                    >
-                      <span className="sb-space-emoji">{s.emoji}</span>
-                      <span className="sb-space-name">{s.name}</span>
-                      <span className="sb-space-count">{s.memberCount || 0}</span>
-                    </button>
-                  ))}
+                <div className="sb-net-group">
+                  <span className="sb-net-label">Spaces</span>
+                  <div className="sb-net-items">
+                    {spaces.map(s => (
+                      <button
+                        key={s.id}
+                        className={`sb-net-item ${spaceFilter === s.id ? 'sb-net-item--active' : ''}`}
+                        onClick={() => { const deselecting = spaceFilter === s.id; setSpaceFilter(deselecting ? 'all' : s.id); setSourceFilter(deselecting ? 'all' : 'spaces'); setAccountFilter('all'); setConnectionFilter('all'); }}
+                        onDoubleClick={() => setInlinePanel({ type: 'space', spaceId: s.id })}
+                        title={`${s.name} — ${s.memberCount || 0} members. Double-click for details.`}
+                      >
+                        <span className="sb-net-item-icon">{s.emoji}</span>
+                        <span className="sb-net-item-name">{s.name}</span>
+                        <span className="sb-net-item-meta">{s.memberCount || 0}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
               {/* Connections */}
               {connections.filter(c => c.status === 'accepted').length > 0 && (
-                <div className="sb-spaces-list" style={{ marginTop: '0.35rem' }}>
-                  <span className="sb-chips-label">Connections</span>
-                  {connections.filter(c => c.status === 'accepted').map(c => (
-                    <button
-                      key={c.id}
-                      className={`sb-space-pill ${connectionFilter === c.id ? 'active' : ''}`}
-                      onClick={() => { const deselecting = connectionFilter === c.id; setConnectionFilter(deselecting ? 'all' : c.id); setSpaceFilter('all'); setSourceFilter(deselecting ? 'all' : 'spaces'); setAccountFilter('all'); }}
-                      onDoubleClick={() => setInlinePanel({ type: 'connection', connectionId: c.id })}
-                      title={`${c.peer.name} — ${c.peer.email}. Double-click for details.`}
-                    >
-                      <PersonAvatar email={c.peer.email} name={c.peer.name} avatarUrl={c.peer.avatar} size={20} />
-                      <span className="sb-space-name">{c.peer.name}</span>
-                    </button>
-                  ))}
+                <div className="sb-net-group">
+                  <span className="sb-net-label">Connections</span>
+                  <div className="sb-net-items">
+                    {connections.filter(c => c.status === 'accepted').map(c => (
+                      <button
+                        key={c.id}
+                        className={`sb-net-item ${connectionFilter === c.id ? 'sb-net-item--active' : ''}`}
+                        onClick={() => { const deselecting = connectionFilter === c.id; setConnectionFilter(deselecting ? 'all' : c.id); setSpaceFilter('all'); setSourceFilter(deselecting ? 'all' : 'spaces'); setAccountFilter('all'); }}
+                        onDoubleClick={() => setInlinePanel({ type: 'connection', connectionId: c.id })}
+                        title={`${c.peer.name} — ${c.peer.email}. Double-click for details.`}
+                      >
+                        <span className="sb-net-item-initial">{(c.peer.name || c.peer.email).charAt(0).toUpperCase()}</span>
+                        <span className="sb-net-item-name">{c.peer.name}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
               {/* Pending incoming connection requests */}
               {connections.filter(c => c.status === 'pending' && c.direction === 'received').length > 0 && (
-                <div className="sb-spaces-list" style={{ marginTop: '0.35rem' }}>
-                  <span className="sb-chips-label">Pending</span>
-                  {connections.filter(c => c.status === 'pending' && c.direction === 'received').map(c => (
-                    <div key={c.id} className="sb-conn-pending">
-                      <PersonAvatar email={c.peer.email} name={c.peer.name} avatarUrl={c.peer.avatar} size={20} />
-                      <span className="sb-space-name" style={{ flex: 1 }}>{c.peer.name}</span>
-                      <button className="u-notif-accept-btn" style={{ fontSize: '0.6rem', padding: '0.15rem 0.4rem' }} onClick={() => acceptConnection(c.id)}>Accept</button>
-                      <button className="u-notif-reject-btn" style={{ fontSize: '0.6rem', padding: '0.15rem 0.4rem' }} onClick={() => rejectConnection(c.id)}>×</button>
-                    </div>
-                  ))}
+                <div className="sb-net-group">
+                  <span className="sb-net-label sb-net-label--pending">Pending</span>
+                  <div className="sb-net-items">
+                    {connections.filter(c => c.status === 'pending' && c.direction === 'received').map(c => (
+                      <div key={c.id} className="sb-net-item sb-net-item--pending">
+                        <span className="sb-net-item-initial">{(c.peer.name || c.peer.email).charAt(0).toUpperCase()}</span>
+                        <span className="sb-net-item-name" style={{ flex: 1 }}>{c.peer.name}</span>
+                        <button className="sb-net-accept" onClick={() => handleAcceptWithModal(c.id)}>Accept</button>
+                        <button className="sb-net-reject" onClick={() => rejectConnection(c.id)}>×</button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </SidebarSection>
@@ -3182,19 +3206,10 @@ export function AIHomePage() {
             </div>
           </header>
 
-          {/* ── Fast Filters ──────────────────────────────────── */}
-          <div className="u-fast-filters">
-            {!sidebarOpen && (
-              <button className="u-action-btn u-filter-toggle" onClick={() => setSidebarOpen(true)}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M4 6h16M4 12h10M4 18h6" />
-                </svg>
-                Filters & Views
-                {activeFilterCount > 0 && <span className="u-filter-toggle-badge">{activeFilterCount}</span>}
-              </button>
-            )}
-            {!sidebarOpen && (
-              <div className="u-fast-group">
+          {/* ── Source selector (segmented control) — hidden when sidebar open ── */}
+          {!sidebarOpen && (
+            <div className="u-source-seg-wrap">
+              <div className="u-source-seg">
                 {([
                   { key: 'all', label: 'All', count: stats.total },
                   { key: 'mine', label: 'Mine', count: stats.myCompanies },
@@ -3202,16 +3217,16 @@ export function AIHomePage() {
                 ] as const).map(f => (
                   <button
                     key={f.key}
-                    className={`u-ff-chip ${sourceFilter === f.key ? 'active' : ''} u-ff-chip--${f.key}`}
+                    className={`u-source-seg-btn ${sourceFilter === f.key ? 'u-source-seg-btn--active' : ''}`}
                     onClick={() => setSourceFilter(f.key)}
                   >
-                    <span>{f.label}</span>
-                    <span className="u-ff-count">{f.count}</span>
+                    {f.label}
+                    <span className="u-source-seg-count">{f.count}</span>
                   </button>
                 ))}
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* ── AI explanation banner ─────────────────────────── */}
           {aiExplanation && (
@@ -3225,7 +3240,7 @@ export function AIHomePage() {
             </div>
           )}
 
-          {/* ── Results bar with entity tabs ─────────────────── */}
+          {/* ── Results bar: entity tabs + inline actions ──── */}
           <div className="u-results-bar">
             <div className="u-entity-tabs">
               <button
@@ -3244,15 +3259,10 @@ export function AIHomePage() {
                 className="u-add-contact-btn"
                 onClick={() => { setInlinePanel({ type: 'add-contact' }); setAddContactStep('email'); setAddContactEmail(''); setAddContactError(null); setAddContactData(null); setAddContactLoading(false); setAddContactSaving(false); }}
               >
-                + Add
+                + Add Contact
               </button>
             </div>
-            {activeFilterCount > 0 && (
-              <button className="u-filters-clear" onClick={clearAllFilters}>
-                Clear {activeFilterCount} filter{activeFilterCount > 1 ? 's' : ''}
-              </button>
-            )}
-            <div className="u-results-right">
+            <div className="u-results-actions">
               <div className="u-view-toggle">
                 <button className={`u-view-btn ${viewMode === 'grid' ? 'active' : ''}`} onClick={() => { setViewMode('grid'); localStorage.setItem('introo_view_mode', 'grid'); }} title="Card view">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
@@ -3263,6 +3273,31 @@ export function AIHomePage() {
               </div>
             </div>
           </div>
+          {(!sidebarOpen || isNetworkView) && (
+            <div className="u-filter-bar-below">
+              {!sidebarOpen && (
+                <button className="u-filter-toggle-compact" onClick={() => setSidebarOpen(true)} title={activeFilterCount > 0 ? `${activeFilterCount} active filter${activeFilterCount > 1 ? 's' : ''} — click to manage` : 'Open filters'}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M4 6h16M4 12h10M4 18h6" />
+                  </svg>
+                  Filters
+                  {activeFilterCount > 0 && (
+                    <span className="u-filter-toggle-compact-badge">
+                      {activeFilterCount}
+                      <button className="u-filter-toggle-compact-x" onClick={(e) => { e.stopPropagation(); clearAllFilters(); }} title="Clear all filters">×</button>
+                    </span>
+                  )}
+                </button>
+              )}
+              {isNetworkView && (
+                <label className="u-grid-exclude-label">
+                  <input type="checkbox" checked={excludeMyContacts} onChange={e => { setExcludeMyContacts(e.target.checked); setGridPage(0); }} />
+                  Exclude companies I have contacts in
+                  <span className="u-grid-section-count">{displayCompanies.length}</span>
+                </label>
+              )}
+            </div>
+          )}
 
           {/* ── Enrichment banner ── */}
           {enriching && (
@@ -3667,15 +3702,6 @@ export function AIHomePage() {
               })();
               return (
                 <>
-                  {isNetworkView && (
-                    <div className="u-grid-filter-bar">
-                      <label className="u-grid-exclude-label">
-                        <input type="checkbox" checked={excludeMyContacts} onChange={e => { setExcludeMyContacts(e.target.checked); setGridPage(0); }} />
-                        Exclude companies I have contacts in
-                      </label>
-                      <span className="u-grid-section-count">{displayCompanies.length}</span>
-                    </div>
-                  )}
                   {viewMode === 'grid' && !groupByField && displayCompanies.slice(pageStart, pageEnd).map(renderCard)}
 
                   {viewMode === 'grid' && groupByField && (() => {
@@ -5480,7 +5506,7 @@ export function AIHomePage() {
                           </div>
                           {c.direction === 'received' ? (
                             <div style={{ display: 'flex', gap: '0.3rem', flexShrink: 0 }}>
-                              <button className="u-notif-accept-btn" style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }} onClick={() => acceptConnection(c.id)}>Accept</button>
+                              <button className="u-notif-accept-btn" style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }} onClick={() => handleAcceptWithModal(c.id)}>Accept</button>
                               <button className="u-notif-reject-btn" style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem' }} onClick={() => rejectConnection(c.id)}>✕</button>
                             </div>
                           ) : (
@@ -6024,7 +6050,7 @@ export function AIHomePage() {
                 mergedCompanies={mergedCompanies}
                 pendingSpaces={pendingSpaces}
                 onNavigate={setInlinePanel}
-                onAcceptConnection={acceptConnection}
+                onAcceptConnection={handleAcceptWithModal}
                 onRejectConnection={rejectConnection}
                 onAcceptSpaceInvite={acceptSpaceInvite}
                 onRejectSpaceInvite={rejectSpaceInvite}
@@ -7301,6 +7327,79 @@ export function AIHomePage() {
         </div>
       )}
       </div>{/* end u-layout */}
+
+      {/* ── Floating onboarding checklist (bottom-right) ── */}
+      {!storeLoading && !loading && contacts.length > 0 && (
+        <OnboardingChecklist
+          progress={checklistProgress}
+          actions={checklistActions}
+        />
+      )}
+
+      {/* ── Accept Connection Confirmation Modal ── */}
+      {acceptModalConnectionId && (
+        <div className="accept-modal-overlay" onClick={() => setAcceptModalConnectionId(null)}>
+          <div className="accept-modal" onClick={e => e.stopPropagation()}>
+            <div className="accept-modal-glow" />
+            <button className="accept-modal-close" onClick={() => setAcceptModalConnectionId(null)}>×</button>
+
+            <div className="accept-modal-header">
+              <div className="accept-modal-icon">🤝</div>
+              <h2 className="accept-modal-title">
+                Connect with {acceptModalConnection?.peer.name || 'this person'}?
+              </h2>
+              <p className="accept-modal-subtitle">
+                Here's what happens when you accept a connection
+              </p>
+            </div>
+
+            <div className="accept-modal-sections">
+              <div className="accept-modal-section accept-modal-section--shared">
+                <div className="accept-modal-section-icon">👁</div>
+                <div className="accept-modal-section-content">
+                  <h3>What they'll see about your contacts</h3>
+                  <ul>
+                    <li><span className="accept-modal-tag accept-modal-tag--visible">Visible</span> Company names and details</li>
+                    <li><span className="accept-modal-tag accept-modal-tag--visible">Visible</span> Contact first name + last initial (e.g. "Alex T.")</li>
+                    <li><span className="accept-modal-tag accept-modal-tag--visible">Visible</span> Job titles</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="accept-modal-section accept-modal-section--hidden">
+                <div className="accept-modal-section-icon">🔒</div>
+                <div className="accept-modal-section-content">
+                  <h3>What stays private</h3>
+                  <ul>
+                    <li><span className="accept-modal-tag accept-modal-tag--hidden">Hidden</span> Contact emails — completely hidden</li>
+                    <li><span className="accept-modal-tag accept-modal-tag--hidden">Hidden</span> Photos and avatars</li>
+                    <li><span className="accept-modal-tag accept-modal-tag--hidden">Hidden</span> Meeting history and calendar data</li>
+                    <li><span className="accept-modal-tag accept-modal-tag--hidden">Hidden</span> Connection strength</li>
+                    <li><span className="accept-modal-tag accept-modal-tag--hidden">Hidden</span> Your tags and saved views</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="accept-modal-section accept-modal-section--intro">
+                <div className="accept-modal-section-icon">✉️</div>
+                <div className="accept-modal-section-content">
+                  <h3>Warm intros — always with your permission</h3>
+                  <p>They can <em>request</em> an introduction, but you choose whether to make it. Nothing is sent without your approval.</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="accept-modal-actions">
+              <button className="accept-modal-btn-secondary" onClick={() => setAcceptModalConnectionId(null)}>
+                Cancel
+              </button>
+              <button className="accept-modal-btn-primary" onClick={confirmAcceptConnection}>
+                Accept Connection
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
