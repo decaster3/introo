@@ -4662,6 +4662,7 @@ body {
   padding: 0;
   width: 38px;
   justify-content: center;
+  position: relative;
 }
 
 .u-network-btn-badge {
@@ -4677,6 +4678,13 @@ body {
   font-size: 0.6rem;
   font-weight: 700;
   line-height: 1;
+}
+
+.u-network-btn.active .u-network-btn-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  box-shadow: 0 0 0 2px var(--bg-primary);
 }
 
 /* ── Omni Bar (search + hunts combined) ──────────── */
