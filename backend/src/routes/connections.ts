@@ -387,6 +387,7 @@ router.get('/:id/reach', async (req, res) => {
       city: string | null;
       country: string | null;
       description: string | null;
+      websiteSummary: string | null;
       linkedinUrl: string | null;
       enrichedAt: Date | null;
       contactCount: number;
@@ -446,6 +447,7 @@ router.get('/:id/reach', async (req, res) => {
           city: contact.company.city,
           country: contact.company.country,
           description: contact.company.description,
+          websiteSummary: contact.company.websiteSummary,
           linkedinUrl: contact.company.linkedinUrl,
           enrichedAt: contact.company.enrichedAt,
           contactCount: 1,

@@ -45,6 +45,7 @@ export function ProfilePanel({
         lastFundingRound: co.lastFundingRound, lastFundingDate: co.lastFundingDate,
         city: co.city, country: co.country,
         industry: co.industry, description: co.description,
+        websiteSummary: co.websiteSummary,
         linkedinUrl: co.linkedinUrl,
         enrichedAt: source !== 'none' ? co.enrichedAt || new Date().toISOString() : null,
       };

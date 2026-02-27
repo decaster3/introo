@@ -10,6 +10,7 @@ import {
 } from '../services/apollo.js';
 import prisma from '../lib/prisma.js';
 import { embedCompany } from './embeddings.js';
+import { scrapeAndSummarizeCompany } from '../services/scraper.js';
 
 const router = Router();
 router.use(authMiddleware);
@@ -204,6 +205,17 @@ router.get('/company/:domain', async (req, res) => {
       return;
     }
 
+    // Apollo has no data -- fallback to website scraping
+    if (process.env.APIFY_API_TOKEN) {
+      const bareCompany = await prisma.company.upsert({
+        where: { domain },
+        create: { domain, name: domain },
+        update: {},
+      });
+      scrapeAndSummarizeCompany(bareCompany).catch(err =>
+        console.error(`[scraper] Fallback scrape failed for ${domain}:`, err.message),
+      );
+    }
     res.json({ company: { domain, name: domain }, source: 'none' });
   } catch (error: any) {
     console.error('Company lookup error:', error.message);

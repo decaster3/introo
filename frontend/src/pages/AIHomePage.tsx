@@ -273,7 +273,7 @@ export function AIHomePage() {
   const [addContactError, setAddContactError] = useState<string | null>(null);
   const [addContactData, setAddContactData] = useState<{
     person: { name: string | null; title: string | null; headline: string | null; linkedinUrl: string | null; photoUrl: string | null; city: string | null; country: string | null; company: string | null; companyDomain: string | null } | null;
-    company: { domain: string; name: string; industry: string | null; employeeCount: number | null; city: string | null; country: string | null; description: string | null; websiteUrl: string | null; logo: string | null } | null;
+    company: { domain: string; name: string; industry: string | null; employeeCount: number | null; city: string | null; country: string | null; description: string | null; websiteSummary: string | null; websiteUrl: string | null; logo: string | null } | null;
     email: string;
     domain: string | null;
     source: 'apollo' | 'partial' | 'none';
@@ -721,6 +721,7 @@ export function AIHomePage() {
         country: c.company.country,
         industry: c.company.industry,
         description: c.company.description,
+        websiteSummary: c.company.websiteSummary,
         linkedinUrl: c.company.linkedinUrl,
         enrichedAt: c.company.enrichedAt,
       } : undefined,
@@ -760,6 +761,7 @@ export function AIHomePage() {
         co.country = c.companyData.country;
         co.industry = c.companyData.industry;
         co.description = c.companyData.description;
+        co.websiteSummary = c.companyData.websiteSummary;
         co.linkedinUrl = c.companyData.linkedinUrl;
         co.enrichedAt = c.companyData.enrichedAt;
       }
@@ -795,6 +797,7 @@ export function AIHomePage() {
         co.city = sc.city;
         co.country = sc.country;
         co.description = sc.description;
+        co.websiteSummary = sc.websiteSummary;
         co.linkedinUrl = sc.linkedinUrl;
         co.enrichedAt = sc.enrichedAt;
       }
@@ -837,6 +840,7 @@ export function AIHomePage() {
         co.city = cc.city;
         co.country = cc.country;
         co.description = cc.description;
+        co.websiteSummary = cc.websiteSummary;
         co.linkedinUrl = cc.linkedinUrl;
         co.enrichedAt = cc.enrichedAt;
       }
@@ -905,7 +909,8 @@ export function AIHomePage() {
         if (!matches && hasKeywords) {
           const allText = [
             co.name, co.domain,
-            co.description || '', co.industry || '',
+            co.description || '', co.websiteSummary || '',
+            co.industry || '',
             co.city || '', co.country || '',
             co.lastFundingRound || '', co.annualRevenue || '',
             ...co.myContacts.map(c => `${c.title} ${c.name}`),
@@ -999,17 +1004,17 @@ export function AIHomePage() {
           }
           if (hf.technologies && hf.technologies.length > 0 && filterMatch) {
             hasAnyFilter = true;
-            const text = (co.description || '').toLowerCase();
+            const text = [co.description, co.websiteSummary].filter(Boolean).join(' ').toLowerCase();
             if (!hf.technologies.some(tech => text.includes(tech.toLowerCase()))) filterMatch = false;
           }
           if (hf.aiKeywords && hf.aiKeywords.length > 0 && filterMatch) {
             hasAnyFilter = true;
-            const allText = [co.name, co.domain, co.description, co.industry, co.city, co.country].filter(Boolean).join(' ').toLowerCase();
+            const allText = [co.name, co.domain, co.description, co.websiteSummary, co.industry, co.city, co.country].filter(Boolean).join(' ').toLowerCase();
             if (!hf.aiKeywords.some(kw => allText.includes(kw))) filterMatch = false;
           }
           if (hf.excludeKeywords && hf.excludeKeywords.length > 0 && filterMatch) {
             hasAnyFilter = true;
-            const text = [co.description, co.industry, co.name].filter(Boolean).join(' ').toLowerCase();
+            const text = [co.description, co.websiteSummary, co.industry, co.name].filter(Boolean).join(' ').toLowerCase();
             if (hf.excludeKeywords.some(ex => text.includes(ex))) filterMatch = false;
           }
           if (hf.tagInclude && hf.tagInclude.length > 0 && filterMatch) {
@@ -1164,7 +1169,7 @@ export function AIHomePage() {
     if (sf.aiKeywords.length > 0) {
       result = result.filter(c => {
         const allText = [
-          c.name, c.domain, c.description, c.industry,
+          c.name, c.domain, c.description, c.websiteSummary, c.industry,
           c.city, c.country,
           ...c.myContacts.map(ct => `${ct.title} ${ct.name}`),
           ...c.spaceContacts.map(ct => `${ct.title || ''} ${ct.name}`),
@@ -1174,7 +1179,7 @@ export function AIHomePage() {
     }
     if (sf.excludeKeywords.length > 0) {
       result = result.filter(c => {
-        const text = [c.description, c.industry, c.name].filter(Boolean).join(' ').toLowerCase();
+        const text = [c.description, c.websiteSummary, c.industry, c.name].filter(Boolean).join(' ').toLowerCase();
         return !sf.excludeKeywords.some(ex => text.includes(ex));
       });
     }
@@ -4434,9 +4439,10 @@ export function AIHomePage() {
                         <a href={co.linkedinUrl} target="_blank" rel="noopener noreferrer" className="u-panel-link-sm" onClick={e => e.stopPropagation()}>in</a>
                       )}
                     </div>
-                    {co.description && (
-                      <p className="u-panel-company-desc">{co.description.length > 200 ? co.description.slice(0, 200) + '...' : co.description}</p>
-                    )}
+                    {(co.description || co.websiteSummary) && (() => {
+                      const text = co.description || co.websiteSummary || '';
+                      return <p className="u-panel-company-desc">{text.length > 200 ? text.slice(0, 200) + '...' : text}</p>;
+                    })()}
                     <div className="u-panel-company-meta">
                       {co.industry && (
                         <span className="u-panel-meta-tag">{co.industry}</span>
@@ -4672,12 +4678,12 @@ export function AIHomePage() {
                   )}
                 </div>
 
-                {/* Description */}
-                {co.description && (
+                {/* Description or Website Summary */}
+                {(co.description || co.websiteSummary) && (
                   <div className="u-panel-section">
-                    <h4 className="u-panel-section-h">About</h4>
-                    <p className={`u-panel-section-text ${aboutExpanded ? '' : 'u-panel-section-text--clamped'}`}>{co.description}</p>
-                    {co.description.length > 120 && (
+                    <h4 className="u-panel-section-h">{co.description ? 'About' : 'Website Summary'}</h4>
+                    <p className={`u-panel-section-text ${aboutExpanded ? '' : 'u-panel-section-text--clamped'}`} style={!co.description && co.websiteSummary ? { whiteSpace: 'pre-line' } : undefined}>{co.description || co.websiteSummary}</p>
+                    {(co.description || co.websiteSummary || '').length > 120 && (
                       <button className="u-panel-history-toggle" onClick={() => setAboutExpanded(!aboutExpanded)}>
                         {aboutExpanded ? 'Show less' : 'Show more'}
                       </button>
@@ -7249,6 +7255,7 @@ export function AIHomePage() {
                             country: c.company.country,
                             industry: c.company.industry,
                             description: c.company.description,
+                            websiteSummary: c.company.websiteSummary,
                             linkedinUrl: c.company.linkedinUrl,
                             enrichedAt: c.company.enrichedAt,
                           } : undefined,
@@ -7274,6 +7281,7 @@ export function AIHomePage() {
                             country: c.company.country,
                             industry: c.company.industry,
                             description: c.company.description,
+                            websiteSummary: c.company.websiteSummary,
                             linkedinUrl: c.company.linkedinUrl,
                             enrichedAt: c.company.enrichedAt,
                           };
@@ -7303,8 +7311,8 @@ export function AIHomePage() {
                               {addContactData.company.industry && <span className="u-add-shared-meta">{addContactData.company.industry}</span>}
                             </div>
                           </div>
-                          {addContactData.company.description && (
-                            <p className="u-add-shared-desc">{addContactData.company.description}</p>
+                          {(addContactData.company.description || addContactData.company.websiteSummary) && (
+                            <p className="u-add-shared-desc">{addContactData.company.description || addContactData.company.websiteSummary}</p>
                           )}
                           <div className="u-add-shared-pills">
                             {addContactData.company.city && <span className="u-add-shared-pill">{addContactData.company.city}{addContactData.company.country ? `, ${addContactData.company.country}` : ''}</span>}

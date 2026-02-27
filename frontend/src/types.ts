@@ -39,6 +39,7 @@ export interface Company {
   state?: string | null;
   country?: string | null;
   description?: string | null;
+  websiteSummary?: string | null;
   technologies?: string[] | null;
   enrichedAt?: string | null;
 }
@@ -101,6 +102,7 @@ export interface SpaceCompany {
   city?: string | null;
   country?: string | null;
   description?: string | null;
+  websiteSummary?: string | null;
   linkedinUrl?: string | null;
   enrichedAt?: string | null;
   contacts: {
@@ -165,6 +167,7 @@ export interface ConnectionCompany {
   city?: string | null;
   country?: string | null;
   description?: string | null;
+  websiteSummary?: string | null;
   linkedinUrl?: string | null;
   enrichedAt?: string | null;
   contacts: {
@@ -199,6 +202,7 @@ export interface DisplayContact {
     country?: string | null;
     industry?: string | null;
     description?: string | null;
+    websiteSummary?: string | null;
     linkedinUrl?: string | null;
     enrichedAt?: string | null;
   };
@@ -229,6 +233,7 @@ export interface MergedCompany {
   country?: string | null;
   industry?: string | null;
   description?: string | null;
+  websiteSummary?: string | null;
   linkedinUrl?: string | null;
   enrichedAt?: string | null;
 }

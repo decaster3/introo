@@ -22,12 +22,14 @@ function buildEmbeddingText(company: {
   industry?: string | null;
   city?: string | null;
   country?: string | null;
+  websiteSummary?: string | null;
 }): string {
   return [
     company.name,
     company.domain,
     company.industry,
     company.description,
+    company.websiteSummary,
     [company.city, company.country].filter(Boolean).join(', '),
   ].filter(Boolean).join(' | ');
 }
@@ -44,12 +46,12 @@ router.post('/generate', adminMiddleware, async (req, res) => {
     const force = req.body.force === true;
 
     const whereClause = force
-      ? `WHERE description IS NOT NULL AND description != ''`
-      : `WHERE description IS NOT NULL AND description != '' AND "embeddedAt" IS NULL`;
+      ? `WHERE (description IS NOT NULL AND description != '') OR ("websiteSummary" IS NOT NULL AND "websiteSummary" != '')`
+      : `WHERE ((description IS NOT NULL AND description != '') OR ("websiteSummary" IS NOT NULL AND "websiteSummary" != '')) AND "embeddedAt" IS NULL`;
 
     const toEmbed = await prisma.$queryRawUnsafe<
-      { id: string; name: string; domain: string; description: string | null; industry: string | null; city: string | null; country: string | null }[]
-    >(`SELECT id, name, domain, description, industry, city, country FROM companies ${whereClause} ORDER BY name`);
+      { id: string; name: string; domain: string; description: string | null; industry: string | null; city: string | null; country: string | null; websiteSummary: string | null }[]
+    >(`SELECT id, name, domain, description, industry, city, country, "websiteSummary" FROM companies ${whereClause} ORDER BY name`);
 
     console.log(`[embeddings] Found ${toEmbed.length} companies to embed (force=${force})`);
 
@@ -193,6 +195,7 @@ router.get('/debug/:domain', adminMiddleware, async (req, res) => {
       select: {
         id: true, domain: true, name: true, description: true,
         industry: true, city: true, country: true, embeddedAt: true,
+        websiteSummary: true,
       },
     });
     if (!company) {
@@ -219,6 +222,7 @@ router.get('/debug/:domain', adminMiddleware, async (req, res) => {
         industry: !!company.industry,
         city: !!company.city,
         country: !!company.country,
+        websiteSummary: !!company.websiteSummary,
       },
     });
   } catch (error) {
@@ -236,8 +240,9 @@ export async function embedCompany(companyId: string, company: {
   industry?: string | null;
   city?: string | null;
   country?: string | null;
+  websiteSummary?: string | null;
 }): Promise<void> {
-  if (!company.description || !process.env.OPENAI_API_KEY) return;
+  if ((!company.description && !company.websiteSummary) || !process.env.OPENAI_API_KEY) return;
 
   const text = buildEmbeddingText(company);
   const response = await getOpenAI().embeddings.create({

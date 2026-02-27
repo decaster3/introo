@@ -33,7 +33,7 @@ const PORT = process.env.PORT || 3001;
 
 // Environment variable validation
 const requiredEnvVars = ['DATABASE_URL'];
-const recommendedEnvVars = ['JWT_SECRET', 'ENCRYPTION_KEY', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'FRONTEND_URL', 'APOLLO_API_KEY', 'OPENAI_API_KEY', 'RESEND_API_KEY', 'RESEND_FROM_EMAIL'];
+const recommendedEnvVars = ['JWT_SECRET', 'ENCRYPTION_KEY', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'FRONTEND_URL', 'APOLLO_API_KEY', 'OPENAI_API_KEY', 'RESEND_API_KEY', 'RESEND_FROM_EMAIL', 'APIFY_API_TOKEN'];
 
 for (const envVar of requiredEnvVars) {
   if (!process.env[envVar]) {

@@ -1,5 +1,6 @@
 import prisma from '../lib/prisma.js';
 import { embedCompany } from '../routes/embeddings.js';
+import { scrapeAndSummarizeCompany } from './scraper.js';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -451,6 +452,18 @@ export async function enrichContactsFree(
             } else {
               await prisma.company.update({ where: { id: companyId! }, data: { enrichedAt: new Date() } });
               console.log(`[enrich] ✗ Company "${domain}": not found in Apollo`);
+              // Fallback: scrape website when Apollo has no data
+              if (!isCancelled() && process.env.APIFY_API_TOKEN) {
+                const companyToScrape = await prisma.company.findUnique({
+                  where: { id: companyId! },
+                  select: { id: true, domain: true, name: true, websiteUrl: true, description: true, industry: true, city: true, country: true },
+                });
+                if (companyToScrape) {
+                  scrapeAndSummarizeCompany(companyToScrape).catch(err =>
+                    console.error(`[scraper] Fallback scrape failed for ${domain}:`, err.message),
+                  );
+                }
+              }
             }
             enrichedCompanyIds.add(companyId!);
             await sleep(API_THROTTLE_MS);
@@ -531,6 +544,33 @@ export async function enrichContactsFree(
   if (outOfCredits) {
     console.error(`[enrich] ⛔ Enrichment stopped early — Apollo credits exhausted`);
   }
+
+  // ── 9. Scrape websites for companies not enriched by Apollo ─────────────
+  // Only scrape companies that Apollo doesn't have data for (no apolloId and no description).
+  // In dev mode, scraping is handled inline only.
+  if (process.env.APIFY_API_TOKEN && !isCancelled() && !IS_DEV) {
+    const unscrapedCompanies = await prisma.company.findMany({
+      where: {
+        scrapedAt: null,
+        apolloId: null,
+        description: null,
+        contacts: { some: { userId } },
+      },
+      select: { id: true, domain: true, name: true, websiteUrl: true, description: true, industry: true, city: true, country: true },
+      take: 500,
+    });
+
+    if (unscrapedCompanies.length > 0) {
+      console.log(`[enrich] Scraping ${unscrapedCompanies.length} unscraped company websites...`);
+      for (const company of unscrapedCompanies) {
+        if (isCancelled()) break;
+        await scrapeAndSummarizeCompany(company).catch(err =>
+          console.error(`[scraper] Failed for ${company.domain}:`, err.message),
+        );
+      }
+    }
+  }
+
   return result;
 }
 

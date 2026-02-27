@@ -130,6 +130,8 @@ model Company {
   technologies     Json?
   apolloId         String?
   enrichedAt       DateTime?
+  websiteSummary   String?
+  scrapedAt        DateTime?
   embedding        Unsupported("vector(1536)")?
   embeddedAt       DateTime?
   createdAt        DateTime       @default(now())
