@@ -4737,6 +4737,56 @@ body {
 }
 .u-omni-input-row input::placeholder { color: var(--text-muted); }
 
+.u-omni-precision {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.u-omni-precision--bottom {
+  padding: 0.25rem 0.875rem 0.5rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.u-omni-precision-count {
+  margin-left: auto;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.u-omni-precision-label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  margin-right: 2px;
+}
+
+.u-omni-precision-chip {
+  padding: 2px 8px;
+  font-size: 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-medium);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+  line-height: 1.4;
+}
+
+.u-omni-precision-chip:hover {
+  border-color: var(--text-muted);
+  color: var(--text-primary);
+}
+
+.u-omni-precision-chip.active {
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  border-color: var(--text-primary);
+}
+
 .u-omni-pin {
   display: flex;
   align-items: center;

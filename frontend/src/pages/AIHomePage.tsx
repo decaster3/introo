@@ -393,6 +393,7 @@ export function AIHomePage() {
   const [deepSearchResults, setDeepSearchResults] = useState<{ domain: string; similarity: number }[] | null>(null);
   const [deepSearchError, setDeepSearchError] = useState<string | null>(null);
   const [deepSearchPrecision, setDeepSearchPrecision] = useState<1 | 2 | 3>(2);
+  const [committedSearch, setCommittedSearch] = useState('');
 
   const toggleSection = useCallback((key: string) => {
     setOpenSections(prev => ({ ...prev, [key]: !prev[key] }));
@@ -433,6 +434,7 @@ export function AIHomePage() {
 
   const runDeepSearch = useCallback(async (query: string, precision?: number) => {
     if (!query.trim() || query.trim().length < 3) return;
+    setCommittedSearch(query.trim());
     setDeepSearchLoading(true);
     setDeepSearchError(null);
     try {
@@ -464,6 +466,7 @@ export function AIHomePage() {
   const clearDeepSearch = useCallback(() => {
     setDeepSearchResults(null);
     setDeepSearchError(null);
+    setCommittedSearch('');
   }, []);
 
   const toggleFundingRound = useCallback((round: string) => {
@@ -1190,8 +1193,8 @@ export function AIHomePage() {
       });
     }
 
-    // ── Search: local text match + deep search (union) ──
-    const sq = searchQuery.trim().toLowerCase();
+    // ── Search: only applied after Enter / button click ──
+    const sq = committedSearch.toLowerCase();
     if (deepSearchResults && deepSearchResults.length > 0) {
       const domainScores = new Map(deepSearchResults.map(r => [r.domain, r.similarity]));
       result = result.filter(c => {
@@ -1200,8 +1203,14 @@ export function AIHomePage() {
         return false;
       });
       result.sort((a, b) => {
-        const aDirectMatch = sq && (a.name.toLowerCase().includes(sq) || a.domain.toLowerCase().includes(sq));
-        const bDirectMatch = sq && (b.name.toLowerCase().includes(sq) || b.domain.toLowerCase().includes(sq));
+        const aName = a.name.toLowerCase();
+        const bName = b.name.toLowerCase();
+        const aExact = sq && aName === sq;
+        const bExact = sq && bName === sq;
+        if (aExact && !bExact) return -1;
+        if (!aExact && bExact) return 1;
+        const aDirectMatch = sq && (aName.includes(sq) || a.domain.toLowerCase().includes(sq));
+        const bDirectMatch = sq && (bName.includes(sq) || b.domain.toLowerCase().includes(sq));
         if (aDirectMatch && !bDirectMatch) return -1;
         if (!aDirectMatch && bDirectMatch) return 1;
         return (domainScores.get(b.domain) || 0) - (domainScores.get(a.domain) || 0);
@@ -1210,6 +1219,13 @@ export function AIHomePage() {
       result = result.filter(c =>
         c.name.toLowerCase().includes(sq) || c.domain.toLowerCase().includes(sq)
       );
+      result.sort((a, b) => {
+        const aExact = a.name.toLowerCase() === sq;
+        const bExact = b.name.toLowerCase() === sq;
+        if (aExact && !bExact) return -1;
+        if (!aExact && bExact) return 1;
+        return 0;
+      });
     }
 
     // ── Employee count ──
@@ -1343,7 +1359,7 @@ export function AIHomePage() {
     }
 
     return result;
-  }, [mergedCompanies, selectedView, sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, sortBy, sidebarFilters, tagInclude, tagExclude, companyTags, tableSorts, groupByField, groupByDir, deepSearchResults, searchQuery]);
+  }, [mergedCompanies, selectedView, sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, sortBy, sidebarFilters, tagInclude, tagExclude, companyTags, tableSorts, groupByField, groupByDir, deepSearchResults, committedSearch]);
 
   // Flatten filteredCompanies into a deduplicated people array
   interface FlatPerson {
@@ -1634,6 +1650,7 @@ export function AIHomePage() {
     setAiExplanation(null);
     setLastAiQuery(null);
     setSearchQuery('');
+    setCommittedSearch('');
     setTableSorts([]);
     setGroupByField(null);
     setCollapsedGroups(new Set());
@@ -1881,6 +1898,7 @@ export function AIHomePage() {
       return viewId;
     });
     setSearchQuery('');
+    setCommittedSearch('');
     setExpandedDomain(null);
     setGridPage(0);
   }, [savedViews]);
@@ -3122,17 +3140,16 @@ export function AIHomePage() {
                 <input
                   ref={searchRef}
                   value={searchQuery}
-                  onChange={e => {
-                    const v = e.target.value;
-                    setSearchQuery(v);
-                    if (!v.trim()) clearDeepSearch();
-                  }}
+                  onChange={e => setSearchQuery(e.target.value)}
                   onFocus={() => setSearchFocused(true)}
                   onBlur={() => setSearchFocused(false)}
                   placeholder={deepSearchLoading ? 'Searching...' : 'Search companies, contacts...'}
                   onKeyDown={e => {
-                    if (e.key === 'Enter' && searchQuery.trim().length >= 3 && !deepSearchLoading) {
-                      runDeepSearch(searchQuery.trim());
+                    if (e.key === 'Enter' && !deepSearchLoading) {
+                      const q = searchQuery.trim();
+                      if (!q) { clearDeepSearch(); return; }
+                      if (q.length >= 3) runDeepSearch(q);
+                      else setCommittedSearch(q);
                     }
                   }}
                   disabled={deepSearchLoading}
@@ -3155,7 +3172,7 @@ export function AIHomePage() {
                   </button>
                 )}
                 {searchQuery && !deepSearchResults && (
-                  <button className="u-search-clear" onClick={() => setSearchQuery('')}>×</button>
+                  <button className="u-search-clear" onClick={() => { setSearchQuery(''); setCommittedSearch(''); }}>×</button>
                 )}
                 {deepSearchResults && (
                   <button
@@ -3166,6 +3183,24 @@ export function AIHomePage() {
                 )}
                 <kbd className="u-kbd">⌘K</kbd>
               </div>
+              {deepSearchResults && (
+                <div className="u-omni-precision u-omni-precision--bottom">
+                  <span className="u-omni-precision-label">Precision</span>
+                  {([1, 2, 3] as const).map(level => (
+                    <button
+                      key={level}
+                      className={`u-omni-precision-chip${deepSearchPrecision === level ? ' active' : ''}`}
+                      onClick={() => {
+                        setDeepSearchPrecision(level);
+                        if (searchQuery.trim().length >= 3) runDeepSearch(searchQuery.trim(), level);
+                      }}
+                    >
+                      {level === 1 ? 'Wide' : level === 2 ? 'Balanced' : 'Strict'}
+                    </button>
+                  ))}
+                  <span className="u-omni-precision-count">{deepSearchResults.length} matched</span>
+                </div>
+              )}
             </div>
 
             <div className="u-topbar-right">
