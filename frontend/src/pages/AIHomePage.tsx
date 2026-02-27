@@ -1089,7 +1089,13 @@ export function AIHomePage() {
     if (sourceFilter === 'mine') {
       result = result.filter(c => c.myCount > 0);
     } else if (sourceFilter === 'spaces') {
-      result = result.filter(c => c.spaceCount > 0);
+      if (spaceFilter !== 'all') {
+        result = result.filter(c => c.spaceIds.includes(spaceFilter));
+      } else if (connectionFilter !== 'all') {
+        result = result.filter(c => c.connectionIds.includes(connectionFilter));
+      } else {
+        result = result.filter(c => c.spaceCount > 0 || c.spaceIds.length > 0 || c.connectionIds.length > 0);
+      }
     } else if (sourceFilter === 'both') {
       result = result.filter(c => c.source === 'both');
     }
