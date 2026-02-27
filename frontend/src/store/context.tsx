@@ -113,8 +113,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
               const parsed = Array.isArray(freshContacts) ? freshContacts : (freshContacts?.data || []);
               dispatch({ type: 'SET_CONTACTS', payload: parsed });
               dispatch({ type: 'SET_COMPANIES', payload: freshCompanies });
-            } catch (syncErr) {
+            } catch (syncErr: any) {
               console.error('Auto calendar sync failed:', syncErr);
+              if (syncErr.needsReauth) {
+                dispatch({ type: 'SET_CALENDAR_CONNECTED', payload: false });
+              }
             }
           }
 

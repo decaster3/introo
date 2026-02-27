@@ -6,6 +6,22 @@ import prisma from '../lib/prisma.js';
 
 const router = Router();
 
+function isCalendarAuthError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : '';
+  const code = (error as { code?: number })?.code;
+  const status = (error as { status?: number })?.status;
+  const httpStatus = (error as { response?: { status?: number } })?.response?.status;
+
+  return msg.includes('invalid_grant') ||
+    msg.includes('Token has been expired') ||
+    msg.includes('Request had insufficient authentication scopes') ||
+    msg.includes('Insufficient Permission') ||
+    msg.includes('insufficient_scope') ||
+    code === 401 || code === 403 ||
+    status === 401 || status === 403 ||
+    httpStatus === 401 || httpStatus === 403;
+}
+
 // All routes require authentication
 router.use(authMiddleware);
 
@@ -74,16 +90,9 @@ router.post('/accounts/:accountId/sync', async (req, res) => {
     });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    const errorCode = (error as { code?: number })?.code;
     console.error('Calendar sync error:', errorMessage);
     
-    const isAuthError = errorMessage.includes('invalid_grant') || 
-                        errorMessage.includes('Token has been expired') ||
-                        errorMessage.includes('Request had insufficient authentication scopes') ||
-                        errorCode === 401 ||
-                        errorCode === 403;
-    
-    if (isAuthError) {
+    if (isCalendarAuthError(error)) {
       res.status(401).json({
         error: 'Calendar access expired',
         message: 'Please reconnect this calendar account',
@@ -115,21 +124,13 @@ router.post('/sync', async (req, res) => {
     });
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    const errorCode = (error as { code?: number })?.code;
     console.error('Calendar sync error:', errorMessage);
     console.error('Full error:', error);
     
-    // Check for specific Google API errors
-    const isAuthError = errorMessage.includes('invalid_grant') || 
-                        errorMessage.includes('Token has been expired') ||
-                        errorMessage.includes('Request had insufficient authentication scopes') ||
-                        errorCode === 401 ||
-                        errorCode === 403;
-    
-    if (isAuthError) {
+    if (isCalendarAuthError(error)) {
       res.status(401).json({
-        error: 'Calendar access expired',
-        message: 'Please sign out and sign in again to grant calendar access',
+        error: 'Calendar access not granted',
+        message: 'Please sign out and sign in again, making sure to check the Google Calendar permission',
         needsReauth: true,
       });
       return;

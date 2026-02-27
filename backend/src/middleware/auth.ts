@@ -98,7 +98,11 @@ export function configurePassport() {
         accessType: 'offline',
         prompt: 'consent',
       } as any,
-      async (accessToken, refreshToken, profile, done) => {
+      async (accessToken: string, refreshToken: string, params: { scope?: string }, profile: any, done: any) => {
+        const grantedScopes = params.scope || '';
+        const hasCalendarScope = grantedScopes.includes('calendar');
+        console.log(`[auth] OAuth scopes granted for ${profile.emails?.[0]?.value}: calendar=${hasCalendarScope}, scopes="${grantedScopes}"`);
+
         try {
           const email = profile.emails?.[0]?.value;
           if (!email) {
@@ -125,39 +129,46 @@ export function configurePassport() {
             ? { googleRefreshToken: encryptedRefreshToken }
             : {};
 
+          // Only store calendar tokens if calendar scope was actually granted
+          const calendarTokenFields = hasCalendarScope
+            ? { googleAccessToken: encryptedAccessToken, ...refreshTokenFields }
+            : { googleAccessToken: null, googleRefreshToken: null };
+
           // Upsert user
           const user = await prisma.user.upsert({
             where: { email },
             update: {
               name: profile.displayName,
               avatar: profile.photos?.[0]?.value,
-              googleAccessToken: encryptedAccessToken,
-              ...refreshTokenFields,
+              ...calendarTokenFields,
             },
             create: {
               email,
               name: profile.displayName,
               avatar: profile.photos?.[0]?.value,
-              googleAccessToken: encryptedAccessToken,
-              ...refreshTokenFields,
+              ...calendarTokenFields,
             },
           });
 
-          // Also write tokens to CalendarAccount (single source of truth for sync)
-          await prisma.calendarAccount.upsert({
-            where: { userId_email: { userId: user.id, email } },
-            update: {
-              googleAccessToken: encryptedAccessToken,
-              ...refreshTokenFields,
-              isActive: true,
-            },
-            create: {
-              userId: user.id,
-              email,
-              googleAccessToken: encryptedAccessToken,
-              ...refreshTokenFields,
-            },
-          });
+          // Only write to CalendarAccount if calendar scope was granted
+          if (hasCalendarScope) {
+            await prisma.calendarAccount.upsert({
+              where: { userId_email: { userId: user.id, email } },
+              update: {
+                googleAccessToken: encryptedAccessToken,
+                ...refreshTokenFields,
+                isActive: true,
+              },
+              create: {
+                userId: user.id,
+                email,
+                googleAccessToken: encryptedAccessToken,
+                ...refreshTokenFields,
+              },
+            });
+          } else {
+            console.log(`[auth] Skipping CalendarAccount for ${email} — calendar scope not granted`);
+          }
 
           // Convert pending invites into real connections / space memberships
           try {

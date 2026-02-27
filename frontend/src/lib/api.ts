@@ -29,8 +29,10 @@ async function request<T>(
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Request failed' }));
-    throw new Error(error.error || error.message || 'Request failed');
+    const body = await response.json().catch(() => ({ error: 'Request failed' }));
+    const err = new Error(body.message || body.error || 'Request failed') as Error & { needsReauth?: boolean };
+    if (body.needsReauth) err.needsReauth = true;
+    throw err;
   }
 
   return response.json();

@@ -75,8 +75,9 @@ export function OnboardingPage() {
       console.error('Calendar sync error:', err);
       const errorMessage = err.message || 'Failed to connect calendar. Please try again.';
       
-      // Check if this is an auth error that requires re-login
-      if (errorMessage.includes('expired') || errorMessage.includes('sign in') || err.needsReauth) {
+      if (err.needsReauth) {
+        setError('Calendar permission was not granted. Please sign out and sign in again — make sure to check the Google Calendar box on the consent screen.');
+      } else if (errorMessage.includes('expired') || errorMessage.includes('sign in')) {
         setError('Calendar access expired. Please sign out and sign in again to reconnect your calendar.');
       } else {
         setError(errorMessage);
@@ -180,7 +181,7 @@ export function OnboardingPage() {
         {error && (
           <div className="onboarding-error">
             {error}
-            {(error.toLowerCase().includes('expired') || error.toLowerCase().includes('sign in') || error.toLowerCase().includes('reconnect')) && (
+            {(error.toLowerCase().includes('expired') || error.toLowerCase().includes('sign in') || error.toLowerCase().includes('permission') || error.toLowerCase().includes('not granted')) && (
               <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem', justifyContent: 'center' }}>
                 <a href={`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/auth/logout`} className="btn-secondary">
                   Sign Out
