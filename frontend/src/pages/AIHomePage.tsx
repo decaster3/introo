@@ -1184,11 +1184,26 @@ export function AIHomePage() {
       });
     }
 
-    // ── Deep Search (embeddings) ──
+    // ── Search: local text match + deep search (union) ──
+    const sq = searchQuery.trim().toLowerCase();
     if (deepSearchResults && deepSearchResults.length > 0) {
       const domainScores = new Map(deepSearchResults.map(r => [r.domain, r.similarity]));
-      result = result.filter(c => domainScores.has(c.domain));
-      result.sort((a, b) => (domainScores.get(b.domain) || 0) - (domainScores.get(a.domain) || 0));
+      result = result.filter(c => {
+        if (domainScores.has(c.domain)) return true;
+        if (sq && (c.name.toLowerCase().includes(sq) || c.domain.toLowerCase().includes(sq))) return true;
+        return false;
+      });
+      result.sort((a, b) => {
+        const aDirectMatch = sq && (a.name.toLowerCase().includes(sq) || a.domain.toLowerCase().includes(sq));
+        const bDirectMatch = sq && (b.name.toLowerCase().includes(sq) || b.domain.toLowerCase().includes(sq));
+        if (aDirectMatch && !bDirectMatch) return -1;
+        if (!aDirectMatch && bDirectMatch) return 1;
+        return (domainScores.get(b.domain) || 0) - (domainScores.get(a.domain) || 0);
+      });
+    } else if (sq) {
+      result = result.filter(c =>
+        c.name.toLowerCase().includes(sq) || c.domain.toLowerCase().includes(sq)
+      );
     }
 
     // ── Employee count ──
@@ -1322,7 +1337,7 @@ export function AIHomePage() {
     }
 
     return result;
-  }, [mergedCompanies, selectedView, sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, sortBy, sidebarFilters, tagInclude, tagExclude, companyTags, tableSorts, groupByField, groupByDir, deepSearchResults]);
+  }, [mergedCompanies, selectedView, sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, sortBy, sidebarFilters, tagInclude, tagExclude, companyTags, tableSorts, groupByField, groupByDir, deepSearchResults, searchQuery]);
 
   // Flatten filteredCompanies into a deduplicated people array
   interface FlatPerson {
