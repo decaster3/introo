@@ -1,4 +1,5 @@
 import prisma from '../lib/prisma.js';
+import { embedCompany } from '../routes/embeddings.js';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -441,8 +442,11 @@ export async function enrichContactsFree(
               if (org.latest_funding_stage) update.lastFundingRound = org.latest_funding_stage;
               if (org.latest_funding_round_date) update.lastFundingDate = new Date(org.latest_funding_round_date);
               if (org.keywords) update.technologies = org.keywords;
-              await prisma.company.update({ where: { id: companyId }, data: update });
+              const updatedCompany = await prisma.company.update({ where: { id: companyId }, data: update });
               companiesEnrichedCount++;
+              embedCompany(updatedCompany.id, updatedCompany).catch(err =>
+                console.error(`[embeddings] Auto-embed failed for ${domain}:`, err.message),
+              );
               console.log(`[enrich] ✓ Company "${domain}": ${org.estimated_num_employees || '?'} employees, industry="${org.industry || '?'}" (1 credit)`);
             } else {
               await prisma.company.update({ where: { id: companyId! }, data: { enrichedAt: new Date() } });

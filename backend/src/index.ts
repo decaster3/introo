@@ -23,6 +23,7 @@ import aiRoutes from './routes/ai.js';
 import emailRoutes from './routes/email.js';
 import viewsRoutes from './routes/views.js';
 import adminRoutes from './routes/admin.js';
+import embeddingsRoutes from './routes/embeddings.js';
 import { sendWeeklyDigest, sendDailyBriefing } from './services/email.js';
 import type { BriefingMeeting, BriefingAttendee } from './services/email.js';
 import prisma from './lib/prisma.js';
@@ -142,6 +143,7 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/email', emailRoutes);
 app.use('/api/views', viewsRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/embeddings', embeddingsRoutes);
 
 // Debug endpoint - development only
 if (!isProduction) {

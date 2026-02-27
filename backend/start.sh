@@ -10,6 +10,9 @@ echo "Node version: $(node --version)"
 echo "=== Checking dist/ ==="
 ls dist/index.js 2>&1 || echo "ERROR: dist/index.js not found!"
 
+echo "=== Enabling pgvector extension ==="
+node -e "const{PrismaClient}=require('@prisma/client');const p=new PrismaClient();p.\$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS vector').then(()=>{console.log('pgvector enabled');return p.\$disconnect()}).catch(e=>{console.error('pgvector error:',e.message);return p.\$disconnect()})" 2>&1 || echo "WARNING: pgvector extension setup had issues, continuing..."
+
 echo "=== Syncing database schema ==="
 npx prisma db push --skip-generate --accept-data-loss 2>&1 || echo "WARNING: prisma db push had issues, continuing..."
 

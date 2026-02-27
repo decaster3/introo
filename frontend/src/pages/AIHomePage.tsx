@@ -285,7 +285,6 @@ export function AIHomePage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // AI search state
-  const [aiParsing, setAiParsing] = useState(false);
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
   const [lastAiQuery, setLastAiQuery] = useState<{ query: string; keywords: string[] } | null>(null);
 
@@ -353,6 +352,7 @@ export function AIHomePage() {
     network: false,
     tags: false,
     strength: false,
+    'deep-search': false,
     description: false,
     'connected-time': false,
     employees: false,
@@ -387,6 +387,12 @@ export function AIHomePage() {
     lastContactMonths: [] as string[],
   });
   const [aiKeywordsLoading, setAiKeywordsLoading] = useState(false);
+
+  // Deep search (embeddings-based semantic search)
+  const [deepSearchLoading, setDeepSearchLoading] = useState(false);
+  const [deepSearchResults, setDeepSearchResults] = useState<{ domain: string; similarity: number }[] | null>(null);
+  const [deepSearchError, setDeepSearchError] = useState<string | null>(null);
+  const [deepSearchPrecision, setDeepSearchPrecision] = useState<1 | 2 | 3>(2);
 
   const toggleSection = useCallback((key: string) => {
     setOpenSections(prev => ({ ...prev, [key]: !prev[key] }));
@@ -423,6 +429,41 @@ export function AIHomePage() {
       ...prev,
       aiKeywords: prev.aiKeywords.filter(k => k !== keyword),
     }));
+  }, []);
+
+  const runDeepSearch = useCallback(async (query: string, precision?: number) => {
+    if (!query.trim() || query.trim().length < 3) return;
+    setDeepSearchLoading(true);
+    setDeepSearchError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/embeddings/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ query: query.trim(), limit: 200, precision: precision ?? deepSearchPrecision }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(err.error || 'Deep search failed');
+      }
+      const data = await res.json();
+      if (!data.results || data.results.length === 0) {
+        setDeepSearchError('No embeddings yet. Ask admin to generate embeddings first.');
+        setDeepSearchResults(null);
+      } else {
+        setDeepSearchResults(data.results);
+      }
+    } catch (e: any) {
+      console.warn('Deep search failed:', e);
+      setDeepSearchError(e.message || 'Search failed');
+    } finally {
+      setDeepSearchLoading(false);
+    }
+  }, [deepSearchPrecision]);
+
+  const clearDeepSearch = useCallback(() => {
+    setDeepSearchResults(null);
+    setDeepSearchError(null);
   }, []);
 
   const toggleFundingRound = useCallback((round: string) => {
@@ -620,6 +661,7 @@ export function AIHomePage() {
     active.add('source');
     if (tagInclude.length > 0 || tagExclude.length > 0) active.add('tags');
     if (strengthFilter !== 'all') active.add('strength');
+    if (deepSearchResults) active.add('deep-search');
     if (sidebarFilters.aiKeywords.length > 0 || sidebarFilters.excludeKeywords.length > 0 || sidebarFilters.description) active.add('description');
     if (sidebarFilters.connectedYears.length > 0 || sidebarFilters.connectedMonths.length > 0) active.add('connected-time');
     if (sidebarFilters.lastContactYears.length > 0 || sidebarFilters.lastContactMonths.length > 0) active.add('last-contact-time');
@@ -1117,20 +1159,6 @@ export function AIHomePage() {
 
     // View selected → don't filter, just sort matches to top (done after all filters)
 
-    // Instant keyword filter (as you type)
-    if (searchQuery.trim()) {
-      const q = searchQuery.trim().toLowerCase();
-      const terms = q.split(/\s+/).filter(t => t.length > 0);
-      result = result.filter(c => {
-        const haystack = [
-          c.name, c.domain, c.industry, c.description, c.city, c.country,
-          ...c.myContacts.map(ct => `${ct.name} ${ct.title}`),
-          ...c.spaceContacts.map(ct => `${ct.name} ${ct.title || ''}`),
-        ].filter(Boolean).join(' ').toLowerCase();
-        return terms.every(t => haystack.includes(t));
-      });
-    }
-
     // ── Business description / AI keywords / exclude ──
     // Only filter by AI-generated keywords (not by the description input text directly)
     if (sf.aiKeywords.length > 0) {
@@ -1149,6 +1177,13 @@ export function AIHomePage() {
         const text = [c.description, c.industry, c.name].filter(Boolean).join(' ').toLowerCase();
         return !sf.excludeKeywords.some(ex => text.includes(ex));
       });
+    }
+
+    // ── Deep Search (embeddings) ──
+    if (deepSearchResults && deepSearchResults.length > 0) {
+      const domainScores = new Map(deepSearchResults.map(r => [r.domain, r.similarity]));
+      result = result.filter(c => domainScores.has(c.domain));
+      result.sort((a, b) => (domainScores.get(b.domain) || 0) - (domainScores.get(a.domain) || 0));
     }
 
     // ── Employee count ──
@@ -1282,7 +1317,7 @@ export function AIHomePage() {
     }
 
     return result;
-  }, [mergedCompanies, selectedView, searchQuery, sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, sortBy, sidebarFilters, tagInclude, tagExclude, companyTags, tableSorts, groupByField, groupByDir]);
+  }, [mergedCompanies, selectedView, sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, sortBy, sidebarFilters, tagInclude, tagExclude, companyTags, tableSorts, groupByField, groupByDir, deepSearchResults]);
 
   // Flatten filteredCompanies into a deduplicated people array
   interface FlatPerson {
@@ -1468,7 +1503,7 @@ export function AIHomePage() {
   // Count active filters
   const activeFilterCount = useMemo(() => {
     let n = 0;
-    if (searchQuery.trim()) n++;
+    if (deepSearchResults) n++;
     if (sourceFilter !== 'all') n++;
     if (accountFilter !== 'all') n++;
     if (strengthFilter !== 'all') n++;
@@ -1492,7 +1527,7 @@ export function AIHomePage() {
     if (sf.lastContactYears.length > 0 || sf.lastContactMonths.length > 0) n++;
     if (tagInclude.length > 0 || tagExclude.length > 0) n++;
     return n;
-  }, [searchQuery, sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, sidebarFilters, tagInclude, tagExclude]);
+  }, [sourceFilter, accountFilter, strengthFilter, spaceFilter, connectionFilter, sidebarFilters, tagInclude, tagExclude, deepSearchResults]);
 
   // Build removable pills for every active filter
   // Compute year/month counts from contacts for "Connected since" filter
@@ -1601,6 +1636,8 @@ export function AIHomePage() {
     });
     setTagInclude([]);
     setTagExclude([]);
+    setDeepSearchResults(null);
+    setDeepSearchError(null);
   }, []);
 
   // Stats
@@ -1740,6 +1777,8 @@ export function AIHomePage() {
           lastContactYears: [],
           lastContactMonths: [],
         });
+        setDeepSearchResults(null);
+        setDeepSearchError(null);
         setSourceFilter('all');
         setStrengthFilter('all');
         setTagInclude([]);
@@ -1845,118 +1884,6 @@ export function AIHomePage() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [tagPickerDomain, inlinePanel, searchQuery, selectedView, toggleView]);
-
-  // AI-powered search: parse natural language and directly fill sidebar filters
-  const aiSearch = useCallback(async (query: string) => {
-    setAiParsing(true);
-    setAiExplanation(null);
-    setLastAiQuery(null);
-    try {
-      const res = await fetch(`${API_BASE}/api/ai/parse-query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          query,
-          availableCountries: availableCountries.map(c => c.name),
-          availableSpaces: spaces.map(s => s.name),
-        }),
-      });
-
-      if (!res.ok) throw new Error('AI parse failed');
-      const data = await res.json();
-      const { filters, semanticKeywords, explanation } = data;
-
-      // Directly apply to sidebar filters
-      setConnectionFilter('all');
-      setSelectedView(null);
-      setGridPage(0);
-
-      setSourceFilter(filters.sourceFilter && filters.sourceFilter !== 'all' ? filters.sourceFilter : 'all');
-      setStrengthFilter(filters.strengthFilter && filters.strengthFilter !== 'all' ? filters.strengthFilter : 'all');
-
-      if (filters.spaceFilter) {
-        const matched = spaces.find((s: any) => s.name.toLowerCase().includes(filters.spaceFilter.toLowerCase()));
-        setSpaceFilter(matched ? matched.id : 'all');
-      } else {
-        setSpaceFilter('all');
-      }
-
-      // Apply structural filters immediately
-      setSidebarFilters(prev => ({
-        ...prev,
-        description: filters.description || '',
-        categories: [],
-        excludeKeywords: [],
-        aiKeywords: [], // will be filled by expand-keywords below
-        employeeRanges: filters.employeeRanges || [],
-        country: filters.country || '',
-        city: filters.city || '',
-        fundingRounds: filters.fundingRounds || [],
-        fundingRecency: 'any',
-        foundedFrom: filters.foundedFrom || '',
-        foundedTo: filters.foundedTo || '',
-        revenueRanges: filters.revenueRanges || [],
-        technologies: [],
-      }));
-
-      // Open the description section so user can see the AI keywords
-      setOpenSections(prev => ({ ...prev, description: true }));
-      setSearchQuery('');
-      setAiExplanation(explanation || null);
-
-      // Now expand keywords via AI (the same way Business Description input does)
-      const expandText = [
-        filters.description || '',
-        ...(semanticKeywords || []),
-      ].filter(Boolean).join(', ');
-
-      if (expandText.trim().length >= 2) {
-        setAiKeywordsLoading(true);
-        try {
-          const kwRes = await fetch(`${API_BASE}/api/ai/expand-keywords`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ text: expandText.trim() }),
-          });
-          if (kwRes.ok) {
-            const kwData = await kwRes.json();
-            if (kwData.keywords?.length > 0) {
-              const expandedKws = kwData.keywords.map((k: string) => k.toLowerCase());
-              setSidebarFilters(prev => ({ ...prev, aiKeywords: expandedKws }));
-              setLastAiQuery({ query: query.trim(), keywords: expandedKws });
-            } else {
-              // Fallback: use semantic keywords as-is
-              const fallbackKws = (semanticKeywords || []).map((k: string) => k.toLowerCase());
-              setSidebarFilters(prev => ({ ...prev, aiKeywords: fallbackKws }));
-              setLastAiQuery({ query: query.trim(), keywords: fallbackKws });
-            }
-          }
-        } catch {
-          // Fallback: use semantic keywords as-is
-          const fallbackKws = (semanticKeywords || []).map((k: string) => k.toLowerCase());
-          setSidebarFilters(prev => ({ ...prev, aiKeywords: fallbackKws }));
-          setLastAiQuery({ query: query.trim(), keywords: fallbackKws });
-        } finally {
-          setAiKeywordsLoading(false);
-        }
-      } else {
-        setLastAiQuery({ query: query.trim(), keywords: [] });
-      }
-    } catch (e) {
-      console.error('AI search failed, falling back to keyword search:', e);
-      const keywords = query.toLowerCase().split(/[\s,]+/).filter(k => k.length > 2);
-      if (keywords.length > 0) {
-        setSidebarFilters(prev => ({ ...prev, aiKeywords: keywords, description: query.trim() }));
-        setOpenSections(prev => ({ ...prev, description: true }));
-        setLastAiQuery({ query: query.trim(), keywords });
-      }
-      setSearchQuery('');
-    } finally {
-      setAiParsing(false);
-    }
-  }, [availableCountries, spaces]);
 
   // Save current AI search as a pinned view
   const saveAsView = useCallback(async () => {
@@ -2170,6 +2097,7 @@ export function AIHomePage() {
     if (sourceFilter !== 'all' || spaceFilter !== 'all' || connectionFilter !== 'all' || accountFilter !== 'all') s.add('source');
     if (tagInclude.length > 0 || tagExclude.length > 0) s.add('tags');
     if (strengthFilter !== 'all') s.add('strength');
+    if (deepSearchResults) s.add('deep-search');
     if (sidebarFilters.aiKeywords.length > 0 || sidebarFilters.excludeKeywords.length > 0 || sidebarFilters.description) s.add('description');
     if (sidebarFilters.connectedYears.length > 0 || sidebarFilters.connectedMonths.length > 0) s.add('connected-time');
     if (sidebarFilters.employeeRanges.length > 0) s.add('employees');
@@ -2180,7 +2108,7 @@ export function AIHomePage() {
     if (sidebarFilters.technologies.length > 0) s.add('technologies');
     if (groupByField || tableSorts.length > 0 || peopleGroupByField || peopleSorts.length > 0) s.add('sort-group');
     return s;
-  }, [sourceFilter, spaceFilter, connectionFilter, accountFilter, strengthFilter, tagInclude, tagExclude, sidebarFilters, groupByField, tableSorts, peopleGroupByField, peopleSorts]);
+  }, [sourceFilter, spaceFilter, connectionFilter, accountFilter, strengthFilter, tagInclude, tagExclude, sidebarFilters, groupByField, tableSorts, peopleGroupByField, peopleSorts, deepSearchResults]);
 
   // ─── Sidebar section helper ────────────────────────────────────────────────
   // SidebarSection is now a stable component defined outside AIHomePage.
@@ -2632,12 +2560,68 @@ export function AIHomePage() {
               )}
             </SidebarSection>
 
-            {/* ── Business description (AI keyword search) ── */}
-            <SidebarSection id="description" icon="🔍" title="Business description" openSections={openSections} toggleSection={toggleSection} activeSectionIds={activeSectionIds}>
-              {/* AI search input */}
+
+            {/* ── AI Deep Search (embeddings) ── */}
+            <SidebarSection id="deep-search" icon="🧠" title="AI Deep Search" openSections={openSections} toggleSection={toggleSection} activeSectionIds={activeSectionIds}>
+              <div className="sb-input-wrap sb-input-with-btn">
+                <input
+                  className="sb-input"
+                  placeholder="e.g. b2b companies with high ticket"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && searchQuery.trim().length >= 3 && !deepSearchLoading) runDeepSearch(searchQuery.trim());
+                  }}
+                />
+                <button
+                  className="sb-input-search-btn"
+                  disabled={searchQuery.trim().length < 3 || deepSearchLoading}
+                  onClick={() => {
+                    if (searchQuery.trim().length >= 3) runDeepSearch(searchQuery.trim());
+                  }}
+                >
+                  {deepSearchLoading ? '...' : '→'}
+                </button>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
+                <span style={{ fontSize: 11, color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>Precision</span>
+                <div className="sb-chips" style={{ gap: 4 }}>
+                  {([1, 2, 3] as const).map(level => (
+                    <button
+                      key={level}
+                      className={`sb-chip sb-chip--time${deepSearchPrecision === level ? ' active' : ''}`}
+                      style={{ minWidth: 28, padding: '2px 6px', fontSize: 11 }}
+                      onClick={() => {
+                        setDeepSearchPrecision(level);
+                        if (searchQuery.trim().length >= 3) runDeepSearch(searchQuery.trim(), level);
+                      }}
+                    >
+                      {level === 1 ? 'Wide' : level === 2 ? 'Balanced' : 'Strict'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {deepSearchResults && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
+                  <span className="sb-empty-hint" style={{ margin: 0, color: 'var(--text-secondary)' }}>
+                    {deepSearchResults.length} companies matched
+                  </span>
+                  <button className="sb-kw-section-clear" onClick={() => { clearDeepSearch(); setSearchQuery(''); }}>Clear</button>
+                </div>
+              )}
+              {deepSearchError && (
+                <p className="sb-empty-hint" style={{ marginTop: 6, color: '#f87171' }}>
+                  {deepSearchError}
+                </p>
+              )}
+            </SidebarSection>
+
+            {/* ── Keywords ── */}
+            <SidebarSection id="description" icon="🔍" title="Keywords" openSections={openSections} toggleSection={toggleSection} activeSectionIds={activeSectionIds}>
+              {/* Keyword expansion */}
               <div className="sb-kw-section">
                 <div className="sb-kw-section-header">
-                  <span className="sb-kw-section-label">AI search</span>
+                  <span className="sb-kw-section-label">Expand keywords</span>
                   {aiKeywordsLoading && <span className="sb-input-loading"><span className="u-spinner-sm" /></span>}
                 </div>
                 <div className="sb-input-wrap sb-input-with-btn">
@@ -2664,10 +2648,10 @@ export function AIHomePage() {
                 </div>
               </div>
 
-              {/* Add keywords */}
+              {/* Active keyword chips */}
               <div className="sb-kw-section">
                 <div className="sb-kw-section-header">
-                  <span className="sb-kw-section-label">Keywords</span>
+                  <span className="sb-kw-section-label">Active keywords</span>
                   {sidebarFilters.aiKeywords.length > 0 && (
                     <>
                       <span className="sb-kw-section-count">{sidebarFilters.aiKeywords.length}</span>
@@ -3111,37 +3095,43 @@ export function AIHomePage() {
                 <input
                   ref={searchRef}
                   value={searchQuery}
-                  onChange={e => { setSearchQuery(e.target.value); setGridPage(0); }}
+                  onChange={e => setSearchQuery(e.target.value)}
                   onFocus={() => setSearchFocused(true)}
                   onBlur={() => setSearchFocused(false)}
-                  placeholder={aiParsing ? 'Parsing with AI...' : 'Search companies, contacts...'}
+                  placeholder={deepSearchLoading ? 'Searching...' : 'Search companies, contacts...'}
                   onKeyDown={e => {
-                    if (e.key === 'Enter' && searchQuery.trim().length > 2 && !aiParsing) {
-                      aiSearch(searchQuery.trim());
+                    if (e.key === 'Enter' && searchQuery.trim().length >= 3 && !deepSearchLoading) {
+                      runDeepSearch(searchQuery.trim());
                     }
                   }}
-                  disabled={aiParsing}
+                  disabled={deepSearchLoading}
                 />
-                {aiParsing && (
+                {deepSearchLoading && (
                   <span className="u-omni-loading">
-                    <span className="u-spinner-sm" /> AI parsing...
+                    <span className="u-spinner-sm" /> Searching...
                   </span>
                 )}
-                {searchQuery.trim().length > 2 && !aiParsing && (
+                {searchQuery.trim().length >= 3 && !deepSearchLoading && (
                   <button
                     className="u-ai-search-btn"
-                    title="Deep search with AI (Enter)"
-                    onMouseDown={e => { e.preventDefault(); aiSearch(searchQuery.trim()); }}
+                    title="Semantic search (Enter)"
+                    onMouseDown={e => { e.preventDefault(); runDeepSearch(searchQuery.trim()); }}
                   >
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"/><path d="M9 18h6"/><path d="M12 18v4"/>
-                      <path d="M8 22h8"/>
+                      <circle cx="11" cy="11" r="5"/><path d="m21 21-4.35-4.35"/>
                     </svg>
-                    AI Deep Search
+                    Deep Search
                   </button>
                 )}
-                {searchQuery && (
+                {searchQuery && !deepSearchResults && (
                   <button className="u-search-clear" onClick={() => setSearchQuery('')}>×</button>
+                )}
+                {deepSearchResults && (
+                  <button
+                    className="u-search-clear"
+                    title="Clear deep search results"
+                    onClick={() => { clearDeepSearch(); setSearchQuery(''); }}
+                  >×</button>
                 )}
                 <kbd className="u-kbd">⌘K</kbd>
               </div>
@@ -3423,7 +3413,7 @@ export function AIHomePage() {
               </div>
             ) : displayCompanies.length === 0 ? (
               <div className="u-grid-empty">
-                {activeFilterCount > 0 || searchQuery.trim() ? (
+                {activeFilterCount > 0 ? (
                   <>
                     <span className="u-grid-empty-icon">🔍</span>
                     <span>No companies match your filters</span>

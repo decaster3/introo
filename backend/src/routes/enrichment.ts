@@ -9,6 +9,7 @@ import {
   type BatchResult,
 } from '../services/apollo.js';
 import prisma from '../lib/prisma.js';
+import { embedCompany } from './embeddings.js';
 
 const router = Router();
 router.use(authMiddleware);
@@ -196,6 +197,9 @@ router.get('/company/:domain', async (req, res) => {
         create: { domain, ...enrichData },
         update: enrichData,
       });
+      embedCompany(company.id, company).catch(err =>
+        console.error(`[embeddings] Auto-embed failed for ${domain}:`, err.message),
+      );
       res.json({ company, source: 'apollo' });
       return;
     }
@@ -230,7 +234,11 @@ async function enrichCompanyIfNeeded(company: any, domain: string): Promise<any>
   if (org.total_funding) update.totalFunding = String(org.total_funding);
   if (org.latest_funding_stage) update.lastFundingRound = org.latest_funding_stage;
   if (org.latest_funding_round_date) update.lastFundingDate = new Date(org.latest_funding_round_date);
-  return prisma.company.update({ where: { domain }, data: update });
+  const updated = await prisma.company.update({ where: { domain }, data: update });
+  embedCompany(updated.id, updated).catch(err =>
+    console.error(`[embeddings] Auto-embed failed for ${domain}:`, err.message),
+  );
+  return updated;
 }
 
 async function createEnrichedCompany(domain: string): Promise<any | null> {
@@ -255,11 +263,15 @@ async function createEnrichedCompany(domain: string): Promise<any | null> {
     lastFundingDate: org.latest_funding_round_date ? new Date(org.latest_funding_round_date) : null,
     enrichedAt: new Date(),
   };
-  return prisma.company.upsert({
+  const company = await prisma.company.upsert({
     where: { domain },
     create: { domain, ...enrichData },
     update: enrichData,
   });
+  embedCompany(company.id, company).catch(err =>
+    console.error(`[embeddings] Auto-embed failed for ${domain}:`, err.message),
+  );
+  return company;
 }
 
 // ─── Lookup contact by email (for manual add) ────────────────────────────────
