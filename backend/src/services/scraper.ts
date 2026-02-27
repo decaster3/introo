@@ -6,9 +6,19 @@ const APIFY_BASE = 'https://api.apify.com/v2';
 const ACTOR_ID = 'apify~website-content-crawler';
 const MAX_CRAWL_PAGES = 1;
 const MAX_CONTENT_CHARS = 12_000; // ~3k tokens — homepage is enough for a summary
-const SCRAPE_TIMEOUT_MS = 120_000;
+const SCRAPE_TIMEOUT_MS = 60_000;
 const IS_DEV = process.env.NODE_ENV !== 'production';
 const DEV_LIMIT = 5;
+
+const EMAIL_PROVIDER_DOMAINS = new Set([
+  'gmail.com', 'googlemail.com', 'hotmail.com', 'hotmail.de', 'hotmail.ca',
+  'hotmail.co.uk', 'hotmail.fr', 'yahoo.com', 'yahoo.co.uk', 'yahoo.de',
+  'ymail.com', 'outlook.com', 'outlook.de', 'outlook.co.uk', 'live.com',
+  'live.de', 'msn.com', 'aol.com', 'icloud.com', 'me.com', 'mac.com',
+  'mail.ru', 'inbox.ru', 'yandex.ru', 'yandex.com', 'protonmail.com',
+  'proton.me', 'zoho.com', 'gmx.de', 'gmx.net', 'gmx.com', 'web.de',
+  't-online.de', 'qq.com', '163.com', '126.com',
+]);
 
 let _openai: OpenAI | null = null;
 function getOpenAI(): OpenAI {
@@ -61,13 +71,8 @@ async function runApifyCrawl(url: string, crawlerType: string): Promise<string |
   return combined.slice(0, MAX_CONTENT_CHARS);
 }
 
-// Try cheerio first (fast, cheap), fall back to playwright if empty
 export async function scrapeWebsite(url: string): Promise<string | null> {
-  const content = await runApifyCrawl(url, 'cheerio').catch(() => null);
-  if (content && content.length > 50) return content;
-
-  console.log(`[scraper] Cheerio returned no content, retrying with playwright...`);
-  return runApifyCrawl(url, 'playwright:adaptive');
+  return runApifyCrawl(url, 'cheerio');
 }
 
 // Summarize scraped website content using GPT-4o-mini
@@ -108,6 +113,14 @@ export async function scrapeAndSummarizeCompany(company: {
   city?: string | null;
   country?: string | null;
 }): Promise<boolean> {
+  if (EMAIL_PROVIDER_DOMAINS.has(company.domain.toLowerCase())) {
+    await prisma.company.update({
+      where: { id: company.id },
+      data: { scrapedAt: new Date() },
+    });
+    return false;
+  }
+
   const url = company.websiteUrl || `https://${company.domain}`;
 
   try {
