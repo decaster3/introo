@@ -801,15 +801,15 @@ export function AIHomePage() {
         co.linkedinUrl = sc.linkedinUrl;
         co.enrichedAt = sc.enrichedAt;
       }
+      if (sc.spaceId && !co.spaceIds.includes(sc.spaceId)) {
+        co.spaceIds.push(sc.spaceId);
+      }
       sc.contacts.forEach(contact => {
         if (!co.spaceContacts.some(ec => ec.id === contact.id) &&
             !co.myContacts.some(mc => mc.id === contact.id)) {
           co.spaceContacts.push({ ...contact, spaceId: contact.spaceId });
           co.spaceCount++;
           co.totalCount++;
-          if (contact.spaceId && !co.spaceIds.includes(contact.spaceId)) {
-            co.spaceIds.push(contact.spaceId);
-          }
         }
       });
       if (co.myCount > 0 && co.spaceCount > 0) co.source = 'both';
@@ -1881,6 +1881,7 @@ export function AIHomePage() {
           setInlinePanel(null);
         } else if (searchQuery) {
           setSearchQuery('');
+          clearDeepSearch();
         } else if (selectedView) {
           toggleView(selectedView);
         }
@@ -1888,7 +1889,7 @@ export function AIHomePage() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [tagPickerDomain, inlinePanel, searchQuery, selectedView, toggleView]);
+  }, [tagPickerDomain, inlinePanel, searchQuery, selectedView, toggleView, clearDeepSearch]);
 
   // Save current AI search as a pinned view
   const saveAsView = useCallback(async () => {
@@ -3100,7 +3101,11 @@ export function AIHomePage() {
                 <input
                   ref={searchRef}
                   value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
+                  onChange={e => {
+                    const v = e.target.value;
+                    setSearchQuery(v);
+                    if (!v.trim()) clearDeepSearch();
+                  }}
                   onFocus={() => setSearchFocused(true)}
                   onBlur={() => setSearchFocused(false)}
                   placeholder={deepSearchLoading ? 'Searching...' : 'Search companies, contacts...'}
