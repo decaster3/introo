@@ -268,6 +268,10 @@ export async function enrichContactsFree(
   if (toEnrich.length === 0) {
     console.log(`[enrich] Nothing to enrich, all contacts are fresh`);
     onProgress?.(result);
+
+    // Still run website scraping for companies that Apollo missed
+    await scrapeUnscrapedForUser(userId, isCancelled);
+
     return result;
   }
 
@@ -546,32 +550,69 @@ export async function enrichContactsFree(
   }
 
   // ── 9. Scrape websites for companies not enriched by Apollo ─────────────
-  // Only scrape companies that Apollo doesn't have data for (no apolloId and no description).
-  // In dev mode, scraping is handled inline only.
-  if (process.env.APIFY_API_TOKEN && !isCancelled() && !IS_DEV) {
-    const unscrapedCompanies = await prisma.company.findMany({
-      where: {
-        scrapedAt: null,
-        apolloId: null,
-        description: null,
-        contacts: { some: { userId } },
-      },
-      select: { id: true, domain: true, name: true, websiteUrl: true, description: true, industry: true, city: true, country: true },
-      take: 500,
-    });
+  await scrapeUnscrapedForUser(userId, isCancelled);
 
-    if (unscrapedCompanies.length > 0) {
-      console.log(`[enrich] Scraping ${unscrapedCompanies.length} unscraped company websites...`);
-      for (const company of unscrapedCompanies) {
+  return result;
+}
+
+async function scrapeUnscrapedForUser(
+  userId: string,
+  isCancelled: () => boolean,
+): Promise<void> {
+  // Embed companies that have data but no embedding yet
+  if (process.env.OPENAI_API_KEY && !isCancelled()) {
+    const unembedded = await prisma.$queryRawUnsafe<
+      { id: string; name: string; domain: string; description: string | null; industry: string | null; city: string | null; country: string | null; websiteSummary: string | null }[]
+    >(
+      `SELECT c.id, c.name, c.domain, c.description, c.industry, c.city, c.country, c."websiteSummary"
+       FROM companies c
+       JOIN contacts ct ON ct."companyId" = c.id AND ct."userId" = $1
+       WHERE c."embeddedAt" IS NULL
+         AND (c.description IS NOT NULL OR c."websiteSummary" IS NOT NULL)
+       LIMIT 200`,
+      userId,
+    );
+
+    if (unembedded.length > 0) {
+      console.log(`[enrich] Embedding ${unembedded.length} companies missing embeddings...`);
+      for (const company of unembedded) {
         if (isCancelled()) break;
-        await scrapeAndSummarizeCompany(company).catch(err =>
-          console.error(`[scraper] Failed for ${company.domain}:`, err.message),
+        await embedCompany(company.id, company).catch(err =>
+          console.error(`[embeddings] Auto-embed failed for ${company.domain}:`, err.message),
         );
       }
     }
   }
 
-  return result;
+  // Scrape websites for companies Apollo didn't have data for
+  if (!process.env.APIFY_API_TOKEN || isCancelled() || IS_DEV) return;
+
+  const unscrapedCompanies = await prisma.company.findMany({
+    where: {
+      scrapedAt: null,
+      apolloId: null,
+      description: null,
+      contacts: { some: { userId } },
+    },
+    select: { id: true, domain: true, name: true, websiteUrl: true, description: true, industry: true, city: true, country: true },
+    take: 500,
+  });
+
+  if (unscrapedCompanies.length === 0) return;
+
+  console.log(`[enrich] Scraping ${unscrapedCompanies.length} unscraped company websites...`);
+  for (const company of unscrapedCompanies) {
+    if (isCancelled()) break;
+    try {
+      await scrapeAndSummarizeCompany(company);
+    } catch (err: any) {
+      if (err.retryable === false) {
+        console.error(`[scraper] Stopping batch — ${err.message}`);
+        break;
+      }
+      console.error(`[scraper] Failed for ${company.domain}:`, err.message);
+    }
+  }
 }
 
 // ─── User Profile Enrichment (1 credit) ──────────────────────────────────────

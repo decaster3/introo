@@ -41,6 +41,11 @@ async function runApifyCrawl(url: string, crawlerType: string): Promise<string |
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');
+    if (response.status === 402 || body.includes('memory-limit')) {
+      const err = new Error(`Apify account limit reached (${response.status})`);
+      (err as any).retryable = false;
+      throw err;
+    }
     throw new Error(`Apify returned ${response.status}: ${body.slice(0, 200)}`);
   }
 
@@ -142,8 +147,9 @@ export async function scrapeAndSummarizeCompany(company: {
 
     console.log(`[scraper] Done: ${company.domain} (${summary.length} char summary)`);
     return true;
-  } catch (err) {
-    console.error(`[scraper] Failed for ${company.domain}:`, (err as Error).message);
+  } catch (err: any) {
+    console.error(`[scraper] Failed for ${company.domain}:`, err.message);
+    if (err.retryable === false) throw err;
     return false;
   }
 }
