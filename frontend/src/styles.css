@@ -4814,11 +4814,17 @@ body {
   border-radius: var(--radius-lg);
   transition: all 0.2s;
   overflow: hidden;
+  position: relative;
 }
 
 .u-omni.focused {
   border-color: var(--accent-primary);
   box-shadow: 0 0 0 3px var(--accent-muted);
+}
+
+.u-omni:has(.u-omni-history) {
+  overflow: visible;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
 /* Hunt pills row inside omni */
@@ -4898,9 +4904,104 @@ body {
 }
 
 .u-omni-precision-chip.active {
-  background: var(--text-primary);
-  color: var(--bg-primary);
-  border-color: var(--text-primary);
+  background: var(--accent-primary);
+  color: #fff;
+  border-color: var(--accent-primary);
+}
+
+/* Recent history dropdown */
+.u-omni-history {
+  position: absolute;
+  top: 100%;
+  left: -1px;
+  right: -1px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--accent-primary);
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  padding: 0.375rem 0;
+  max-height: 280px;
+  overflow-y: auto;
+  z-index: 200;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.u-omni-history-section + .u-omni-history-section {
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 0.25rem;
+  padding-top: 0.25rem;
+}
+
+.u-omni-history-heading {
+  padding: 0.25rem 0.875rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.u-omni-history-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.35rem 0.875rem;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.u-omni-history-item:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.u-omni-history-item svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.u-omni-history-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Search tips (empty state) */
+.u-omni-tips {
+  padding: 0.25rem 0;
+}
+
+.u-omni-tips-heading {
+  padding: 0.375rem 0.875rem 0.125rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.u-omni-tip-item {
+  color: var(--accent-primary) !important;
+  font-style: italic;
+}
+
+.u-omni-tip-item svg {
+  color: var(--accent-primary) !important;
+  opacity: 0.6;
+}
+
+.u-omni-tips-hint {
+  padding: 0.5rem 0.875rem 0.375rem;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 0.25rem;
 }
 
 .u-omni-pin {

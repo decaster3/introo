@@ -52,6 +52,9 @@ model User {
   pendingInvites     PendingInvite[]
   savedViews         SavedView[]
   activity           UserActivity[]
+  searchHistory      SearchHistory[]
+  companyViews       CompanyViewHistory[]
+  contactViews       ContactViewHistory[]
 
   @@map("users")
 }
@@ -422,4 +425,39 @@ model UserActivity {
   @@unique([userId, date])
   @@index([date])
   @@map("user_activity")
+}
+
+model SearchHistory {
+  id        String   @id @default(cuid())
+  userId    String
+  query     String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("search_history")
+}
+
+model CompanyViewHistory {
+  id            String   @id @default(cuid())
+  userId        String
+  companyDomain String
+  companyName   String
+  createdAt     DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("company_view_history")
+}
+
+model ContactViewHistory {
+  id           String   @id @default(cuid())
+  userId       String
+  contactEmail String
+  contactName  String
+  createdAt    DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("contact_view_history")
 }

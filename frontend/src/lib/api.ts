@@ -379,6 +379,57 @@ export const adminApi = {
   }>('/api/admin/activity-chart'),
 };
 
+// History (recent searches & company views)
+export interface SearchHistoryItem {
+  id: string;
+  query: string;
+  createdAt: string;
+}
+
+export interface CompanyViewItem {
+  id: string;
+  companyDomain: string;
+  companyName: string;
+  createdAt: string;
+}
+
+export interface ContactViewItem {
+  id: string;
+  contactEmail: string;
+  contactName: string;
+  createdAt: string;
+}
+
+export interface RecentViewItem {
+  type: 'company' | 'contact';
+  id: string;
+  domain?: string;
+  email?: string;
+  name: string;
+  createdAt: string;
+}
+
+export const historyApi = {
+  getSearches: () => request<SearchHistoryItem[]>('/api/history/searches'),
+  saveSearch: (query: string) =>
+    request<SearchHistoryItem>('/api/history/searches', {
+      method: 'POST',
+      body: JSON.stringify({ query }),
+    }),
+  saveCompanyView: (companyDomain: string, companyName: string) =>
+    request<CompanyViewItem>('/api/history/company-views', {
+      method: 'POST',
+      body: JSON.stringify({ companyDomain, companyName }),
+    }),
+  saveContactView: (contactEmail: string, contactName: string) =>
+    request<ContactViewItem>('/api/history/contact-views', {
+      method: 'POST',
+      body: JSON.stringify({ contactEmail, contactName }),
+    }),
+  getRecentViews: (limit = 5) =>
+    request<RecentViewItem[]>(`/api/history/recent-views?limit=${limit}`),
+};
+
 export interface IntroRequestResponse {
   id: string;
   requesterId: string;

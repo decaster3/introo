@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAppState, useAppActions } from '../store';
-import { API_BASE, authApi, calendarApi, requestsApi, spacesApi, notificationsApi, offersApi, tagsApi, emailApi, viewsApi, enrichmentApi, relationshipsApi, type CalendarAccountInfo, type IntroRequestResponse } from '../lib/api';
+import { API_BASE, authApi, calendarApi, requestsApi, spacesApi, notificationsApi, offersApi, tagsApi, emailApi, viewsApi, enrichmentApi, relationshipsApi, historyApi, type CalendarAccountInfo, type IntroRequestResponse, type SearchHistoryItem, type RecentViewItem } from '../lib/api';
 import { calculateStrength, type SpaceCompany, type DisplayContact, type MergedCompany, type ViewFilters, type SavedView, type ViewSortRule, type InlinePanel } from '../types';
 import { PersonAvatar, CompanyLogo, OnboardingChecklist } from '../components';
 import type { ChecklistProgress, ChecklistActions } from '../components';
@@ -395,6 +395,10 @@ export function AIHomePage() {
   const [deepSearchPrecision, setDeepSearchPrecision] = useState<1 | 2 | 3>(2);
   const [committedSearch, setCommittedSearch] = useState('');
 
+  // Recent history
+  const [recentSearches, setRecentSearches] = useState<SearchHistoryItem[]>([]);
+  const [recentViews, setRecentViews] = useState<RecentViewItem[]>([]);
+
   const toggleSection = useCallback((key: string) => {
     setOpenSections(prev => ({ ...prev, [key]: !prev[key] }));
   }, []);
@@ -434,15 +438,25 @@ export function AIHomePage() {
 
   const runDeepSearch = useCallback(async (query: string, precision?: number) => {
     if (!query.trim() || query.trim().length < 3) return;
-    setCommittedSearch(query.trim());
+    const trimmed = query.trim();
+    setCommittedSearch(trimmed);
     setDeepSearchLoading(true);
     setDeepSearchError(null);
+
+    // Save to search history (fire-and-forget)
+    historyApi.saveSearch(trimmed).then(item => {
+      setRecentSearches(prev => {
+        const filtered = prev.filter(s => s.query !== trimmed);
+        return [item, ...filtered].slice(0, 3);
+      });
+    }).catch(() => {});
+
     try {
       const res = await fetch(`${API_BASE}/api/embeddings/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ query: query.trim(), limit: 200, precision: precision ?? deepSearchPrecision }),
+        body: JSON.stringify({ query: trimmed, limit: 200, precision: precision ?? deepSearchPrecision }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -549,6 +563,33 @@ export function AIHomePage() {
       })));
     }).catch(err => console.error('Failed to load views:', err));
   }, [currentUser]);
+
+  // Load recent history on mount
+  useEffect(() => {
+    if (!currentUser) return;
+    historyApi.getSearches().then(setRecentSearches).catch(() => {});
+    historyApi.getRecentViews(5).then(setRecentViews).catch(() => {});
+  }, [currentUser]);
+
+  // Save company/contact view when a panel is opened
+  const openedCompanyDomain = inlinePanel?.type === 'company' ? inlinePanel.company?.domain : null;
+  const openedContactEmail = inlinePanel?.type === 'person' ? (inlinePanel as any).contact?.email : null;
+
+  useEffect(() => {
+    if (!openedCompanyDomain) return;
+    const name = inlinePanel?.type === 'company' ? inlinePanel.company?.name : null;
+    historyApi.saveCompanyView(openedCompanyDomain, name || openedCompanyDomain).then(() => {
+      historyApi.getRecentViews(5).then(setRecentViews).catch(() => {});
+    }).catch(() => {});
+  }, [openedCompanyDomain]);
+
+  useEffect(() => {
+    if (!openedContactEmail) return;
+    const name = inlinePanel?.type === 'person' ? (inlinePanel as any).contact?.name : null;
+    historyApi.saveContactView(openedContactEmail, name || openedContactEmail).then(() => {
+      historyApi.getRecentViews(5).then(setRecentViews).catch(() => {});
+    }).catch(() => {});
+  }, [openedContactEmail]);
 
   // Close picker on outside click
   useEffect(() => {
@@ -3199,6 +3240,94 @@ export function AIHomePage() {
                     </button>
                   ))}
                   <span className="u-omni-precision-count">{deepSearchResults.length} matched</span>
+                </div>
+              )}
+              {searchFocused && !searchQuery && !deepSearchResults && (
+                <div className="u-omni-history" onMouseDown={e => e.preventDefault()}>
+                  {recentSearches.length === 0 && recentViews.length === 0 ? (
+                    <div className="u-omni-tips">
+                      <div className="u-omni-tips-heading">Try searching for</div>
+                      {[
+                        { text: 'VC funds', icon: 'search' },
+                        { text: 'B2B Fintech companies', icon: 'search' },
+                        { text: 'AI companies', icon: 'search' },
+                      ].map(tip => (
+                        <button
+                          key={tip.text}
+                          className="u-omni-history-item u-omni-tip-item"
+                          onClick={() => { setSearchQuery(tip.text); runDeepSearch(tip.text); }}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+                          </svg>
+                          <span className="u-omni-history-text">{tip.text}</span>
+                        </button>
+                      ))}
+                      <div className="u-omni-tips-hint">
+                        Use natural language — AI parses your query into filters automatically
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {recentSearches.length > 0 && (
+                        <div className="u-omni-history-section">
+                          <div className="u-omni-history-heading">Recent searches</div>
+                          {recentSearches.slice(0, 3).map(s => (
+                            <button
+                              key={s.id}
+                              className="u-omni-history-item"
+                              onClick={() => { setSearchQuery(s.query); runDeepSearch(s.query); }}
+                            >
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+                              </svg>
+                              <span className="u-omni-history-text">{s.query}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {recentViews.length > 0 && (
+                        <div className="u-omni-history-section">
+                          <div className="u-omni-history-heading">Recently viewed</div>
+                          {recentViews.slice(0, 5).map(v => {
+                            if (v.type === 'company') {
+                              const match = mergedCompanies.find(c => c.domain === v.domain);
+                              return (
+                                <button
+                                  key={v.id}
+                                  className="u-omni-history-item"
+                                  onClick={() => {
+                                    if (match) {
+                                      setInlinePanel({ type: 'company', company: match });
+                                    } else {
+                                      setSearchQuery(v.name);
+                                      setCommittedSearch(v.name);
+                                    }
+                                  }}
+                                >
+                                  <CompanyLogo domain={v.domain!} name={v.name} size={16} />
+                                  <span className="u-omni-history-text">{v.name}</span>
+                                </button>
+                              );
+                            }
+                            return (
+                              <button
+                                key={v.id}
+                                className="u-omni-history-item"
+                                onClick={() => {
+                                  setSearchQuery(v.name);
+                                  setCommittedSearch(v.name);
+                                }}
+                              >
+                                <PersonAvatar email={v.email!} name={v.name} size={16} />
+                                <span className="u-omni-history-text">{v.name}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               )}
             </div>
