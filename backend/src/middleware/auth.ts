@@ -75,8 +75,8 @@ export interface AuthUser {
   city?: string | null;
   country?: string | null;
   timezone?: string | null;
-  onboardingCompletedAt?: string | null;
-  onboardingChecklistDismissedAt?: string | null;
+  onboardingCompletedAt?: Date | null;
+  onboardingChecklistDismissedAt?: Date | null;
 }
 
 export interface AuthenticatedRequest extends Request {
