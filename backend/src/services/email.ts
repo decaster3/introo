@@ -168,10 +168,15 @@ async function getUserEmailPrefs(userId: string): Promise<EmailPreferences> {
     if (user?.emailPreferences && typeof user.emailPreferences === 'object') {
       return user.emailPreferences as EmailPreferences;
     }
-  } catch {
-    // Column may not exist yet
+  } catch (err) {
+    const msg = (err as Error).message || '';
+    if (msg.includes('Unknown field') || msg.includes('column') || msg.includes('does not exist')) {
+      // Schema migration hasn't run yet — fall through to defaults
+    } else {
+      console.error('[email] Failed to read email preferences, defaulting to all-enabled:', msg);
+    }
   }
-  return { intros: true, notifications: true, digests: true };
+  return { intros: true, notifications: true, digests: true, briefings: true };
 }
 
 async function getUserEmail(userId: string): Promise<string | null> {
@@ -839,16 +844,40 @@ export async function sendNotificationEmail(
   });
 }
 
-/** Weekly digest email — summary of network activity */
+/** Weekly digest email — growth + action hybrid */
+export interface DigestStats {
+  newContacts: number;
+  newMeetings: number;
+  introsSent: number;
+  introsReceived: number;
+  introsDone: number;
+  prevContacts: number;
+  prevMeetings: number;
+  prevIntrosSent: number;
+  prevIntrosReceived: number;
+  topCompanies: { name: string; logo?: string | null; contactCount: number }[];
+  actionItems: {
+    pendingRequestsForYou: number;
+    pendingOffersForYou: number;
+    unansweredConnectionRequests: number;
+  };
+  insight?: string;
+}
+
+function trendBadge(current: number, previous: number): string {
+  if (previous === 0 && current === 0) return '';
+  if (previous === 0) return `<span style="font-size: 11px; color: #22c55e; font-weight: 600; margin-left: 4px;">NEW</span>`;
+  const diff = current - previous;
+  if (diff === 0) return `<span style="font-size: 11px; color: #a1a1aa; margin-left: 4px;">=</span>`;
+  const pct = Math.round((diff / previous) * 100);
+  const arrow = diff > 0 ? '&#9650;' : '&#9660;';
+  const color = diff > 0 ? '#22c55e' : '#ef4444';
+  return `<span style="font-size: 11px; color: ${color}; font-weight: 600; margin-left: 4px;">${arrow} ${Math.abs(pct)}%</span>`;
+}
+
 export async function sendWeeklyDigest(
   userId: string,
-  stats: {
-    newContacts: number;
-    newMeetings: number;
-    introRequests: number;
-    introOffers: number;
-    topCompanies: { name: string; contactCount: number }[];
-  }
+  stats: DigestStats,
 ): Promise<EmailResult> {
   const prefs = await getUserEmailPrefs(userId);
   if (prefs.digests === false) {
@@ -864,53 +893,97 @@ export async function sendWeeklyDigest(
   });
   const firstName = user?.name?.split(' ')[0] || 'there';
 
-  const hasActivity = stats.newContacts > 0 || stats.newMeetings > 0 || stats.introRequests > 0 || stats.introOffers > 0;
+  // --- Action items section ---
+  const { pendingRequestsForYou, pendingOffersForYou, unansweredConnectionRequests } = stats.actionItems;
+  const totalActions = pendingRequestsForYou + pendingOffersForYou + unansweredConnectionRequests;
 
-  const topCompaniesHtml = stats.topCompanies.length > 0
-    ? `<hr class="divider" />
-       <h2>Top companies this week</h2>
-       <p>${stats.topCompanies.map(c => `<span class="highlight">${c.name}</span> &mdash; ${c.contactCount} contact${c.contactCount !== 1 ? 's' : ''}`).join('<br/>')}</p>`
+  const actionLines: string[] = [];
+  if (pendingRequestsForYou > 0) {
+    actionLines.push(`<tr><td style="padding: 8px 0; font-size: 14px; color: #3f3f46;">Intro requests waiting for your help</td><td style="padding: 8px 0; text-align: right;"><a href="${FRONTEND_URL}/home" style="color: #6366f1; font-weight: 600; font-size: 14px; text-decoration: none;">${pendingRequestsForYou} request${pendingRequestsForYou !== 1 ? 's' : ''} &rarr;</a></td></tr>`);
+  }
+  if (pendingOffersForYou > 0) {
+    actionLines.push(`<tr><td style="padding: 8px 0; font-size: 14px; color: #3f3f46;">Intro offers you haven't responded to</td><td style="padding: 8px 0; text-align: right;"><a href="${FRONTEND_URL}/home" style="color: #6366f1; font-weight: 600; font-size: 14px; text-decoration: none;">${pendingOffersForYou} offer${pendingOffersForYou !== 1 ? 's' : ''} &rarr;</a></td></tr>`);
+  }
+  if (unansweredConnectionRequests > 0) {
+    actionLines.push(`<tr><td style="padding: 8px 0; font-size: 14px; color: #3f3f46;">Connection requests waiting on you</td><td style="padding: 8px 0; text-align: right;"><a href="${FRONTEND_URL}/home" style="color: #6366f1; font-weight: 600; font-size: 14px; text-decoration: none;">${unansweredConnectionRequests} pending &rarr;</a></td></tr>`);
+  }
+
+  const actionHtml = totalActions > 0
+    ? `<div style="background: #fefce8; border-radius: 12px; padding: 18px 20px; margin: 24px 0;">
+        <div style="font-size: 13px; font-weight: 700; color: #a16207; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px;">Needs your attention</div>
+        <table style="width: 100%; border-collapse: collapse;">${actionLines.join('')}</table>
+       </div>`
     : '';
 
-  const summaryLine = hasActivity
-    ? `Here's what happened in your network this past week.`
-    : `It was a quiet week. Here's a quick snapshot of your network.`;
+  // --- Top companies with logos ---
+  const topCompaniesHtml = stats.topCompanies.length > 0
+    ? `<hr class="divider" />
+       <div style="font-size: 13px; font-weight: 700; color: #a1a1aa; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 14px;">Top companies this week</div>
+       ${stats.topCompanies.map(c => {
+         const logoHtml = c.logo
+           ? `<img src="${c.logo}" alt="" width="28" height="28" style="width: 28px; height: 28px; border-radius: 6px; margin-right: 12px; vertical-align: middle;" />`
+           : `<span style="display: inline-block; width: 28px; height: 28px; border-radius: 6px; background: #f4f4f5; margin-right: 12px; vertical-align: middle; text-align: center; line-height: 28px; font-size: 13px; font-weight: 600; color: #71717a;">${escapeHtml(c.name.charAt(0))}</span>`;
+         return `<div style="margin-bottom: 10px;">${logoHtml}<span style="font-size: 14px; font-weight: 600; color: #18181b; vertical-align: middle;">${escapeHtml(c.name)}</span> <span style="font-size: 13px; color: #a1a1aa; vertical-align: middle;">&mdash; ${c.contactCount} new contact${c.contactCount !== 1 ? 's' : ''}</span></div>`;
+       }).join('')}`
+    : '';
+
+  // --- Insight line ---
+  const insightHtml = stats.insight
+    ? `<div style="background: #eef2ff; border-radius: 12px; padding: 16px 20px; margin: 20px 0;">
+        <span style="font-size: 14px; color: #4338ca; line-height: 1.5;">${stats.insight}</span>
+       </div>`
+    : '';
+
+  // --- Intros done this week ---
+  const introsDoneHtml = stats.introsDone > 0
+    ? `<hr class="divider" />
+       <div style="text-align: center; padding: 8px 0;">
+        <span style="font-size: 36px;">&#127881;</span>
+        <div style="font-size: 15px; font-weight: 600; color: #18181b; margin-top: 6px;">${stats.introsDone} intro${stats.introsDone !== 1 ? 's' : ''} completed this week</div>
+        <div style="font-size: 13px; color: #71717a; margin-top: 4px;">Warm connections that wouldn't have happened otherwise.</div>
+       </div>`
+    : '';
 
   const html = baseLayout(`
     <h1>Your week in review</h1>
-    <p>Hey ${firstName}, ${summaryLine}</p>
+    <p>Hey ${firstName}, here's how your network moved this week.</p>
 
     <div class="stat-row">
       <div class="stat">
         <div class="stat-value">${stats.newContacts}</div>
-        <div class="stat-label">New Contacts</div>
+        <div class="stat-label">New Contacts ${trendBadge(stats.newContacts, stats.prevContacts)}</div>
       </div>
       <div class="stat">
         <div class="stat-value">${stats.newMeetings}</div>
-        <div class="stat-label">Meetings</div>
+        <div class="stat-label">Meetings ${trendBadge(stats.newMeetings, stats.prevMeetings)}</div>
       </div>
       <div class="stat">
-        <div class="stat-value">${stats.introRequests}</div>
-        <div class="stat-label">Requests</div>
+        <div class="stat-value">${stats.introsSent}</div>
+        <div class="stat-label">You requested ${trendBadge(stats.introsSent, stats.prevIntrosSent)}</div>
       </div>
       <div class="stat">
-        <div class="stat-value">${stats.introOffers}</div>
-        <div class="stat-label">Offers</div>
+        <div class="stat-value">${stats.introsReceived}</div>
+        <div class="stat-label">Asked of you ${trendBadge(stats.introsReceived, stats.prevIntrosReceived)}</div>
       </div>
     </div>
 
+    ${actionHtml}
+    ${introsDoneHtml}
     ${topCompaniesHtml}
+    ${insightHtml}
 
     <div style="margin-top: 28px;">
-      <a href="${FRONTEND_URL}/home" class="btn">See Your Network</a>
+      <a href="${FRONTEND_URL}/home" class="btn">${totalActions > 0 ? 'Review &amp; Respond' : 'See Your Network'}</a>
     </div>
 
-    <p class="muted">This is your weekly digest from ${APP_NAME}. You can turn it off anytime in <a href="${FRONTEND_URL}/home?panel=settings" style="color: #71717a;">Settings</a>.</p>
-  `, { preheader: `${stats.newContacts} new contacts, ${stats.newMeetings} meetings this week.` });
+    <p class="muted">Your weekly digest from ${APP_NAME}. <a href="${FRONTEND_URL}/home?panel=settings" style="color: #71717a;">Unsubscribe</a></p>
+  `, { preheader: `${stats.newContacts} new contacts, ${stats.newMeetings} meetings${totalActions > 0 ? ` — ${totalActions} item${totalActions !== 1 ? 's' : ''} need attention` : ''}.` });
 
   return send({
     to: email,
-    subject: `${firstName}, your week: ${stats.newContacts} new contacts & ${stats.newMeetings} meetings`,
+    subject: totalActions > 0
+      ? `${firstName}, ${totalActions} thing${totalActions !== 1 ? 's' : ''} need your attention + your weekly recap`
+      : `${firstName}, your week: ${stats.newContacts} new contacts & ${stats.newMeetings} meetings`,
     html,
   });
 }

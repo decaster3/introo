@@ -24,6 +24,7 @@ model User {
   calendarSyncedAt   DateTime?
   timezone           String?
   lastBriefingDate   String?
+  lastDigestDate     String?
   calendarConnectedAt   DateTime?
   calendarRemindersSent Int              @default(0)
   introRemindersSent    Int              @default(0)

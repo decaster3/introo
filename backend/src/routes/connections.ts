@@ -187,7 +187,7 @@ router.post('/', async (req, res) => {
       const reSender = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
       await prisma.directConnection.update({
         where: { id: existing.id },
-        data: { status: 'pending', fromUserId: userId, toUserId: targetUser.id },
+        data: { status: 'pending', fromUserId: userId, toUserId: targetUser.id, remindersSent: 0 },
       });
 
       // Notify the target user about the new request

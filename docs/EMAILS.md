@@ -288,7 +288,7 @@ This sequence only fires after the user has:
 
 ---
 
-### 12. Weekly Digest
+### 12. Weekly Digest (Growth + Action)
 
 | Field       | Value |
 |-------------|-------|
@@ -297,10 +297,35 @@ This sequence only fires after the user has:
 | **Triggered by**| Background cron job (`backgroundWeeklyDigest`) running every 7 days |
 | **Trigger location** | `index.ts` — scheduled task |
 | **Recipient**   | Each user with Google Calendar connected |
-| **Subject**     | `{firstName}, your week: {N} new contacts & {N} meetings` |
-| **Content**     | Stats grid (new contacts, meetings, intro requests, intro offers), top 5 companies by new contact count |
+| **Subject**     | If action items: `{firstName}, {N} things need your attention + your weekly recap` — otherwise: `{firstName}, your week: {N} new contacts & {N} meetings` |
 | **Preference**  | Respects `digests` preference (skipped if `false`) |
-| **Conditions**  | Skipped if ALL stats are 0 (no email for quiet weeks) |
+| **Conditions**  | Skipped if ALL stats are 0 AND no pending action items |
+
+#### Sections (top to bottom)
+
+| Section | Description |
+|---------|-------------|
+| **Stats grid with trends** | 4 stats: New Contacts, Meetings, You Requested, Asked of You. Each shows a trend badge comparing to the previous week (▲/▼ percentage, or `=` if flat, or `NEW` if previous was 0). |
+| **Needs your attention** | Yellow callout listing pending actions: intro requests waiting for your help, intro offers you haven't responded to, unanswered connection requests. Each links to the app. Only shown if at least one action item exists. |
+| **Intros completed** | Celebration block with party emoji showing how many intros were completed this week (status `done`). Only shown if > 0. |
+| **Top companies** | Top 5 companies by new contact count, with company logo (or initial fallback). |
+| **Insight line** | One contextual sentence in a purple callout. Picks the most interesting stat: top company growth, intros completed, or overall contact growth percentage. |
+| **CTA button** | "Review & Respond" if there are action items, "See Your Network" otherwise. |
+
+#### Data gathered by cron
+
+| Data point | Query |
+|------------|-------|
+| `newContacts` / `prevContacts` | Contacts created this week vs previous week |
+| `newMeetings` / `prevMeetings` | Meetings this week vs previous week |
+| `introsSent` / `prevIntrosSent` | Intro requests created by user this week vs previous week |
+| `introsReceived` / `prevIntrosReceived` | Intro requests from others visible to user (via spaces or 1:1 connections) this week vs previous week |
+| `introsDone` | IntroOffers with status `done` updated this week where user is requester or introducer |
+| `pendingRequestsForYou` | Open intro requests visible to user that they haven't offered on yet |
+| `pendingOffersForYou` | Pending intro offers on user's own requests |
+| `unansweredConnectionRequests` | Pending DirectConnections where user is the recipient |
+| `topCompanies` | Top 5 companies by new contact count, with name and logo |
+| `insight` | Auto-generated contextual sentence based on the most notable metric |
 
 ---
 

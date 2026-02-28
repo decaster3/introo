@@ -298,28 +298,83 @@ const DIGEST_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 async function backgroundWeeklyDigest() {
   console.log('[cron] Starting weekly digest emails...');
   try {
-    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const now = Date.now();
+    const oneWeekAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
+    const twoWeeksAgo = new Date(now - 14 * 24 * 60 * 60 * 1000);
+    const todayStr = new Date().toISOString().slice(0, 10);
 
     const users = await prisma.user.findMany({
       where: { googleAccessToken: { not: null } },
-      select: { id: true, email: true },
+      select: { id: true, email: true, lastDigestDate: true },
     });
 
     for (const user of users) {
       try {
-        const [newContacts, newMeetings, introRequests, introOffers, topCompanies] = await Promise.all([
-          prisma.contact.count({
-            where: { userId: user.id, createdAt: { gte: oneWeekAgo } },
-          }),
-          prisma.meeting.count({
-            where: { contact: { userId: user.id }, date: { gte: oneWeekAgo } },
-          }),
+        if (user.lastDigestDate === todayStr) continue;
+
+        const [
+          newContacts, newMeetings, introsSent, introsReceived, introsDone,
+          prevContacts, prevMeetings, prevIntrosSent, prevIntrosReceived,
+          pendingRequestsForYou, pendingOffersForYou, unansweredConnectionRequests,
+          topCompanies,
+        ] = await Promise.all([
+          // This week
+          prisma.contact.count({ where: { userId: user.id, createdAt: { gte: oneWeekAgo } } }),
+          prisma.meeting.count({ where: { contact: { userId: user.id }, date: { gte: oneWeekAgo } } }),
+          prisma.introRequest.count({ where: { requesterId: user.id, createdAt: { gte: oneWeekAgo } } }),
           prisma.introRequest.count({
-            where: { requesterId: user.id, createdAt: { gte: oneWeekAgo } },
+            where: {
+              createdAt: { gte: oneWeekAgo },
+              OR: [
+                { space: { members: { some: { userId: user.id, status: 'approved' } } } },
+                { requester: { sentConnections: { some: { toUserId: user.id, status: 'accepted' } } } },
+                { requester: { receivedConnections: { some: { fromUserId: user.id, status: 'accepted' } } } },
+              ],
+              requesterId: { not: user.id },
+            },
           }),
           prisma.introOffer.count({
-            where: { introducerId: user.id, createdAt: { gte: oneWeekAgo } },
+            where: {
+              status: 'done',
+              updatedAt: { gte: oneWeekAgo },
+              OR: [{ introducerId: user.id }, { request: { requesterId: user.id } }],
+            },
           }),
+          // Previous week (for trend comparison)
+          prisma.contact.count({ where: { userId: user.id, createdAt: { gte: twoWeeksAgo, lt: oneWeekAgo } } }),
+          prisma.meeting.count({ where: { contact: { userId: user.id }, date: { gte: twoWeeksAgo, lt: oneWeekAgo } } }),
+          prisma.introRequest.count({ where: { requesterId: user.id, createdAt: { gte: twoWeeksAgo, lt: oneWeekAgo } } }),
+          prisma.introRequest.count({
+            where: {
+              createdAt: { gte: twoWeeksAgo, lt: oneWeekAgo },
+              OR: [
+                { space: { members: { some: { userId: user.id, status: 'approved' } } } },
+                { requester: { sentConnections: { some: { toUserId: user.id, status: 'accepted' } } } },
+                { requester: { receivedConnections: { some: { fromUserId: user.id, status: 'accepted' } } } },
+              ],
+              requesterId: { not: user.id },
+            },
+          }),
+          // Pending actions
+          prisma.introRequest.count({
+            where: {
+              status: 'open',
+              offers: { none: { introducerId: user.id } },
+              OR: [
+                { space: { members: { some: { userId: user.id, status: 'approved' } } } },
+                { requester: { sentConnections: { some: { toUserId: user.id, status: 'accepted' } } } },
+                { requester: { receivedConnections: { some: { fromUserId: user.id, status: 'accepted' } } } },
+              ],
+              requesterId: { not: user.id },
+            },
+          }),
+          prisma.introOffer.count({
+            where: { request: { requesterId: user.id }, status: 'pending' },
+          }),
+          prisma.directConnection.count({
+            where: { toUserId: user.id, status: 'pending' },
+          }),
+          // Top companies
           prisma.contact.groupBy({
             by: ['companyId'],
             where: { userId: user.id, createdAt: { gte: oneWeekAgo }, companyId: { not: null } },
@@ -329,7 +384,8 @@ async function backgroundWeeklyDigest() {
           }),
         ]);
 
-        if (newContacts === 0 && newMeetings === 0 && introRequests === 0 && introOffers === 0) {
+        const totalActions = pendingRequestsForYou + pendingOffersForYou + unansweredConnectionRequests;
+        if (newContacts === 0 && newMeetings === 0 && introsSent === 0 && introsReceived === 0 && introsDone === 0 && totalActions === 0) {
           continue;
         }
 
@@ -337,21 +393,38 @@ async function backgroundWeeklyDigest() {
         const companies = companyIds.length > 0
           ? await prisma.company.findMany({
               where: { id: { in: companyIds } },
-              select: { id: true, name: true },
+              select: { id: true, name: true, logo: true },
             })
           : [];
 
         const topCompanyList = topCompanies.map(tc => {
           const company = companies.find(c => c.id === tc.companyId);
-          return { name: company?.name || 'Unknown', contactCount: tc._count.id };
+          return { name: company?.name || 'Unknown', logo: company?.logo, contactCount: tc._count.id };
         });
 
+        // Generate insight line based on the most interesting stat
+        let insight: string | undefined;
+        const topCompany = topCompanyList[0];
+        if (topCompany && topCompany.contactCount >= 3) {
+          insight = `Your <strong>${topCompany.name}</strong> network grew by ${topCompany.contactCount} contacts this week.`;
+        } else if (introsDone > 0) {
+          insight = `${introsDone} warm intro${introsDone !== 1 ? 's' : ''} made this week — connections that skip the cold outreach.`;
+        } else if (newContacts > prevContacts && prevContacts > 0) {
+          const pct = Math.round(((newContacts - prevContacts) / prevContacts) * 100);
+          if (pct >= 20) insight = `Your contact growth is up ${pct}% compared to last week. Keep it going.`;
+        }
+
         await sendWeeklyDigest(user.id, {
-          newContacts,
-          newMeetings,
-          introRequests,
-          introOffers,
+          newContacts, newMeetings, introsSent, introsReceived, introsDone,
+          prevContacts, prevMeetings, prevIntrosSent: prevIntrosSent, prevIntrosReceived: prevIntrosReceived,
           topCompanies: topCompanyList,
+          actionItems: { pendingRequestsForYou, pendingOffersForYou, unansweredConnectionRequests },
+          insight,
+        });
+
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { lastDigestDate: todayStr },
         });
 
         console.log(`[cron] Sent weekly digest to ${user.email}`);
@@ -563,14 +636,15 @@ async function backgroundInviteReminders() {
 
     const now = Date.now();
 
-    // Deduplicate: only process the oldest pending invite per email address
-    const seenEmails = new Set<string>();
+    // Deduplicate: one active reminder track per email+type (1:1 vs each space)
+    // This ensures a space invite doesn't get starved by an older 1:1 invite
+    const seenKeys = new Set<string>();
     const dedupedInvites = invites
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
       .filter(inv => {
-        const key = inv.email.toLowerCase();
-        if (seenEmails.has(key)) return false;
-        seenEmails.add(key);
+        const key = `${inv.email.toLowerCase()}:${inv.spaceId || '1:1'}`;
+        if (seenKeys.has(key)) return false;
+        seenKeys.add(key);
         return true;
       });
 
@@ -684,14 +758,15 @@ async function backgroundConnectionReminders() {
       try {
         const { toUser } = conn;
 
-        // Only for the user's very first invitation — skip if they have any earlier connection
-        const hasEarlierConnection = await prisma.directConnection.count({
+        // Skip if there's an older pending connection for this user (only remind about the oldest pending one)
+        const hasEarlierPendingConnection = await prisma.directConnection.count({
           where: {
             toUserId: conn.toUserId,
+            status: 'pending',
             createdAt: { lt: conn.createdAt },
           },
         });
-        if (hasEarlierConnection > 0) continue;
+        if (hasEarlierPendingConnection > 0) continue;
 
         // Gate: calendar must be connected
         if (!toUser.googleAccessToken && !toUser.calendarConnectedAt) continue;
@@ -784,6 +859,13 @@ async function backgroundIntroNudgeReminders() {
           take: 1,
           select: { updatedAt: true },
         },
+        // First accepted 1:1 connection (as sender)
+        sentConnections: {
+          where: { status: 'accepted' },
+          orderBy: { updatedAt: 'asc' },
+          take: 1,
+          select: { updatedAt: true },
+        },
         // First approved space membership
         spaceMemberships: {
           where: { status: 'approved' },
@@ -795,6 +877,7 @@ async function backgroundIntroNudgeReminders() {
         _count: {
           select: {
             receivedConnections: { where: { status: 'accepted' } },
+            sentConnections: { where: { status: 'accepted' } },
             spaceMemberships: { where: { status: 'approved' } },
           },
         },
@@ -805,17 +888,17 @@ async function backgroundIntroNudgeReminders() {
 
     for (const user of candidates) {
       try {
-        // Must have at least one accepted connection or approved space
-        const firstConnAt = user.receivedConnections[0]?.updatedAt;
+        // Must have at least one accepted connection (sent or received) or approved space
+        const firstReceivedAt = user.receivedConnections[0]?.updatedAt;
+        const firstSentAt = user.sentConnections[0]?.updatedAt;
+        const firstConnAt = firstReceivedAt && firstSentAt
+          ? (new Date(firstReceivedAt).getTime() < new Date(firstSentAt).getTime() ? firstReceivedAt : firstSentAt)
+          : firstReceivedAt || firstSentAt;
         const firstSpaceAt = user.spaceMemberships[0]?.joinedAt;
         if (!firstConnAt && !firstSpaceAt) continue;
 
         // Only for the first connection/space: total count must be exactly 1
-        const totalConnections = user._count.receivedConnections + user._count.spaceMemberships;
-        if (totalConnections > 1 && user.introRemindersSent === 0) {
-          // They already have multiple — not their first rodeo, but if we haven't
-          // started the sequence yet, skip. If we already started (sent >= 1), finish it.
-        }
+        const totalConnections = user._count.receivedConnections + user._count.sentConnections + user._count.spaceMemberships;
         // Stricter: only start the sequence if they have exactly 1 total
         if (user.introRemindersSent === 0 && totalConnections > 1) continue;
 
@@ -977,8 +1060,9 @@ verifyDatabaseConnection().then(async () => {
     setInterval(backgroundCalendarSync, SYNC_INTERVAL_MS);
     console.log(`[cron] Calendar background sync scheduled every ${SYNC_INTERVAL_MS / 3600000}h (initial run in 30s)`);
 
+    setTimeout(backgroundWeeklyDigest, 10 * 60 * 1000); // initial run 10 min after startup
     setInterval(backgroundWeeklyDigest, DIGEST_INTERVAL_MS);
-    console.log(`[cron] Weekly digest email scheduled every 7 days`);
+    console.log(`[cron] Weekly digest email scheduled every 7 days (initial run in 10m)`);
 
     setTimeout(dailyMorningBriefing, 60 * 1000); // initial check 1 min after startup
     setInterval(dailyMorningBriefing, BRIEFING_CHECK_INTERVAL_MS);

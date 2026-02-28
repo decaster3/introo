@@ -819,9 +819,9 @@ router.post('/:id/members', async (req, res) => {
       // User not on platform — create a pending invite and send email
       const inviter = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true } });
 
-      // Check if already invited to this space
+      // Check if already invited to this space (by any admin)
       const existingInvite = await prisma.pendingInvite.findFirst({
-        where: { fromUserId: userId, email: normalizedEmail, spaceId: id, status: 'pending' },
+        where: { email: normalizedEmail, spaceId: id, status: 'pending' },
       });
       if (existingInvite) {
         res.status(409).json({ error: 'Invitation already sent to this email' });

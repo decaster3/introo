@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { Request, Response, NextFunction, RequestHandler } from 'express';
 import prisma from '../lib/prisma.js';
+import { sendNotificationEmail } from '../services/email.js';
 
 // Security: Require JWT_SECRET in production
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -196,15 +197,19 @@ export function configurePassport() {
                   await prisma.spaceMember.create({
                     data: { spaceId: invite.spaceId, userId: user.id, role: 'member', status: 'pending' },
                   });
+                  const spaceNotif = {
+                    type: 'space_invited',
+                    title: `Invitation to ${invite.space.name}`,
+                    body: `${invite.fromUser.name || 'Someone'} invited you to join ${invite.space.emoji || ''} ${invite.space.name}.`,
+                  };
                   await prisma.notification.create({
                     data: {
                       userId: user.id,
-                      type: 'space_invited',
-                      title: `Invitation to ${invite.space.name}`,
-                      body: `${invite.fromUser.name || 'Someone'} invited you to join ${invite.space.emoji || ''} ${invite.space.name}.`,
+                      ...spaceNotif,
                       data: { spaceId: invite.spaceId, spaceName: invite.space.name, spaceEmoji: invite.space.emoji, inviterId: invite.fromUserId },
                     },
                   });
+                  sendNotificationEmail(user.id, spaceNotif).catch(() => {});
                 }
               } else {
                 // 1:1 connection invite → create DirectConnection + notify
@@ -220,15 +225,19 @@ export function configurePassport() {
                   const conn = await prisma.directConnection.create({
                     data: { fromUserId: invite.fromUserId, toUserId: user.id },
                   });
+                  const connNotif = {
+                    type: 'connection_request',
+                    title: `${invite.fromUser.name || 'Someone'} wants to connect`,
+                    body: 'They invited you to join. Accept to share your networks with each other.',
+                  };
                   await prisma.notification.create({
                     data: {
                       userId: user.id,
-                      type: 'connection_request',
-                      title: `${invite.fromUser.name || 'Someone'} wants to connect`,
-                      body: 'They invited you to join. Accept to share your networks with each other.',
+                      ...connNotif,
                       data: { connectionId: conn.id, fromUserId: invite.fromUserId, fromUserName: invite.fromUser.name },
                     },
                   });
+                  sendNotificationEmail(user.id, connNotif).catch(() => {});
                 }
               }
               // Mark invite as converted
