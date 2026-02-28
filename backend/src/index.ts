@@ -24,7 +24,7 @@ import emailRoutes from './routes/email.js';
 import viewsRoutes from './routes/views.js';
 import adminRoutes from './routes/admin.js';
 import embeddingsRoutes from './routes/embeddings.js';
-import { sendWeeklyDigest, sendDailyBriefing, sendCalendarReminderEmail, sendInviteReminderEmail, sendSpaceInviteReminderEmail } from './services/email.js';
+import { sendWeeklyDigest, sendDailyBriefing, sendCalendarReminderEmail, sendConnectionReminderEmail, sendInviteReminderEmail, sendSpaceInviteReminderEmail } from './services/email.js';
 import type { BriefingMeeting, BriefingAttendee } from './services/email.js';
 import prisma from './lib/prisma.js';
 
@@ -638,6 +638,115 @@ async function backgroundInviteReminders() {
   }
 }
 
+// ─── Connection acceptance reminders (1d, 3d, 7d — gated behind calendar) ────
+
+const CONN_REMINDER_CHECK_INTERVAL_MS = 60 * 60 * 1000; // check every hour
+
+const CONN_REMINDER_THRESHOLDS: { ping: 1 | 2 | 3; minMs: number; maxMs: number }[] = [
+  { ping: 1, minMs: 1 * 24 * 60 * 60 * 1000, maxMs: 3 * 24 * 60 * 60 * 1000 },
+  { ping: 2, minMs: 3 * 24 * 60 * 60 * 1000, maxMs: 7 * 24 * 60 * 60 * 1000 },
+  { ping: 3, minMs: 7 * 24 * 60 * 60 * 1000, maxMs: 14 * 24 * 60 * 60 * 1000 },
+];
+
+let connReminderRunning = false;
+
+async function backgroundConnectionReminders() {
+  if (connReminderRunning) return;
+  connReminderRunning = true;
+  try {
+    const pendingConns = await prisma.directConnection.findMany({
+      where: {
+        status: 'pending',
+        remindersSent: { lt: 3 },
+      },
+      select: {
+        id: true,
+        createdAt: true,
+        remindersSent: true,
+        toUserId: true,
+        fromUser: { select: { name: true } },
+        toUser: { select: { id: true, name: true, email: true, googleAccessToken: true, calendarConnectedAt: true, emailPreferences: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const now = Date.now();
+
+    // Only process the FIRST pending connection per recipient
+    const seenRecipients = new Set<string>();
+    const firstConns = pendingConns.filter(conn => {
+      if (seenRecipients.has(conn.toUserId)) return false;
+      seenRecipients.add(conn.toUserId);
+      return true;
+    });
+
+    for (const conn of firstConns) {
+      try {
+        const { toUser } = conn;
+
+        // Only for the user's very first invitation — skip if they have any earlier connection
+        const hasEarlierConnection = await prisma.directConnection.count({
+          where: {
+            toUserId: conn.toUserId,
+            createdAt: { lt: conn.createdAt },
+          },
+        });
+        if (hasEarlierConnection > 0) continue;
+
+        // Gate: calendar must be connected
+        if (!toUser.googleAccessToken && !toUser.calendarConnectedAt) continue;
+
+        // Respect email preferences
+        if (toUser.emailPreferences && typeof toUser.emailPreferences === 'object') {
+          const prefs = toUser.emailPreferences as Record<string, boolean>;
+          if (prefs.notifications === false) continue;
+        }
+
+        // Sequence starts from whichever is later: invite creation or calendar connection
+        const calConnAt = toUser.calendarConnectedAt ? new Date(toUser.calendarConnectedAt).getTime() : 0;
+        const inviteAt = new Date(conn.createdAt).getTime();
+        const sequenceStart = Math.max(inviteAt, calConnAt);
+        const ageMs = now - sequenceStart;
+
+        let currentSent = conn.remindersSent;
+
+        while (currentSent < 3) {
+          const nextPing = (currentSent + 1) as 1 | 2 | 3;
+          const threshold = CONN_REMINDER_THRESHOLDS.find(t => t.ping === nextPing);
+          if (!threshold) break;
+          if (ageMs < threshold.minMs) break;
+          if (ageMs < threshold.maxMs) {
+            await sendConnectionReminderEmail({
+              recipientEmail: toUser.email,
+              recipientName: toUser.name,
+              senderName: conn.fromUser?.name || 'Someone',
+              ping: nextPing,
+            });
+            await prisma.directConnection.update({
+              where: { id: conn.id },
+              data: { remindersSent: nextPing },
+            });
+            console.log(`[cron] Sent connection reminder #${nextPing} to ${toUser.email} (from ${conn.fromUser?.name})`);
+            break;
+          }
+          currentSent = nextPing;
+          await prisma.directConnection.update({
+            where: { id: conn.id },
+            data: { remindersSent: nextPing },
+          });
+          console.log(`[cron] Skipped connection reminder #${nextPing} for ${toUser.email} (window passed)`);
+        }
+      } catch (err) {
+        console.error(`[cron] Failed connection reminder for conn ${conn.id}:`, (err as Error).message);
+      }
+    }
+  } catch (err) {
+    console.error('[cron] Connection reminders error:', err);
+  } finally {
+    connReminderRunning = false;
+  }
+}
+
 // Ensure ADMIN_EMAILS users have admin role on startup
 async function ensureAdminUsers() {
   const adminEmails = (process.env.ADMIN_EMAILS || '')
@@ -684,5 +793,9 @@ verifyDatabaseConnection().then(async () => {
     setTimeout(backgroundInviteReminders, 3 * 60 * 1000); // initial check 3 min after startup
     setInterval(backgroundInviteReminders, INVITE_REMINDER_CHECK_INTERVAL_MS);
     console.log(`[cron] Invite signup reminders scheduled every 1 hour (initial run in 3m)`);
+
+    setTimeout(backgroundConnectionReminders, 4 * 60 * 1000); // initial check 4 min after startup
+    setInterval(backgroundConnectionReminders, CONN_REMINDER_CHECK_INTERVAL_MS);
+    console.log(`[cron] Connection acceptance reminders scheduled every 1 hour (initial run in 4m)`);
   });
 });

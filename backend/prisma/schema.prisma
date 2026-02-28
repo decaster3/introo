@@ -24,6 +24,7 @@ model User {
   calendarSyncedAt   DateTime?
   timezone           String?
   lastBriefingDate   String?
+  calendarConnectedAt   DateTime?
   calendarRemindersSent Int              @default(0)
   role               String              @default("user")
   emailPreferences   Json                @default("{\"intros\":true,\"notifications\":true,\"digests\":true}")
@@ -338,14 +339,15 @@ model SignalMatch {
 }
 
 model DirectConnection {
-  id         String   @id @default(cuid())
-  fromUserId String
-  toUserId   String
-  status     String   @default("pending") // pending, accepted, rejected
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  fromUser   User     @relation("ConnectionFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
-  toUser     User     @relation("ConnectionTo", fields: [toUserId], references: [id], onDelete: Cascade)
+  id             String   @id @default(cuid())
+  fromUserId     String
+  toUserId       String
+  status         String   @default("pending") // pending, accepted, rejected
+  remindersSent  Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  fromUser       User     @relation("ConnectionFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser         User     @relation("ConnectionTo", fields: [toUserId], references: [id], onDelete: Cascade)
 
   @@unique([fromUserId, toUserId])
   @@index([fromUserId])

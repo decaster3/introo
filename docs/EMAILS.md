@@ -126,7 +126,42 @@ Users can opt out of specific email categories via Settings. Preferences are sto
 
 ---
 
-### 6. Intro Offer Email
+### 6. Connection Acceptance Reminders (3-ping sequence)
+
+| Field       | Value |
+|-------------|-------|
+| **Function**    | `sendConnectionReminderEmail()` |
+| **File**        | `services/email.ts` |
+| **Triggered by**| Background cron job (`backgroundConnectionReminders`) checking every 1 hour |
+| **Trigger location** | `index.ts` — scheduled task |
+| **Recipient**   | Users who have a pending `DirectConnection` they haven't accepted |
+| **Preference**  | Respects `notifications` preference (skipped if `false`) |
+| **Tracked by**  | `directConnection.remindersSent` (0–3) |
+| **Stops when**  | User accepts/rejects the connection OR all 3 pings have been sent |
+| **Scope**       | **First pending invitation only** — if a user has multiple pending connections, only the oldest one triggers reminders |
+| **Gate**        | Requires `calendarConnected = true` — if the user hasn't connected their calendar yet, the calendar reminder sequence runs instead and this sequence is deferred |
+| **Sequence start** | `max(directConnection.createdAt, user.calendarConnectedAt)` — ensures users who connect their calendar late don't get bombarded |
+
+#### Ping schedule
+
+| Ping | Timing | Subject | Content |
+|------|--------|---------|---------|
+| 1 | 1 day after sequence start | `{senderName} is waiting on you` | Explains what connecting does: see each other's networks, get warm intros, help each other. Three value props with check marks. CTA: "Accept {senderFirst}'s Request". |
+| 2 | 3 days after sequence start | `You and {senderName} — the intros you're both missing` | Scenario-driven: imagine the other person knows someone you're trying to reach. Connected members discover 3–5 intro paths. CTA: "Accept & Connect". |
+| 3 | 7 days after sequence start | `Last reminder from {senderName}` | Final reminder. Acknowledges it's the last nudge. Reassures: request stays in dashboard if they change their mind. CTA: "Review Request". |
+
+#### Sequencing with calendar reminders
+
+This sequence is **gated behind calendar connection**. The flow for an invited user:
+
+1. User signs up → **Calendar reminder sequence** fires (30min, 1d, 3d)
+2. User connects calendar → Calendar sequence stops, `calendarConnectedAt` is set
+3. **Connection acceptance sequence** begins, timed from `max(invite.createdAt, calendarConnectedAt)`
+4. If the user never connects their calendar, connection reminders never fire
+
+---
+
+### 7. Intro Offer Email
 
 | Field       | Value |
 |-------------|-------|
@@ -142,7 +177,7 @@ Users can opt out of specific email categories via Settings. Preferences are sto
 
 ---
 
-### 7. Double Intro Email (3-way Introduction)
+### 8. Double Intro Email (3-way Introduction)
 
 | Field       | Value |
 |-------------|-------|
@@ -159,7 +194,7 @@ Users can opt out of specific email categories via Settings. Preferences are sto
 
 ---
 
-### 8. Direct Contact Email
+### 9. Direct Contact Email
 
 | Field       | Value |
 |-------------|-------|
@@ -182,7 +217,7 @@ Users can opt out of specific email categories via Settings. Preferences are sto
 
 ---
 
-### 9. Notification Email
+### 10. Notification Email
 
 | Field       | Value |
 |-------------|-------|
@@ -220,7 +255,7 @@ Users can opt out of specific email categories via Settings. Preferences are sto
 
 ---
 
-### 10. Weekly Digest
+### 11. Weekly Digest
 
 | Field       | Value |
 |-------------|-------|
@@ -236,7 +271,7 @@ Users can opt out of specific email categories via Settings. Preferences are sto
 
 ---
 
-### 11. Daily Morning Briefing
+### 12. Daily Morning Briefing
 
 | Field       | Value |
 |-------------|-------|

@@ -134,6 +134,11 @@ export function configurePassport() {
             ? { googleAccessToken: encryptedAccessToken, ...refreshTokenFields }
             : { googleAccessToken: null, googleRefreshToken: null };
 
+          // Set calendarConnectedAt on first calendar grant (never overwrite)
+          const calendarConnectedAtField = hasCalendarScope && !existingUser?.calendarConnectedAt
+            ? { calendarConnectedAt: new Date() }
+            : {};
+
           // Upsert user
           const user = await prisma.user.upsert({
             where: { email },
@@ -141,12 +146,14 @@ export function configurePassport() {
               name: profile.displayName,
               avatar: profile.photos?.[0]?.value,
               ...calendarTokenFields,
+              ...calendarConnectedAtField,
             },
             create: {
               email,
               name: profile.displayName,
               avatar: profile.photos?.[0]?.value,
               ...calendarTokenFields,
+              ...calendarConnectedAtField,
             },
           });
 

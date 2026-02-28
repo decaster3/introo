@@ -365,6 +365,85 @@ export async function sendCalendarReminderEmail(
   return send({ to: user.email, subject: c.subject, html });
 }
 
+/** Connection acceptance reminder — nudge users who have a pending connection request they haven't accepted */
+export async function sendConnectionReminderEmail(params: {
+  recipientEmail: string;
+  recipientName: string;
+  senderName: string;
+  ping: 1 | 2 | 3;
+}): Promise<EmailResult> {
+  const { recipientEmail, recipientName, senderName, ping } = params;
+  const safeSenderName = escapeHtml(senderName);
+  const senderFirst = escapeHtml(senderName.split(' ')[0]);
+
+  const content: Record<1 | 2 | 3, { subject: string; heading: string; body: string; preheader: string }> = {
+    1: {
+      subject: `${safeSenderName} is waiting on you`,
+      heading: `${safeSenderName} is waiting on you`,
+      body: `
+        <p><span class="highlight">${safeSenderName}</span> sent you a connection request on ${APP_NAME}.</p>
+        <p>When you accept, you'll both be able to see each other's professional networks &mdash; every company, every contact, every intro path. It's how warm introductions happen.</p>
+
+        <div style="margin: 20px 0;">
+          <div class="step">
+            <div class="step-num">&check;</div>
+            <div class="step-text"><span class="highlight">See who ${senderFirst} knows</span> &mdash; browse their contacts by company, role, or industry</div>
+          </div>
+          <div class="step">
+            <div class="step-num">&check;</div>
+            <div class="step-text"><span class="highlight">Get warm intros</span> &mdash; ask ${senderFirst} to introduce you to people in their network</div>
+          </div>
+          <div class="step">
+            <div class="step-num">&check;</div>
+            <div class="step-text"><span class="highlight">Help each other</span> &mdash; when ${senderFirst} needs an intro to someone you know, you'll get notified</div>
+          </div>
+        </div>
+      `,
+      preheader: `${safeSenderName} invited you to connect — accept to see each other's networks.`,
+    },
+    2: {
+      subject: `You and ${safeSenderName} — the intros you're both missing`,
+      heading: `The intros you're both missing`,
+      body: `
+        <p>${safeSenderName} sent you a connection request on ${APP_NAME} a few days ago. Here's what happens the moment you accept:</p>
+
+        <div class="callout">
+          <p>Imagine ${senderFirst} knows the VP of Sales at a company you've been trying to reach. Or you know someone at a company ${senderFirst} has been targeting for months. Right now, neither of you can see that. <strong>One click changes it.</strong></p>
+        </div>
+
+        <p>Connected members typically discover <span class="highlight">3&ndash;5 warm intro paths</span> they never knew existed. Paths that would have taken weeks of cold outreach &mdash; or never happened at all.</p>
+        <p>It takes one click. No new permissions, no extra setup.</p>
+      `,
+      preheader: `Accept ${senderFirst}'s request and see where your networks overlap.`,
+    },
+    3: {
+      subject: `Last reminder from ${safeSenderName}`,
+      heading: `Last reminder: ${safeSenderName} wants to connect`,
+      body: `
+        <p>This is the last time we'll nudge you about this.</p>
+        <p><span class="highlight">${safeSenderName}</span> sent you a connection request on ${APP_NAME} last week. If you accept, you'll both unlock each other's networks &mdash; making it easy to find warm intro paths to clients, partners, investors, or collaborators.</p>
+        <p>If you're not interested, no action needed &mdash; the request will stay in your dashboard if you change your mind later.</p>
+        <p>One warm intro is worth 100 cold emails.</p>
+      `,
+      preheader: `${senderFirst}'s connection request is still waiting — this is the last reminder.`,
+    },
+  };
+
+  const c = content[ping];
+
+  const html = baseLayout(`
+    <h1>${c.heading}</h1>
+    ${c.body}
+    <div style="margin-top: 24px;">
+      <a href="${FRONTEND_URL}/home" class="btn">${ping === 3 ? 'Review Request' : `Accept ${senderFirst}'s Request`}</a>
+    </div>
+    <hr class="divider" />
+    <p class="muted">You can review and manage all connection requests in your ${APP_NAME} dashboard. Change your email preferences anytime in <a href="${FRONTEND_URL}/home?panel=settings" style="color: #71717a;">Settings</a>.</p>
+  `, { preheader: c.preheader });
+
+  return send({ to: recipientEmail, subject: c.subject, html });
+}
+
 /** 1:1 invite reminder — nudge non-users who were invited but haven't signed up */
 export async function sendInviteReminderEmail(params: {
   recipientEmail: string;
