@@ -267,37 +267,68 @@ export async function sendSpaceInviteEmail(params: {
   });
 }
 
-/** Welcome email — sent after first signup */
-export async function sendWelcomeEmail(user: { id: string; email: string; name: string }): Promise<EmailResult> {
+/** Welcome email — sent after first signup. Content varies based on whether the user granted calendar access. */
+export async function sendWelcomeEmail(
+  user: { id: string; email: string; name: string },
+  calendarConnected: boolean = true,
+): Promise<EmailResult> {
   const firstName = user.name.split(' ')[0] || 'there';
 
-  const html = baseLayout(`
-    <h1>Hey ${firstName}, welcome aboard!</h1>
-    <p>Thanks for signing up for ${APP_NAME}. We're already working on mapping your professional network from your calendar.</p>
+  const html = calendarConnected
+    ? baseLayout(`
+        <h1>Hey ${firstName}, welcome aboard!</h1>
+        <p>Thanks for signing up for ${APP_NAME}. We're already working on mapping your professional network from your calendar.</p>
 
-    <div style="margin: 24px 0 28px;">
-      <div class="step">
-        <div class="step-num">1</div>
-        <div class="step-text"><span class="highlight">Calendar sync</span> &mdash; we're pulling your meetings right now</div>
-      </div>
-      <div class="step">
-        <div class="step-num">2</div>
-        <div class="step-text"><span class="highlight">Contact enrichment</span> &mdash; we add company, role &amp; LinkedIn data</div>
-      </div>
-      <div class="step">
-        <div class="step-num">3</div>
-        <div class="step-text"><span class="highlight">Your network map</span> &mdash; search, filter, and discover who you know</div>
-      </div>
-    </div>
+        <div style="margin: 24px 0 28px;">
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-text"><span class="highlight">Calendar sync</span> &mdash; we're pulling your meetings right now</div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-text"><span class="highlight">Contact enrichment</span> &mdash; we add company, role &amp; LinkedIn data</div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-text"><span class="highlight">Your network map</span> &mdash; search, filter, and discover who you know</div>
+          </div>
+        </div>
 
-    <p>This usually takes just a minute or two. Once it's done, you'll have a searchable view of every person you've met with.</p>
+        <p>This usually takes just a minute or two. Once it's done, you'll have a searchable view of every person you've met with.</p>
 
-    <div style="margin-top: 24px;">
-      <a href="${FRONTEND_URL}/home" class="btn">Open ${APP_NAME}</a>
-    </div>
+        <div style="margin-top: 24px;">
+          <a href="${FRONTEND_URL}/home" class="btn">Open ${APP_NAME}</a>
+        </div>
 
-    <p class="muted">You received this because you just signed up for ${APP_NAME}. No action needed &mdash; we're setting everything up for you.</p>
-  `, { preheader: `We're syncing your calendar and building your network map.` });
+        <p class="muted">You received this because you just signed up for ${APP_NAME}. No action needed &mdash; we're setting everything up for you.</p>
+      `, { preheader: `We're syncing your calendar and building your network map.` })
+    : baseLayout(`
+        <h1>Hey ${firstName}, welcome to ${APP_NAME}!</h1>
+        <p>Thanks for signing up. To get started, connect your Google Calendar so we can map your professional network.</p>
+
+        <div style="margin: 24px 0 28px;">
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-text"><span class="highlight">Connect your calendar</span> &mdash; it takes about 60 seconds</div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-text"><span class="highlight">We enrich your contacts</span> &mdash; company, role &amp; LinkedIn data</div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-text"><span class="highlight">Your network map</span> &mdash; search, filter, and discover who you know</div>
+          </div>
+        </div>
+
+        <p>Once your calendar is connected, we'll have your network ready in a minute or two.</p>
+
+        <div style="margin-top: 24px;">
+          <a href="${FRONTEND_URL}/home" class="btn">Connect Calendar</a>
+        </div>
+
+        <p class="muted">You received this because you just signed up for ${APP_NAME}.</p>
+      `, { preheader: `Connect your Google Calendar to unlock your professional network map.` });
 
   return send({ to: user.email, subject: `Welcome to ${APP_NAME}, ${firstName}!`, html });
 }

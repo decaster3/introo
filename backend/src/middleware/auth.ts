@@ -253,7 +253,7 @@ export function configurePassport() {
             console.error('[auth] Failed to convert pending invites:', err);
           }
 
-          return done(null, user);
+          return done(null, { ...user, hasCalendarScope });
         } catch (error) {
           return done(error as Error);
         }

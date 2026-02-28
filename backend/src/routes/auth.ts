@@ -206,7 +206,7 @@ router.get('/google/callback', async (req, res, next) => {
     const createdMs = user.createdAt ? Date.now() - new Date(user.createdAt).getTime() : null;
     console.log(`[auth] User ${user.email}: createdAt=${user.createdAt}, age=${createdMs}ms, isNew=${createdMs !== null && createdMs < 60_000}`);
     if (createdMs !== null && createdMs < 60_000) {
-      sendWelcomeEmail({ id: user.id, email: user.email, name: user.name })
+      sendWelcomeEmail({ id: user.id, email: user.email, name: user.name }, !!user.hasCalendarScope)
         .then(r => console.log(`[auth] Welcome email result:`, r))
         .catch(err => console.error(`[auth] Welcome email error:`, err));
     }
