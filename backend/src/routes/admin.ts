@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authMiddleware, adminMiddleware, invalidateUserCache, AuthenticatedRequest } from '../middleware/auth.js';
+import { authMiddleware, adminMiddleware, invalidateUserCache, decryptToken, AuthenticatedRequest } from '../middleware/auth.js';
 import prisma from '../lib/prisma.js';
 
 const router = Router();
@@ -337,6 +337,68 @@ router.post('/users/:id/role', async (req, res) => {
     }
     console.error('[admin] set role error:', error);
     res.status(500).json({ error: 'Failed to update role' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /api/admin/users/:id  — permanently delete user (cascade)
+// ---------------------------------------------------------------------------
+router.delete('/users/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const currentUserId = (req as AuthenticatedRequest).user!.id;
+
+    if (id === currentUserId) {
+      res.status(400).json({ error: 'Cannot delete yourself' });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: { id: true, name: true, email: true, googleAccessToken: true },
+    });
+
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    // Revoke Google OAuth tokens so Google forgets the grant.
+    // This ensures the user sees the full consent screen (with calendar checkbox) if they sign up again.
+    const calendarAccounts = await prisma.calendarAccount.findMany({
+      where: { userId: id },
+      select: { googleAccessToken: true },
+    });
+
+    const tokensToRevoke = [
+      user.googleAccessToken,
+      ...calendarAccounts.map(a => a.googleAccessToken),
+    ]
+      .filter(Boolean)
+      .map(t => decryptToken(t!))
+      .filter(Boolean) as string[];
+
+    await Promise.allSettled(
+      tokensToRevoke.map(token =>
+        fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(token)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        })
+      )
+    );
+
+    await prisma.user.delete({ where: { id } });
+    invalidateUserCache(id);
+
+    console.log(`[admin] User deleted: ${user.email} (${user.id}) by ${currentUserId}`);
+    res.json({ success: true, deletedUser: user });
+  } catch (error: any) {
+    if (error?.code === 'P2025') {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+    console.error('[admin] delete user error:', error);
+    res.status(500).json({ error: 'Failed to delete user' });
   }
 });
 

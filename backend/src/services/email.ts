@@ -297,6 +297,247 @@ export async function sendWelcomeEmail(user: { id: string; email: string; name: 
   return send({ to: user.email, subject: `Welcome to ${APP_NAME}, ${firstName}!`, html });
 }
 
+/** Calendar reminder email — nudge users who haven't connected their calendar */
+export async function sendCalendarReminderEmail(
+  user: { id: string; email: string; name: string },
+  ping: 1 | 2 | 3,
+): Promise<EmailResult> {
+  const firstName = user.name.split(' ')[0] || 'there';
+
+  const content: Record<1 | 2 | 3, { subject: string; heading: string; body: string; preheader: string }> = {
+    1: {
+      subject: `${firstName}, your network map is waiting`,
+      heading: `${firstName}, your network map is waiting`,
+      body: `
+        <p>You signed up for ${APP_NAME} — nice! But we noticed you haven't connected your Google Calendar yet.</p>
+        <p>Once you do, we'll automatically build a searchable map of every person you've met with, enriched with company, role, and LinkedIn data. It takes about 60 seconds.</p>
+      `,
+      preheader: `Connect your calendar and we'll map your entire professional network.`,
+    },
+    2: {
+      subject: `${firstName}, you're missing out on your network`,
+      heading: `${firstName}, you're missing out on your network`,
+      body: `
+        <p>Quick reminder &mdash; ${APP_NAME} works best when it can see your calendar. Without it, we can't map your network.</p>
+        <p>Here's what you'll unlock:</p>
+        <div style="margin: 20px 0;">
+          <div class="step">
+            <div class="step-num">&check;</div>
+            <div class="step-text"><span class="highlight">Every contact you've met with</span> &mdash; searchable by name, company, or role</div>
+          </div>
+          <div class="step">
+            <div class="step-num">&check;</div>
+            <div class="step-text"><span class="highlight">Relationship strength</span> &mdash; see who you're close to and who's fading</div>
+          </div>
+          <div class="step">
+            <div class="step-num">&check;</div>
+            <div class="step-text"><span class="highlight">Warm intro paths</span> &mdash; discover who can introduce you to people you want to meet</div>
+          </div>
+        </div>
+        <p>It takes one click and about 60 seconds.</p>
+      `,
+      preheader: `You're missing out — connect your calendar to unlock your full network.`,
+    },
+    3: {
+      subject: `Last reminder: connect your calendar, ${firstName}`,
+      heading: `Connect your calendar, ${firstName}`,
+      body: `
+        <p>${APP_NAME} is built around your calendar &mdash; without it, there's not much we can do for you.</p>
+        <p>Connect your Google Calendar and we'll instantly surface your entire professional network. No manual entry, no imports, no spreadsheets.</p>
+        <p>If you have questions or need help, just reply to this email.</p>
+      `,
+      preheader: `Last reminder — connect your Google Calendar to get started with ${APP_NAME}.`,
+    },
+  };
+
+  const c = content[ping];
+
+  const html = baseLayout(`
+    <h1>${c.heading}</h1>
+    ${c.body}
+    <div style="margin-top: 24px;">
+      <a href="${FRONTEND_URL}/home" class="btn">Connect Google Calendar</a>
+    </div>
+    <hr class="divider" />
+    <p class="muted">Your calendar data is read-only and never shared with anyone. You can change your email preferences anytime in <a href="${FRONTEND_URL}/home?panel=settings" style="color: #71717a;">Settings</a>.</p>
+  `, { preheader: c.preheader });
+
+  return send({ to: user.email, subject: c.subject, html });
+}
+
+/** 1:1 invite reminder — nudge non-users who were invited but haven't signed up */
+export async function sendInviteReminderEmail(params: {
+  recipientEmail: string;
+  senderName: string;
+  ping: 1 | 2 | 3 | 4;
+}): Promise<EmailResult> {
+  const { recipientEmail, senderName, ping } = params;
+  const safeSenderName = escapeHtml(senderName);
+  const senderFirst = escapeHtml(senderName.split(' ')[0]);
+
+  const content: Record<1 | 2 | 3 | 4, { subject: string; heading: string; body: string; preheader: string }> = {
+    1: {
+      subject: `${safeSenderName} is waiting to connect with you`,
+      heading: `${safeSenderName} is waiting to connect with you`,
+      body: `
+        <p>${safeSenderName} invited you to ${APP_NAME} yesterday &mdash; a platform where professionals help each other get warm introductions.</p>
+        <p>Here's how it works: you connect your Google Calendar, and ${APP_NAME} maps every person you've ever met with. Then, when ${senderFirst} needs an intro to someone at a company you know &mdash; or you need one from them &mdash; it's one click away.</p>
+      `,
+      preheader: `${safeSenderName} invited you to join ${APP_NAME} — help each other with warm intros.`,
+    },
+    2: {
+      subject: `${safeSenderName}'s invite: see who you both know`,
+      heading: `${safeSenderName} wants to swap intro paths with you`,
+      body: `
+        <p>A few days ago, ${safeSenderName} invited you to ${APP_NAME}. Here's what people use it for:</p>
+        <div style="margin: 20px 0;">
+          <div class="step">
+            <div class="step-num">&check;</div>
+            <div class="step-text"><span class="highlight">Finding clients</span> &mdash; "I need an intro to the Head of Marketing at Stripe." A connection who's met with them makes it happen.</div>
+          </div>
+          <div class="step">
+            <div class="step-num">&check;</div>
+            <div class="step-text"><span class="highlight">Finding partners</span> &mdash; "Anyone know someone at Notion?" Turns out your old colleague works there.</div>
+          </div>
+          <div class="step">
+            <div class="step-num">&check;</div>
+            <div class="step-text"><span class="highlight">Finding like-minded people</span> &mdash; discover shared connections at 500+ companies you didn't know you had in common.</div>
+          </div>
+        </div>
+        <p>When you and ${senderFirst} connect on ${APP_NAME}, you both see where your networks overlap &mdash; and where you can open doors for each other.</p>
+      `,
+      preheader: `See who you and ${safeSenderName} both know — and help each other get warm intros.`,
+    },
+    3: {
+      subject: `The intros you're missing`,
+      heading: `The intros you're missing`,
+      body: `
+        <p>${safeSenderName} invited you to ${APP_NAME} last week. Here's a scenario:</p>
+        <div class="callout">
+          <p>Imagine you're trying to reach a decision-maker at a company you've been targeting for months. Cold emails aren't working. But someone in your network met with them last quarter &mdash; you just didn't know. On ${APP_NAME}, that intro request takes 10 seconds, and the person who knows them gets notified instantly.</p>
+        </div>
+        <p>The average professional has met with 300&ndash;800 people over the past few years. Most of those connections are invisible &mdash; sitting in your calendar, unused. ${APP_NAME} surfaces them so you can actually help each other: find clients, partners, investors, or collaborators through warm paths instead of cold outreach.</p>
+        <p>It takes 60 seconds to connect your calendar. Read-only, no passwords shared.</p>
+      `,
+      preheader: `Your calendar holds intro paths you don't know about — ${safeSenderName} invited you to find them.`,
+    },
+    4: {
+      subject: `Last chance to connect with ${safeSenderName} on ${APP_NAME}`,
+      heading: `Last chance to connect with ${safeSenderName}`,
+      body: `
+        <p>${safeSenderName} invited you to ${APP_NAME} so you can help each other with warm introductions &mdash; to potential clients, partners, hires, or anyone else you're trying to reach.</p>
+        <p>Users typically uncover 3&ndash;5 intro paths they never knew existed within their first week. One warm intro is worth 100 cold emails.</p>
+        <div class="callout">
+          <p>This invitation will expire soon. If you want access to ${senderFirst}'s network and the intro paths it unlocks, now is the time.</p>
+        </div>
+      `,
+      preheader: `This invitation from ${safeSenderName} will expire soon — join now before you lose access.`,
+    },
+  };
+
+  const c = content[ping];
+
+  const html = baseLayout(`
+    <h1>${c.heading}</h1>
+    ${c.body}
+    <div style="margin-top: 24px;">
+      <a href="${FRONTEND_URL}" class="btn">Join ${APP_NAME}</a>
+    </div>
+    <hr class="divider" />
+    <p class="muted">This invitation was sent by ${safeSenderName} via ${APP_NAME}. If you don't know this person, you can safely ignore this email.</p>
+  `, { preheader: c.preheader });
+
+  return send({ to: recipientEmail, subject: c.subject, html });
+}
+
+/** Space invite reminder — nudge non-users who were invited to a space but haven't signed up */
+export async function sendSpaceInviteReminderEmail(params: {
+  recipientEmail: string;
+  senderName: string;
+  spaceName: string;
+  spaceEmoji: string;
+  ping: 1 | 2 | 3 | 4;
+}): Promise<EmailResult> {
+  const { recipientEmail, senderName, spaceName, spaceEmoji, ping } = params;
+  const safeSenderName = escapeHtml(senderName);
+  const safeSpaceName = escapeHtml(spaceName);
+  const safeSpaceEmoji = escapeHtml(spaceEmoji);
+  const spaceLabel = `${safeSpaceEmoji} ${safeSpaceName}`;
+
+  const content: Record<1 | 2 | 3 | 4, { subject: string; heading: string; body: string; preheader: string }> = {
+    1: {
+      subject: `${safeSenderName} invited you to ${spaceLabel}`,
+      heading: `${safeSenderName} invited you to ${spaceLabel}`,
+      body: `
+        <p>${safeSenderName} wants you to join ${spaceLabel} on ${APP_NAME} &mdash; a private group where members make warm introductions for each other.</p>
+        <p>Here's how it works: everyone connects their calendar, and the group instantly sees who knows who across hundreds of companies. When you need an intro to a potential client, partner, or collaborator &mdash; you post a request and the member who knows them gets notified.</p>
+        <p>Members of the average space can reach 200+ companies between them. Your network could unlock doors no one else in the group can.</p>
+      `,
+      preheader: `${safeSenderName} invited you to ${spaceLabel} — make warm intros together.`,
+    },
+    2: {
+      subject: `${spaceLabel} is waiting for you`,
+      heading: `${spaceLabel} is waiting for you`,
+      body: `
+        <p>A few days ago, ${safeSenderName} invited you to ${spaceLabel} on ${APP_NAME}. Here's what members use it for:</p>
+        <div style="margin: 20px 0;">
+          <div class="step">
+            <div class="step-num">&check;</div>
+            <div class="step-text"><span class="highlight">Landing clients</span> &mdash; "I need a warm intro to the VP of Sales at Datadog." Someone in the space met with them last month.</div>
+          </div>
+          <div class="step">
+            <div class="step-num">&check;</div>
+            <div class="step-text"><span class="highlight">Finding partners</span> &mdash; "Anyone connected to someone at Figma?" Three members have contacts there.</div>
+          </div>
+          <div class="step">
+            <div class="step-num">&check;</div>
+            <div class="step-text"><span class="highlight">Sharing deal flow</span> &mdash; members surface intro paths to 1,000+ companies across their combined networks.</div>
+          </div>
+        </div>
+        <p>One request, one notification, one warm intro. No cold outreach, no awkward LinkedIn messages.</p>
+      `,
+      preheader: `Members of ${spaceLabel} are making intros — join and add your network.`,
+    },
+    3: {
+      subject: `${safeSpaceName} members are making intros — without you`,
+      heading: `${safeSpaceName} members are making intros &mdash; without you`,
+      body: `
+        <p>${safeSenderName} invited you to ${spaceLabel} on ${APP_NAME} last week. Here's a scenario:</p>
+        <div class="callout">
+          <p>A member posts: "Looking for an intro to someone at HubSpot." Another member who had a meeting with their team last quarter gets notified, checks with their contact, and makes the intro &mdash; all within a day. No cold emails, no guessing, no favors out of the blue.</p>
+        </div>
+        <p>This is happening in ${safeSpaceName} right now, but your network isn't part of it yet. The average professional has connections at 50&ndash;150 companies they've forgotten about. Joining takes 60 seconds &mdash; connect your calendar and your contacts are automatically mapped.</p>
+      `,
+      preheader: `${safeSpaceName} members are making intros without you — join now.`,
+    },
+    4: {
+      subject: `Last reminder: ${safeSenderName}'s invite to ${spaceLabel}`,
+      heading: `Last reminder: join ${spaceLabel}`,
+      body: `
+        <p>Members of ${spaceLabel} are actively requesting and making warm intros to clients, partners, and collaborators. Your network could be the missing piece &mdash; one intro you can make might be worth more than 100 cold emails for someone in the group.</p>
+        <div class="callout">
+          <p>This invitation will expire soon. If you want access to ${safeSpaceName}'s shared network and the intro paths it unlocks, now is the time to join.</p>
+        </div>
+      `,
+      preheader: `This invitation to ${spaceLabel} will expire soon — join before you lose access.`,
+    },
+  };
+
+  const c = content[ping];
+
+  const html = baseLayout(`
+    <h1>${c.heading}</h1>
+    ${c.body}
+    <div style="margin-top: 24px;">
+      <a href="${FRONTEND_URL}" class="btn">Join ${safeSpaceName}</a>
+    </div>
+    <hr class="divider" />
+    <p class="muted">This invitation was sent by ${safeSenderName} via ${APP_NAME}. If you don't know this person, you can safely ignore this email.</p>
+  `, { preheader: c.preheader });
+
+  return send({ to: recipientEmail, subject: c.subject, html });
+}
+
 /** Intro offer email — someone can intro the recipient to a target company */
 export async function sendIntroOfferEmail(params: {
   senderName: string;

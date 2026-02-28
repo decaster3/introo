@@ -1,0 +1,268 @@
+# Email System Documentation
+
+All transactional emails are sent via the **Resend** API from `backend/src/services/email.ts`. In development (no `RESEND_API_KEY`), emails are logged to the console. In non-production environments, all emails are redirected to `DEV_EMAIL_REDIRECT` (or `rinat.khatipov@gmail.com` by default).
+
+**From address:** `Introo <RESEND_FROM_EMAIL>`
+
+---
+
+## User Preferences
+
+Users can opt out of specific email categories via Settings. Preferences are stored in `user.emailPreferences` (JSON field).
+
+| Preference key | Controls                          | Default |
+|----------------|-----------------------------------|---------|
+| `intros`       | Intro-related emails              | `true`  |
+| `notifications`| Notification emails               | `true`  |
+| `digests`      | Weekly digest                     | `true`  |
+| `briefings`    | Daily morning briefing            | `true`  |
+
+---
+
+## Email Templates
+
+### 1. Welcome Email
+
+| Field       | Value |
+|-------------|-------|
+| **Function**    | `sendWelcomeEmail()` |
+| **File**        | `services/email.ts` |
+| **Triggered by**| First-time Google OAuth sign-up (user account age < 60 seconds) |
+| **Trigger location** | `routes/auth.ts` — Google OAuth callback |
+| **Recipient**   | The new user |
+| **Subject**     | `Welcome to Introo, {firstName}!` |
+| **Content**     | Greeting, 3-step onboarding explanation (calendar sync, contact enrichment, network map), CTA to open app |
+| **Preference**  | None (always sent) |
+| **Rate limit**  | Once per user (only sent on first sign-up) |
+
+---
+
+### 2. Calendar Connection Reminder (3-ping sequence)
+
+| Field       | Value |
+|-------------|-------|
+| **Function**    | `sendCalendarReminderEmail()` |
+| **File**        | `services/email.ts` |
+| **Triggered by**| Background cron job (`backgroundCalendarReminders`) checking every 10 minutes |
+| **Trigger location** | `index.ts` — scheduled task |
+| **Recipient**   | Users who signed up but have not connected Google Calendar |
+| **Preference**  | None (onboarding sequence, always sent) |
+| **Tracked by**  | `user.calendarRemindersSent` (0, 1, 2, or 3) |
+| **Stops when**  | User connects their calendar OR all 3 pings have been sent |
+
+#### Ping schedule
+
+| Ping | Timing | Subject | Content |
+|------|--------|---------|---------|
+| 1 | 30 minutes after sign-up | `{firstName}, your network map is waiting` | Gentle nudge explaining what happens when they connect (searchable network map, enrichment). Emphasizes it takes 60 seconds. |
+| 2 | 1 day after sign-up | `{firstName}, you're missing out on your network` | Highlights three value props: searchable contacts, relationship strength, warm intro paths. |
+| 3 | 3 days after sign-up | `Last reminder: connect your calendar, {firstName}` | Final reminder. Emphasizes no manual entry needed, offers to help via reply. |
+
+---
+
+### 3. Invite Email (1:1 Connection)
+
+| Field       | Value |
+|-------------|-------|
+| **Function**    | `sendInviteEmail()` |
+| **File**        | `services/email.ts` |
+| **Triggered by**| User sends a connection request to an email address that has no existing account |
+| **Trigger location** | `routes/connections.ts` — `POST /connections` |
+| **Recipient**   | The invited (non-user) email address |
+| **Subject**     | `{senderName} invited you to Introo` |
+| **Content**     | Sender name/email, explanation of Introo, CTA to join |
+| **Preference**  | None (recipient is not a user yet) |
+| **Condition**   | Target email does not match any existing user |
+
+---
+
+### 4. Space Invite Email
+
+| Field       | Value |
+|-------------|-------|
+| **Function**    | `sendSpaceInviteEmail()` |
+| **File**        | `services/email.ts` |
+| **Triggered by**| Space owner/admin invites a non-user email address to a Space |
+| **Trigger location** | `routes/spaces.ts` — `POST /spaces/:id/members` (when target is not an existing user) |
+| **Recipient**   | The invited (non-user) email address |
+| **Subject**     | `{senderName} invited you to {emoji} {spaceName} on Introo` |
+| **Content**     | Sender info, Space name, explanation of Spaces, CTA to join |
+| **Preference**  | None (recipient is not a user yet) |
+| **Condition**   | Target email does not match any existing user |
+
+---
+
+### 5. Invite Signup Reminders (4-ping sequence)
+
+| Field       | Value |
+|-------------|-------|
+| **Functions**   | `sendInviteReminderEmail()` (1:1) / `sendSpaceInviteReminderEmail()` (space) |
+| **File**        | `services/email.ts` |
+| **Triggered by**| Background cron job (`backgroundInviteReminders`) checking every 1 hour |
+| **Trigger location** | `index.ts` — scheduled task |
+| **Recipient**   | Non-users who were invited (via 1:1 connection or space) but haven't signed up |
+| **Preference**  | None (recipient is not a user yet) |
+| **Tracked by**  | `pendingInvite.remindersSent` (0–4) |
+| **Stops when**  | Recipient signs up OR all 4 pings have been sent |
+| **Variants**    | Copy adapts based on invite type — 1:1 invites focus on the sender, space invites mention the space name |
+
+#### 1:1 Connection Invite — ping schedule
+
+| Ping | Timing | Subject | Content |
+|------|--------|---------|---------|
+| 1 | 1 day after invite | `{senderName} is waiting to connect with you` | Explains how Introo works: connect calendar, map network, request and make intros for each other. |
+| 2 | 3 days after invite | `{senderName}'s invite: see who you both know` | Three use cases: finding clients, partners, like-minded people. Emphasizes seeing shared connections. |
+| 3 | 7 days after invite | `The intros you're missing` | Scenario-driven: targeting a decision-maker, someone in your network knows them but you didn't know. Warm paths vs cold outreach. |
+| 4 | 10 days after invite | `Last chance to connect with {senderName} on Introo` | Urgency: invitation will expire soon, one warm intro worth 100 cold emails. |
+
+#### Space Invite — ping schedule
+
+| Ping | Timing | Subject | Content |
+|------|--------|---------|---------|
+| 1 | 1 day after invite | `{senderName} invited you to {emoji} {spaceName}` | Explains spaces: private group, members make warm intros, 200+ companies reachable. |
+| 2 | 3 days after invite | `{emoji} {spaceName} is waiting for you` | Three use cases: landing clients, finding partners, sharing deal flow across 1,000+ companies. |
+| 3 | 7 days after invite | `{spaceName} members are making intros — without you` | Scenario: member requests HubSpot intro, another member makes it happen in a day. Your network isn't part of it yet. |
+| 4 | 10 days after invite | `Last reminder: {senderName}'s invite to {emoji} {spaceName}` | Urgency: invitation will expire soon, your network could be the missing piece. |
+
+---
+
+### 6. Intro Offer Email
+
+| Field       | Value |
+|-------------|-------|
+| **Function**    | `sendIntroOfferEmail()` |
+| **File**        | `services/email.ts` |
+| **Triggered by**| User clicks "Offer Intro" on another user's intro request, explicitly sending an email |
+| **Trigger location** | `routes/email.ts` — `POST /email/intro-offer` |
+| **Recipient**   | The intro requester |
+| **Subject**     | `{senderName} can intro you to someone at {targetCompany}` |
+| **Content**     | Sender name, target company, contact name (if provided), CTA to reply via email |
+| **Reply-To**    | The sender's email (direct reply goes to sender) |
+| **Preference**  | None (explicitly triggered action) |
+
+---
+
+### 7. Double Intro Email (3-way Introduction)
+
+| Field       | Value |
+|-------------|-------|
+| **Function**    | `sendDoubleIntroEmail()` |
+| **File**        | `services/email.ts` |
+| **Triggered by**| Connector marks an intro request as "done" by sending a 3-way intro email |
+| **Trigger location** | `routes/email.ts` — `POST /email/double-intro` |
+| **Recipients**  | The requester AND the contact (both in `to:`) |
+| **CC**          | The sender/introducer |
+| **Subject**     | `{senderName} intro: {requesterFirst} <> {contactFirst} ({targetCompany})` |
+| **Content**     | Introduction context for both parties, invitation to reply-all |
+| **Reply-To**    | The sender's email |
+| **Preference**  | None (explicitly triggered action) |
+
+---
+
+### 8. Direct Contact Email
+
+| Field       | Value |
+|-------------|-------|
+| **Function**    | `sendContactEmail()` |
+| **File**        | `services/email.ts` |
+| **Triggered by**| User sends a direct message to a contact via the app (used for "Ask Details" and "Ask Permission" flows on intro requests, or general contact) |
+| **Trigger location** | `routes/email.ts` — `POST /email/contact` |
+| **Recipient**   | The target contact's email |
+| **CC**          | The sender |
+| **Subject**     | Custom (provided by the user) |
+| **Content**     | Custom message body from the user |
+| **Reply-To**    | The sender's email |
+| **Preference**  | None (explicitly triggered action) |
+| **Rate limit**  | Max 20 emails per user per hour |
+
+#### Sub-actions (contact email with side effects)
+
+- **`action: 'ask-details'`** — When a connector asks the requester for more details about their intro request. Updates `introRequest.detailsRequestedAt` and sends an additional notification email to the requester.
+- **`action: 'ask-permission'`** — When a connector checks with their contact before making an intro. Updates `introRequest.checkedWithContact*` fields.
+
+---
+
+### 9. Notification Email
+
+| Field       | Value |
+|-------------|-------|
+| **Function**    | `sendNotificationEmail()` |
+| **File**        | `services/email.ts` |
+| **Triggered by**| Any in-app notification that also warrants an email (see table below) |
+| **Recipient**   | The user being notified |
+| **Subject**     | Same as notification title |
+| **Content**     | Notification title + body, CTA to open app |
+| **Preference**  | Respects `notifications` preference (skipped if `false`) |
+
+#### All notification types that trigger an email
+
+| Notification Type | Trigger | Recipient | Title | Body |
+|---|---|---|---|---|
+| `connection_request` | User sends a 1:1 connection request | Target user | `{name} wants to connect` | Accept to share your networks with each other. |
+| `connection_accepted` | User accepts a connection request | The original requester | `{name} accepted your connection` | You are now connected. |
+| `intro_request` | New intro request created in a Space | Each space member who has contacts at the target company | `Intro request: {company}` | {requester} is looking for an intro to {company}. "{text}" |
+| `intro_request` | New intro request via 1:1 connection | Connection peer | `Intro request: {company}` | {requester} is looking for an intro to {company}. "{text}" |
+| `intro_review` | Intro request created in a Space with admin review enabled | Space owner | `Review request: {company}` | {requester} requested an intro to {company} in {space}. This request needs your approval. |
+| `intro_approved` | Space owner approves a pending intro request | The requester | `Approved: {company}` | Your intro request to {company} in {space} was approved. Space members are now reviewing it. |
+| `intro_approved` | Auto-approval when new member joins a Space (pending requests get approved) | The requester | `Approved: {company}` | Your intro request to {company} in {space} was approved. Space members are now reviewing it. |
+| `intro_declined` | Connector declines an intro request | The requester | `Declined: {company}` | {name} can't make an intro to {company} right now. *(+ optional reason)* |
+| `intro_declined` | Admin rejects a pending intro request | The requester | `Not approved: {company}` | Your intro request to {company} in {space} was not approved. *(+ optional reason)* |
+| `intro_offered` | Connector offers an intro (via offer endpoint) | The requester | `Intro offered: {company}` | {name} offered to introduce you to someone at {company}. |
+| `intro_offered` | Connector marks intro as done (double intro sent) | The requester | `Intro done: {company}` | {name} made an introduction for you to {company}. |
+| `details_requested` | Connector sends "ask details" email for an intro request | The requester | `Details requested: {company}` | {name} wants more details about your intro request to {company}. Check your email and reply. |
+| `space_join_request` | User requests to join a Space (approval required) | Space owner | `Join request: {space}` | {name} wants to join {emoji} {space}. |
+| `space_member_joined` | User joins a Space (open join) | Space owner | `New member: {space}` | {name} joined {emoji} {space}. |
+| `space_member_joined` | User accepts a Space invitation | Space owner | `New member: {space}` | {name} accepted the invitation to {emoji} {space}. |
+| `space_approved` | Space owner approves a join request | The requesting member | `Welcome to {space}!` | Your request to join {emoji} {space} was approved. |
+| `space_invited` | Space owner invites an existing user | The invited user | `Invitation to {space}` | {name} invited you to join {emoji} {space}. |
+| `space_member_left` | Member leaves a Space voluntarily | Space owner | `Member left: {space}` | {name} left {emoji} {space}. |
+| `space_removed` | Space owner removes a member | The removed member | `Removed from {space}` | You were removed from {emoji} {space}. |
+
+---
+
+### 10. Weekly Digest
+
+| Field       | Value |
+|-------------|-------|
+| **Function**    | `sendWeeklyDigest()` |
+| **File**        | `services/email.ts` |
+| **Triggered by**| Background cron job (`backgroundWeeklyDigest`) running every 7 days |
+| **Trigger location** | `index.ts` — scheduled task |
+| **Recipient**   | Each user with Google Calendar connected |
+| **Subject**     | `{firstName}, your week: {N} new contacts & {N} meetings` |
+| **Content**     | Stats grid (new contacts, meetings, intro requests, intro offers), top 5 companies by new contact count |
+| **Preference**  | Respects `digests` preference (skipped if `false`) |
+| **Conditions**  | Skipped if ALL stats are 0 (no email for quiet weeks) |
+
+---
+
+### 11. Daily Morning Briefing
+
+| Field       | Value |
+|-------------|-------|
+| **Function**    | `sendDailyBriefing()` |
+| **File**        | `services/email.ts` |
+| **Triggered by**| Background cron job (`dailyMorningBriefing`) checking every 15 minutes |
+| **Trigger location** | `index.ts` — scheduled task |
+| **Recipient**   | Each user with Google Calendar connected |
+| **Subject**     | `{firstName}, {N} meeting(s) today — your briefing` |
+| **Content**     | Date header, meeting cards with enriched attendee data (name, title, LinkedIn, company info, relationship strength), new contacts saved count |
+| **Preference**  | Respects `briefings` preference (skipped if `false`) |
+| **Conditions**  | All of the following must be true: |
+|                 | - Weekday only (Mon-Fri) |
+|                 | - User's local time is 9:00-9:14 AM |
+|                 | - Not already sent today (`lastBriefingDate` != today) |
+|                 | - User has at least 1 calendar event today |
+
+---
+
+## Infrastructure
+
+| Setting | Value |
+|---------|-------|
+| Provider | [Resend](https://resend.com) |
+| Config | `RESEND_API_KEY`, `RESEND_FROM_EMAIL` env vars |
+| Dev redirect | All emails go to `DEV_EMAIL_REDIRECT` in non-production |
+| Dev fallback | Console logging when `RESEND_API_KEY` is not set |
+| Template | Shared `baseLayout()` with responsive HTML/CSS, Introo branding |
+| Rate limiting | Contact emails: 20/user/hour (tracked via `notification` table with type `email_sent`) |

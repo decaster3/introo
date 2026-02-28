@@ -2023,6 +2023,122 @@ body {
   pointer-events: none; z-index: 0;
 }
 
+/* ── Calendar access gate overlay ─────────────────── */
+
+.u-calendar-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  background: rgba(13, 15, 18, 0.6);
+  animation: calGateFadeIn 0.4s ease-out;
+}
+
+@keyframes calGateFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.u-calendar-gate-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  max-width: 420px;
+  width: 90%;
+  padding: 2.5rem 2rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg), 0 0 60px rgba(91, 141, 239, 0.08);
+  animation: calCardSlideUp 0.45s ease-out;
+}
+
+@keyframes calCardSlideUp {
+  from { opacity: 0; transform: translateY(24px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.u-calendar-gate-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: var(--accent-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1.25rem;
+}
+
+.u-calendar-gate-title {
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.5rem;
+}
+
+.u-calendar-gate-desc {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  margin-bottom: 1.5rem;
+}
+
+.u-calendar-gate-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 1.75rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background 0.2s, box-shadow 0.2s, transform 0.15s, border-color 0.2s;
+}
+
+.u-calendar-gate-btn:hover {
+  background: var(--bg-tertiary);
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.u-calendar-gate-btn:active {
+  transform: translateY(0);
+}
+
+.u-calendar-gate-trust {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: 1.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border-subtle);
+  width: 100%;
+}
+
+.u-calendar-gate-trust-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  justify-content: center;
+}
+
+.u-calendar-gate-trust-item svg {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
 /* ── Layout: sidebar + main ────────────────────────── */
 
 .u-layout {
@@ -13095,6 +13211,34 @@ body {
   border-color: var(--accent-primary);
   color: var(--accent-primary);
   background: var(--accent-muted);
+}
+
+.admin-actions-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.admin-delete-btn {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-tertiary);
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  transition: all 0.15s;
+  opacity: 0.4;
+}
+.admin-delete-btn:hover {
+  border-color: #ef4444;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  opacity: 1;
 }
 
 /* Per-user funnel pipeline */

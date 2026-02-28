@@ -367,6 +367,10 @@ export const adminApi = {
       method: 'POST',
       body: JSON.stringify({ role }),
     }),
+  deleteUser: (userId: string) =>
+    request<{ success: boolean; deletedUser: { id: string; name: string; email: string } }>(`/api/admin/users/${userId}`, {
+      method: 'DELETE',
+    }),
   getPendingInvites: () => request<AdminPendingInvite[]>('/api/admin/pending-invites'),
   getActivityChart: () => request<{
     wau: { week: string; count: number }[];

@@ -292,6 +292,18 @@ export function AdminPage() {
     fetchData({ page });
   };
 
+  const handleDeleteUser = async (userId: string, userName: string, userEmail: string) => {
+    if (!confirm(`Are you sure you want to permanently delete "${userName}" (${userEmail})?\n\nThis will cascade-delete ALL their data (contacts, spaces, intros, etc.) and cannot be undone.`)) return;
+    if (!confirm(`FINAL WARNING: This action is irreversible. Delete "${userEmail}"?`)) return;
+    try {
+      await adminApi.deleteUser(userId);
+      setUsers(prev => prev.filter(u => u.id !== userId));
+      if (expandedUser === userId) setExpandedUser(null);
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete user');
+    }
+  };
+
   const handleRoleToggle = async (userId: string, currentRole: string) => {
     const newRole = currentRole === 'admin' ? 'user' : 'admin';
     if (newRole === 'admin' && !confirm(`Promote this user to admin?`)) return;
@@ -568,6 +580,7 @@ export function AdminPage() {
                 expandedUser={expandedUser}
                 onToggleExpand={(id) => setExpandedUser(expandedUser === id ? null : id)}
                 onRoleToggle={handleRoleToggle}
+                onDeleteUser={handleDeleteUser}
                 currentUserId={currentUser?.id}
               />
             ))}
@@ -588,13 +601,14 @@ export function AdminPage() {
   );
 }
 
-function MonthGroup({ label, count, users, expandedUser, onToggleExpand, onRoleToggle, currentUserId }: {
+function MonthGroup({ label, count, users, expandedUser, onToggleExpand, onRoleToggle, onDeleteUser, currentUserId }: {
   label: string;
   count: number;
   users: DisplayUser[];
   expandedUser: string | null;
   onToggleExpand: (id: string) => void;
   onRoleToggle: (id: string, role: string) => void;
+  onDeleteUser: (id: string, name: string, email: string) => void;
   currentUserId?: string;
 }) {
   return (
@@ -612,6 +626,7 @@ function MonthGroup({ label, count, users, expandedUser, onToggleExpand, onRoleT
           expanded={expandedUser === user.id}
           onToggleExpand={() => onToggleExpand(user.id)}
           onRoleToggle={onRoleToggle}
+          onDeleteUser={onDeleteUser}
           isSelf={user.id === currentUserId}
         />
       ))}
@@ -619,11 +634,12 @@ function MonthGroup({ label, count, users, expandedUser, onToggleExpand, onRoleT
   );
 }
 
-function UserRow({ user, expanded, onToggleExpand, onRoleToggle, isSelf }: {
+function UserRow({ user, expanded, onToggleExpand, onRoleToggle, onDeleteUser, isSelf }: {
   user: DisplayUser;
   expanded: boolean;
   onToggleExpand: () => void;
   onRoleToggle: (id: string, role: string) => void;
+  onDeleteUser: (id: string, name: string, email: string) => void;
   isSelf: boolean;
 }) {
   const steps = getUserCompletedSteps(user);
@@ -738,15 +754,26 @@ function UserRow({ user, expanded, onToggleExpand, onRoleToggle, isSelf }: {
           </span>
         </td>
         <td onClick={e => e.stopPropagation()}>
-          {!isSelf && !isPending && (
-            <button
-              className="admin-role-toggle-btn"
-              onClick={() => onRoleToggle(user.id, user.role)}
-              title={user.role === 'admin' ? 'Remove admin' : 'Make admin'}
-            >
-              {user.role === 'admin' ? '\u2212' : '+'}
-            </button>
-          )}
+          <div className="admin-actions-cell">
+            {!isSelf && !isPending && (
+              <button
+                className="admin-role-toggle-btn"
+                onClick={() => onRoleToggle(user.id, user.role)}
+                title={user.role === 'admin' ? 'Remove admin' : 'Make admin'}
+              >
+                {user.role === 'admin' ? '\u2212' : '+'}
+              </button>
+            )}
+            {!isSelf && !isPending && (
+              <button
+                className="admin-delete-btn"
+                onClick={() => onDeleteUser(user.id, user.name, user.email)}
+                title="Permanently delete user"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+              </button>
+            )}
+          </div>
         </td>
       </tr>
       {expanded && (

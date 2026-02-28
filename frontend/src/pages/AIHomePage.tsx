@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAppState, useAppActions } from '../store';
-import { API_BASE, calendarApi, requestsApi, spacesApi, notificationsApi, offersApi, tagsApi, emailApi, viewsApi, enrichmentApi, relationshipsApi, type CalendarAccountInfo, type IntroRequestResponse } from '../lib/api';
+import { API_BASE, authApi, calendarApi, requestsApi, spacesApi, notificationsApi, offersApi, tagsApi, emailApi, viewsApi, enrichmentApi, relationshipsApi, type CalendarAccountInfo, type IntroRequestResponse } from '../lib/api';
 import { calculateStrength, type SpaceCompany, type DisplayContact, type MergedCompany, type ViewFilters, type SavedView, type ViewSortRule, type InlinePanel } from '../types';
 import { PersonAvatar, CompanyLogo, OnboardingChecklist } from '../components';
 import type { ChecklistProgress, ChecklistActions } from '../components';
@@ -7562,6 +7562,61 @@ export function AIHomePage() {
           Settings
         </button>
       </nav>
+
+      {/* Calendar access gate — blurs entire UI until calendar is connected */}
+      {!storeLoading && isAuthenticated && !isCalendarConnected && (
+        <div className="u-calendar-gate">
+          <div className="u-calendar-gate-card">
+            <div className="u-calendar-gate-icon">
+              <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="var(--accent-primary)" strokeWidth="1.5">
+                <rect x="3" y="4" width="18" height="18" rx="2" />
+                <line x1="16" y1="2" x2="16" y2="6" />
+                <line x1="8" y1="2" x2="8" y2="6" />
+                <line x1="3" y1="10" x2="21" y2="10" />
+                <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01" strokeLinecap="round" />
+              </svg>
+            </div>
+            <h2 className="u-calendar-gate-title">One step to get started</h2>
+            <p className="u-calendar-gate-desc">
+              Connect your Google Calendar so Introo can discover who you already know.
+              We only look at meeting participants — never event details, notes, or attachments.
+            </p>
+            <button
+              className="u-calendar-gate-btn"
+              onClick={() => { window.location.href = authApi.getGoogleAuthUrl(); }}
+            >
+              <svg width="20" height="20" viewBox="0 0 48 48">
+                <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+                <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+                <path fill="#FBBC05" d="M10.53 28.59a14.5 14.5 0 010-9.18l-7.98-6.19a24.01 24.01 0 000 21.56l7.98-6.19z"/>
+                <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+              </svg>
+              Continue with Google
+            </button>
+
+            <div className="u-calendar-gate-trust">
+              <div className="u-calendar-gate-trust-item">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+                <span>Read-only access</span>
+              </div>
+              <div className="u-calendar-gate-trust-item">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
+                </svg>
+                <span>Your data stays private</span>
+              </div>
+              <div className="u-calendar-gate-trust-item">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                </svg>
+                <span>Disconnect anytime</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

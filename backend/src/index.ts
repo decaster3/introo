@@ -24,7 +24,7 @@ import emailRoutes from './routes/email.js';
 import viewsRoutes from './routes/views.js';
 import adminRoutes from './routes/admin.js';
 import embeddingsRoutes from './routes/embeddings.js';
-import { sendWeeklyDigest, sendDailyBriefing } from './services/email.js';
+import { sendWeeklyDigest, sendDailyBriefing, sendCalendarReminderEmail, sendInviteReminderEmail, sendSpaceInviteReminderEmail } from './services/email.js';
 import type { BriefingMeeting, BriefingAttendee } from './services/email.js';
 import prisma from './lib/prisma.js';
 
@@ -462,6 +462,182 @@ async function dailyMorningBriefing() {
   }
 }
 
+// ─── Calendar connection reminders (30min, 1day, 3days after signup) ─────────
+
+const REMINDER_CHECK_INTERVAL_MS = 10 * 60 * 1000; // check every 10 minutes
+
+const REMINDER_THRESHOLDS: { ping: 1 | 2 | 3; minMs: number; maxMs: number }[] = [
+  { ping: 1, minMs: 30 * 60 * 1000, maxMs: 24 * 60 * 60 * 1000 },           // 30 min – 24h
+  { ping: 2, minMs: 24 * 60 * 60 * 1000, maxMs: 3 * 24 * 60 * 60 * 1000 },  // 1 day – 3 days
+  { ping: 3, minMs: 3 * 24 * 60 * 60 * 1000, maxMs: 7 * 24 * 60 * 60 * 1000 }, // 3 days – 7 days
+];
+
+let reminderRunning = false;
+
+async function backgroundCalendarReminders() {
+  if (reminderRunning) return;
+  reminderRunning = true;
+  try {
+    const users = await prisma.user.findMany({
+      where: {
+        googleAccessToken: null,
+        calendarRemindersSent: { lt: 3 },
+      },
+      select: { id: true, email: true, name: true, createdAt: true, calendarRemindersSent: true },
+    });
+
+    const now = Date.now();
+
+    for (const user of users) {
+      try {
+        const ageMs = now - new Date(user.createdAt).getTime();
+        let currentSent = user.calendarRemindersSent;
+
+        // Skip past any ping windows that have already closed
+        while (currentSent < 3) {
+          const nextPing = (currentSent + 1) as 1 | 2 | 3;
+          const threshold = REMINDER_THRESHOLDS.find(t => t.ping === nextPing);
+          if (!threshold) break;
+          if (ageMs < threshold.minMs) break; // too early for this ping
+          if (ageMs < threshold.maxMs) {
+            // Within window — send this ping
+            await sendCalendarReminderEmail({ id: user.id, email: user.email, name: user.name }, nextPing);
+            await prisma.user.update({
+              where: { id: user.id },
+              data: { calendarRemindersSent: nextPing },
+            });
+            console.log(`[cron] Sent calendar reminder #${nextPing} to ${user.email}`);
+            break;
+          }
+          // Window has passed — skip this ping silently
+          currentSent = nextPing;
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { calendarRemindersSent: nextPing },
+          });
+          console.log(`[cron] Skipped calendar reminder #${nextPing} for ${user.email} (window passed)`);
+        }
+      } catch (err) {
+        console.error(`[cron] Failed calendar reminder for ${user.email}:`, (err as Error).message);
+      }
+    }
+  } catch (err) {
+    console.error('[cron] Calendar reminders error:', err);
+  } finally {
+    reminderRunning = false;
+  }
+}
+
+// ─── Invite signup reminders (1d, 3d, 7d, 10d after invite) ─────────────────
+
+const INVITE_REMINDER_CHECK_INTERVAL_MS = 60 * 60 * 1000; // check every hour
+
+const INVITE_REMINDER_THRESHOLDS: { ping: 1 | 2 | 3 | 4; minMs: number; maxMs: number }[] = [
+  { ping: 1, minMs: 1 * 24 * 60 * 60 * 1000, maxMs: 3 * 24 * 60 * 60 * 1000 },
+  { ping: 2, minMs: 3 * 24 * 60 * 60 * 1000, maxMs: 7 * 24 * 60 * 60 * 1000 },
+  { ping: 3, minMs: 7 * 24 * 60 * 60 * 1000, maxMs: 10 * 24 * 60 * 60 * 1000 },
+  { ping: 4, minMs: 10 * 24 * 60 * 60 * 1000, maxMs: 30 * 24 * 60 * 60 * 1000 },
+];
+
+let inviteReminderRunning = false;
+
+async function backgroundInviteReminders() {
+  if (inviteReminderRunning) return;
+  inviteReminderRunning = true;
+  try {
+    const invites = await prisma.pendingInvite.findMany({
+      where: {
+        status: 'pending',
+        remindersSent: { lt: 4 },
+      },
+      select: {
+        id: true,
+        email: true,
+        createdAt: true,
+        remindersSent: true,
+        spaceId: true,
+        fromUser: { select: { name: true } },
+        space: { select: { name: true, emoji: true } },
+      },
+    });
+
+    const now = Date.now();
+
+    // Deduplicate: only process the oldest pending invite per email address
+    const seenEmails = new Set<string>();
+    const dedupedInvites = invites
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      .filter(inv => {
+        const key = inv.email.toLowerCase();
+        if (seenEmails.has(key)) return false;
+        seenEmails.add(key);
+        return true;
+      });
+
+    for (const invite of dedupedInvites) {
+      try {
+        // Skip if the user has since signed up
+        const existingUser = await prisma.user.findUnique({
+          where: { email: invite.email },
+          select: { id: true },
+        });
+        if (existingUser) continue;
+
+        const ageMs = now - new Date(invite.createdAt).getTime();
+        let currentSent = invite.remindersSent;
+
+        // Skip past any ping windows that have already closed
+        while (currentSent < 4) {
+          const nextPing = (currentSent + 1) as 1 | 2 | 3 | 4;
+          const threshold = INVITE_REMINDER_THRESHOLDS.find(t => t.ping === nextPing);
+          if (!threshold) break;
+          if (ageMs < threshold.minMs) break; // too early for this ping
+          if (ageMs < threshold.maxMs) {
+            // Within window — send this ping
+            const senderName = invite.fromUser?.name || 'Someone';
+
+            if (invite.spaceId && invite.space) {
+              await sendSpaceInviteReminderEmail({
+                recipientEmail: invite.email,
+                senderName,
+                spaceName: invite.space.name,
+                spaceEmoji: invite.space.emoji || '',
+                ping: nextPing,
+              });
+            } else {
+              await sendInviteReminderEmail({
+                recipientEmail: invite.email,
+                senderName,
+                ping: nextPing,
+              });
+            }
+
+            await prisma.pendingInvite.update({
+              where: { id: invite.id },
+              data: { remindersSent: nextPing },
+            });
+            console.log(`[cron] Sent invite reminder #${nextPing} to ${invite.email}`);
+            break;
+          }
+          // Window has passed — skip this ping silently
+          currentSent = nextPing;
+          await prisma.pendingInvite.update({
+            where: { id: invite.id },
+            data: { remindersSent: nextPing },
+          });
+          console.log(`[cron] Skipped invite reminder #${nextPing} for ${invite.email} (window passed)`);
+        }
+      } catch (err) {
+        console.error(`[cron] Failed invite reminder for ${invite.email}:`, (err as Error).message);
+      }
+    }
+  } catch (err) {
+    console.error('[cron] Invite reminders error:', err);
+  } finally {
+    inviteReminderRunning = false;
+  }
+}
+
 // Ensure ADMIN_EMAILS users have admin role on startup
 async function ensureAdminUsers() {
   const adminEmails = (process.env.ADMIN_EMAILS || '')
@@ -500,5 +676,13 @@ verifyDatabaseConnection().then(async () => {
     setTimeout(dailyMorningBriefing, 60 * 1000); // initial check 1 min after startup
     setInterval(dailyMorningBriefing, BRIEFING_CHECK_INTERVAL_MS);
     console.log(`[cron] Daily briefing check scheduled every 15 minutes (initial run in 60s)`);
+
+    setTimeout(backgroundCalendarReminders, 2 * 60 * 1000); // initial check 2 min after startup
+    setInterval(backgroundCalendarReminders, REMINDER_CHECK_INTERVAL_MS);
+    console.log(`[cron] Calendar connection reminders scheduled every 10 minutes (initial run in 2m)`);
+
+    setTimeout(backgroundInviteReminders, 3 * 60 * 1000); // initial check 3 min after startup
+    setInterval(backgroundInviteReminders, INVITE_REMINDER_CHECK_INTERVAL_MS);
+    console.log(`[cron] Invite signup reminders scheduled every 1 hour (initial run in 3m)`);
   });
 });
