@@ -775,6 +775,7 @@ async function backgroundIntroNudgeReminders() {
         email: true,
         name: true,
         introRemindersSent: true,
+        introNudgeStartAt: true,
         emailPreferences: true,
         // First accepted 1:1 connection (as recipient)
         receivedConnections: {
@@ -824,10 +825,13 @@ async function backgroundIntroNudgeReminders() {
           if (prefs.notifications === false) continue;
         }
 
-        // Sequence starts from the earliest accepted connection or approved space
+        // Sequence starts from the earliest accepted connection or approved space,
+        // but never earlier than introNudgeStartAt (backfill override for existing users)
         const connTs = firstConnAt ? new Date(firstConnAt).getTime() : Infinity;
         const spaceTs = firstSpaceAt ? new Date(firstSpaceAt).getTime() : Infinity;
-        const sequenceStart = Math.min(connTs, spaceTs);
+        const computedStart = Math.min(connTs, spaceTs);
+        const overrideStart = user.introNudgeStartAt ? new Date(user.introNudgeStartAt).getTime() : 0;
+        const sequenceStart = Math.max(computedStart, overrideStart);
         const ageMs = now - sequenceStart;
 
         let currentSent = user.introRemindersSent;
@@ -918,10 +922,53 @@ async function backfillCalendarConnectedAt() {
   }
 }
 
+// One-time backfill: set introNudgeStartAt for existing users who have accepted
+// a connection or joined a space but haven't requested an intro yet.
+// Sets the override so the first intro nudge email fires Monday 9 AM CET.
+// Idempotent — only touches users where introNudgeStartAt is still NULL
+// and introRemindersSent is 0.
+async function backfillIntroNudgeStart() {
+  try {
+    // Monday March 2 2026, 9 AM CET = 08:00 UTC
+    // First email fires 1 day after introNudgeStartAt, so set to Sunday March 1 08:00 UTC
+    const monday9amCET = new Date('2026-03-02T08:00:00.000Z');
+    const backfillTimestamp = new Date(monday9amCET.getTime() - 24 * 60 * 60 * 1000);
+
+    // Only backfill if Monday hasn't passed yet
+    if (Date.now() > monday9amCET.getTime()) {
+      console.log('[backfill] introNudgeStartAt: Monday 9 AM CET has passed, skipping');
+      return;
+    }
+
+    const result = await prisma.user.updateMany({
+      where: {
+        googleAccessToken: { not: null },
+        introRemindersSent: 0,
+        introNudgeStartAt: null,
+        introRequests: { none: {} },
+        OR: [
+          { receivedConnections: { some: { status: 'accepted' } } },
+          { spaceMemberships: { some: { status: 'approved' } } },
+        ],
+      },
+      data: {
+        introNudgeStartAt: backfillTimestamp,
+      },
+    });
+
+    if (result.count > 0) {
+      console.log(`[backfill] Set introNudgeStartAt for ${result.count} existing user(s) → first intro nudge at Monday 9 AM CET`);
+    }
+  } catch (err) {
+    console.error('[backfill] introNudgeStartAt backfill error:', (err as Error).message);
+  }
+}
+
 // Start server
 verifyDatabaseConnection().then(async () => {
   await ensureAdminUsers();
   await backfillCalendarConnectedAt();
+  await backfillIntroNudgeStart();
   server = app.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
 

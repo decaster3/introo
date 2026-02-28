@@ -27,6 +27,7 @@ model User {
   calendarConnectedAt   DateTime?
   calendarRemindersSent Int              @default(0)
   introRemindersSent    Int              @default(0)
+  introNudgeStartAt     DateTime?
   role               String              @default("user")
   emailPreferences   Json                @default("{\"intros\":true,\"notifications\":true,\"digests\":true}")
   createdAt          DateTime            @default(now())
