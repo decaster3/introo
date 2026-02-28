@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { authApi } from '../lib/api';
 
 const DISMISSED_KEY = 'introo_onboarding_dismissed';
@@ -8,7 +8,6 @@ export type StepKey =
   | 'enrichContacts'
   | 'openCard'
   | 'applyFilter'
-  | 'saveView'
   | 'acceptConnection'
   | 'inviteFriend'
   | 'requestIntro';
@@ -23,7 +22,6 @@ const STEPS: Step[] = [
   { key: 'enrichContacts', icon: '✨', label: 'Enrich your contacts' },
   { key: 'openCard', icon: '🏢', label: 'Open a company card' },
   { key: 'applyFilter', icon: '📊', label: 'Apply a filter' },
-  { key: 'saveView', icon: '📌', label: 'Save a View' },
   { key: 'acceptConnection', icon: '🤝', label: 'Accept a connection' },
   { key: 'inviteFriend', icon: '👋', label: 'Invite a friend' },
   { key: 'requestIntro', icon: '✉️', label: 'Request an intro' },
@@ -41,11 +39,27 @@ export function OnboardingChecklist({ progress, actions, isDismissed }: Props) {
   const [dismissed, setDismissed] = useState(() => !!isDismissed || !!localStorage.getItem(DISMISSED_KEY));
   const [open, setOpen] = useState(false);
   const [showDone, setShowDone] = useState(false);
+  const [celebration, setCelebration] = useState<Step | null>(null);
+  const prevDoneRef = useRef<Set<StepKey>>(new Set(STEPS.filter(s => progress[s.key]).map(s => s.key)));
 
   const done = useMemo(() => STEPS.filter(s => progress[s.key]), [progress]);
   const todo = useMemo(() => STEPS.filter(s => !progress[s.key]), [progress]);
   const count = done.length;
   const allDone = count === TOTAL;
+  const nextStep = todo[0] || null;
+
+  // Detect newly completed steps and show celebration
+  useEffect(() => {
+    const prev = prevDoneRef.current;
+    const newlyDone = STEPS.find(s => progress[s.key] && !prev.has(s.key));
+    if (newlyDone) {
+      setCelebration(newlyDone);
+      const t = setTimeout(() => setCelebration(null), 2800);
+      prevDoneRef.current = new Set(STEPS.filter(s => progress[s.key]).map(s => s.key));
+      return () => clearTimeout(t);
+    }
+    prevDoneRef.current = new Set(STEPS.filter(s => progress[s.key]).map(s => s.key));
+  }, [progress]);
 
   useEffect(() => {
     if (allDone && !dismissed) {
@@ -73,6 +87,17 @@ export function OnboardingChecklist({ progress, actions, isDismissed }: Props) {
 
   return (
     <div className="ob-float">
+      {/* Celebration toast */}
+      {celebration && (
+        <div className="ob-celebrate" key={celebration.key}>
+          <span className="ob-celebrate-icon">{celebration.icon}</span>
+          <span className="ob-celebrate-text">
+            <strong>{celebration.label}</strong> — done!
+          </span>
+          <svg className="ob-celebrate-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34c759" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+        </div>
+      )}
+
       {open && (
         <>
           <div className="ob-float-backdrop" onClick={() => setOpen(false)} />
@@ -138,7 +163,14 @@ export function OnboardingChecklist({ progress, actions, isDismissed }: Props) {
         onClick={() => setOpen(!open)}
         title="Onboarding progress"
       >
-        <span className="ob-float-trigger-text">Onboarding {count}/{TOTAL}</span>
+        <span className="ob-float-trigger-text">
+          {allDone
+            ? `All done! ${count}/${TOTAL}`
+            : nextStep
+              ? `Next: ${nextStep.icon} ${nextStep.label}`
+              : `Onboarding ${count}/${TOTAL}`
+          }
+        </span>
         <span className="ob-float-trigger-bar">
           <span className="ob-float-trigger-bar-fill" style={{ width: `${(count / TOTAL) * 100}%` }} />
         </span>

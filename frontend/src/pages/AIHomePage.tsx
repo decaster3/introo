@@ -2243,11 +2243,10 @@ export function AIHomePage() {
     enrichContacts: obEnrichedContacts,
     openCard: obExploredCompany,
     applyFilter: obAppliedFilter,
-    saveView: savedViews.length > 0,
     acceptConnection: connections.filter(c => c.status === 'accepted').length > 0,
     inviteFriend: connections.length > 0 || pendingInvites.length > 0,
     requestIntro: (myIntroRequests || []).length > 0,
-  }), [isCalendarConnected, obEnrichedContacts, obExploredCompany, obAppliedFilter, savedViews.length, connections, pendingInvites.length, myIntroRequests]);
+  }), [isCalendarConnected, obEnrichedContacts, obExploredCompany, obAppliedFilter, connections, pendingInvites.length, myIntroRequests]);
 
   const checklistActions: ChecklistActions = useMemo(() => ({
     connectCalendar: () => setInlinePanel({ type: 'settings' }),
@@ -2257,7 +2256,6 @@ export function AIHomePage() {
       if (first) setInlinePanel({ type: 'company', company: first });
     },
     applyFilter: () => { setSidebarOpen(true); setSidebarTab('filters'); },
-    saveView: () => { setSidebarOpen(true); setSidebarTab('views'); },
     acceptConnection: () => setInlinePanel({ type: 'network-manage' }),
     inviteFriend: () => setInlinePanel({ type: 'network-manage' }),
     requestIntro: () => {
