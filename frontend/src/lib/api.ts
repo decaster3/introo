@@ -45,6 +45,8 @@ export const authApi = {
   updateProfile: (data: { name?: string; title?: string; companyDomain?: string; linkedinUrl?: string; headline?: string; city?: string; country?: string; timezone?: string }) =>
     request<{ user: User }>('/auth/me', { method: 'PATCH', body: JSON.stringify(data) }),
   logout: () => request<{ success: boolean }>('/auth/logout', { method: 'POST' }),
+  updateOnboarding: (data: { tourCompleted?: boolean; checklistDismissed?: boolean }) =>
+    request<{ success: boolean }>('/auth/onboarding', { method: 'PATCH', body: JSON.stringify(data) }),
   getGoogleAuthUrl: () => `${API_BASE}/auth/google`,
 };
 

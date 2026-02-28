@@ -7576,6 +7576,7 @@ export function AIHomePage() {
         <OnboardingChecklist
           progress={checklistProgress}
           actions={checklistActions}
+          isDismissed={!!currentUser?.onboardingChecklistDismissedAt}
         />
       )}
 

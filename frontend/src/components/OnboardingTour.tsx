@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { authApi } from '../lib/api';
 
 export interface TourStep {
   target: string;          // CSS selector for the element to highlight
@@ -57,10 +58,11 @@ const STORAGE_KEY = 'introo_onboarding_complete';
 
 interface OnboardingTourProps {
   forceShow?: boolean;
+  isCompleted?: boolean;
   onComplete?: () => void;
 }
 
-export function OnboardingTour({ forceShow, onComplete }: OnboardingTourProps) {
+export function OnboardingTour({ forceShow, isCompleted, onComplete }: OnboardingTourProps) {
   const [step, setStep] = useState(0);
   const [visible, setVisible] = useState(false);
   const [spotlightRect, setSpotlightRect] = useState<DOMRect | null>(null);
@@ -68,19 +70,15 @@ export function OnboardingTour({ forceShow, onComplete }: OnboardingTourProps) {
   const tooltipRef = useRef<HTMLDivElement>(null);
   const animRef = useRef<number>(0);
 
-  // Decide if tour should show
   useEffect(() => {
     if (forceShow) {
       setVisible(true);
       return;
     }
-    const done = localStorage.getItem(STORAGE_KEY);
-    if (!done) {
-      // Small delay so the page renders first
-      const t = setTimeout(() => setVisible(true), 1200);
-      return () => clearTimeout(t);
-    }
-  }, [forceShow]);
+    if (isCompleted) return;
+    const t = setTimeout(() => setVisible(true), 1200);
+    return () => clearTimeout(t);
+  }, [forceShow, isCompleted]);
 
   // Position the spotlight and tooltip for the current step
   const positionStep = useCallback(() => {
@@ -145,26 +143,28 @@ export function OnboardingTour({ forceShow, onComplete }: OnboardingTourProps) {
     };
   }, [positionStep]);
 
+  const markComplete = useCallback(() => {
+    localStorage.setItem(STORAGE_KEY, 'true');
+    setVisible(false);
+    authApi.updateOnboarding({ tourCompleted: true }).catch(() => {});
+    onComplete?.();
+  }, [onComplete]);
+
   const handleNext = useCallback(() => {
     if (step < TOUR_STEPS.length - 1) {
       setStep(s => s + 1);
     } else {
-      // Complete
-      localStorage.setItem(STORAGE_KEY, 'true');
-      setVisible(false);
-      onComplete?.();
+      markComplete();
     }
-  }, [step, onComplete]);
+  }, [step, markComplete]);
 
   const handlePrev = useCallback(() => {
     if (step > 0) setStep(s => s - 1);
   }, [step]);
 
   const handleSkip = useCallback(() => {
-    localStorage.setItem(STORAGE_KEY, 'true');
-    setVisible(false);
-    onComplete?.();
-  }, [onComplete]);
+    markComplete();
+  }, [markComplete]);
 
   if (!visible) return null;
 
@@ -257,4 +257,5 @@ export function OnboardingTour({ forceShow, onComplete }: OnboardingTourProps) {
 /** Utility: reset onboarding so it shows again */
 export function resetOnboarding() {
   localStorage.removeItem(STORAGE_KEY);
+  authApi.updateOnboarding({ tourCompleted: false, checklistDismissed: false }).catch(() => {});
 }

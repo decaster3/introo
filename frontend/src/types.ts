@@ -16,6 +16,8 @@ export interface User {
   city?: string | null;
   country?: string | null;
   timezone?: string | null;
+  onboardingCompletedAt?: string | null;
+  onboardingChecklistDismissedAt?: string | null;
 }
 
 export interface Company {

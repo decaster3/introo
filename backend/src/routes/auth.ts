@@ -288,7 +288,7 @@ router.patch('/me', authMiddleware, async (req, res) => {
     const user = await prisma.user.update({
       where: { id: userId },
       data: updateData,
-      select: { id: true, email: true, name: true, role: true, avatar: true, title: true, company: true, companyDomain: true, linkedinUrl: true, headline: true, city: true, country: true, timezone: true },
+      select: { id: true, email: true, name: true, role: true, avatar: true, title: true, company: true, companyDomain: true, linkedinUrl: true, headline: true, city: true, country: true, timezone: true, onboardingCompletedAt: true, onboardingChecklistDismissedAt: true },
     });
 
     invalidateUserCache(userId);
@@ -296,6 +296,37 @@ router.patch('/me', authMiddleware, async (req, res) => {
   } catch (error: any) {
     console.error('Profile update error:', error.message);
     res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+// Update onboarding state
+router.patch('/onboarding', authMiddleware, async (req, res) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.id;
+    const { tourCompleted, checklistDismissed } = req.body;
+
+    const updateData: Record<string, any> = {};
+    if (tourCompleted === true) updateData.onboardingCompletedAt = new Date();
+    if (tourCompleted === false) updateData.onboardingCompletedAt = null;
+    if (checklistDismissed === true) updateData.onboardingChecklistDismissedAt = new Date();
+    if (checklistDismissed === false) updateData.onboardingChecklistDismissedAt = null;
+
+    if (Object.keys(updateData).length === 0) {
+      res.status(400).json({ error: 'Nothing to update' });
+      return;
+    }
+
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+      select: { onboardingCompletedAt: true, onboardingChecklistDismissedAt: true },
+    });
+
+    invalidateUserCache(userId);
+    res.json({ success: true, ...user });
+  } catch (error: any) {
+    console.error('Onboarding update error:', error.message);
+    res.status(500).json({ error: 'Failed to update onboarding state' });
   }
 });
 

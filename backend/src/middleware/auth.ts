@@ -75,6 +75,8 @@ export interface AuthUser {
   city?: string | null;
   country?: string | null;
   timezone?: string | null;
+  onboardingCompletedAt?: string | null;
+  onboardingChecklistDismissedAt?: string | null;
 }
 
 export interface AuthenticatedRequest extends Request {
@@ -304,7 +306,7 @@ export function invalidateUserCache(userId: string) {
   USER_CACHE.delete(userId);
 }
 
-const USER_SELECT = { id: true, email: true, name: true, role: true, avatar: true, title: true, company: true, companyDomain: true, linkedinUrl: true, headline: true, city: true, country: true, timezone: true } as const;
+const USER_SELECT = { id: true, email: true, name: true, role: true, avatar: true, title: true, company: true, companyDomain: true, linkedinUrl: true, headline: true, city: true, country: true, timezone: true, onboardingCompletedAt: true, onboardingChecklistDismissedAt: true } as const;
 
 export const authMiddleware: RequestHandler = async (req, res, next) => {
   const token = req.cookies?.token || req.headers.authorization?.replace('Bearer ', '');

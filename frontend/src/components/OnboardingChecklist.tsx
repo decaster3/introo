@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { authApi } from '../lib/api';
 
 const DISMISSED_KEY = 'introo_onboarding_dismissed';
 
@@ -33,10 +34,11 @@ const TOTAL = STEPS.length;
 interface Props {
   progress: ChecklistProgress;
   actions: ChecklistActions;
+  isDismissed?: boolean;
 }
 
-export function OnboardingChecklist({ progress, actions }: Props) {
-  const [dismissed, setDismissed] = useState(() => !!localStorage.getItem(DISMISSED_KEY));
+export function OnboardingChecklist({ progress, actions, isDismissed }: Props) {
+  const [dismissed, setDismissed] = useState(() => !!isDismissed || !!localStorage.getItem(DISMISSED_KEY));
   const [open, setOpen] = useState(false);
   const [showDone, setShowDone] = useState(false);
 
@@ -51,10 +53,15 @@ export function OnboardingChecklist({ progress, actions }: Props) {
     }
   }, [allDone, dismissed]);
 
+  useEffect(() => {
+    if (isDismissed) setDismissed(true);
+  }, [isDismissed]);
+
   const handleDismiss = useCallback(() => {
     setDismissed(true);
     setOpen(false);
     localStorage.setItem(DISMISSED_KEY, 'true');
+    authApi.updateOnboarding({ checklistDismissed: true }).catch(() => {});
   }, []);
 
   const fire = useCallback((key: StepKey) => {
@@ -145,4 +152,5 @@ export function resetChecklist() {
   ['introo_explored_company', 'introo_enriched_contacts', 'introo_applied_filter'].forEach(
     k => localStorage.removeItem(k)
   );
+  authApi.updateOnboarding({ checklistDismissed: false }).catch(() => {});
 }

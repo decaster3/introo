@@ -58,6 +58,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
             payload: { isAuthenticated: true, user },
           });
 
+          // Clear all onboarding localStorage keys when a different user signs in
+          const previousUserId = localStorage.getItem('introo_user_id');
+          if (previousUserId && previousUserId !== user.id) {
+            const onboardingKeys = [
+              'introo_onboarding_complete',
+              'introo_onboarding_dismissed',
+              'introo_splash_seen',
+              'introo_top_highlighted',
+              'introo_tag_tip_seen',
+              'introo_hunt_prompt_dismissed',
+              'introo_view_prompt_dismissed',
+              'introo_explored_company',
+              'introo_enriched_contacts',
+              'introo_applied_filter',
+              'introo_view_mode',
+              'introo_table_col_order',
+              'introo_tag_defs',
+              'introo_company_tags',
+              'pods_last_enrich',
+            ];
+            onboardingKeys.forEach(k => localStorage.removeItem(k));
+          }
+          localStorage.setItem('introo_user_id', user.id);
+
           // Auto-detect timezone on first load if not yet saved
           if (!user.timezone) {
             try {
@@ -86,11 +110,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
           // Auto-sync when user has 0 contacts (first login or post-OAuth redirect)
           if (contacts.length === 0 && calendarStatus.isConnected) {
-            // Calendar connected but no contacts — need to sync
-            // Only clear onboarding localStorage if this is genuinely a new session
-            // (no onboarding flag exists yet), not a flaky API response
-            if (!localStorage.getItem('introo_onboarding_complete')) {
+            if (!user.onboardingCompletedAt) {
               const sessionKeys = [
+                'introo_onboarding_complete',
+                'introo_onboarding_dismissed',
                 'introo_splash_seen',
                 'introo_top_highlighted',
                 'introo_tag_tip_seen',
