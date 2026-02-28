@@ -444,6 +444,73 @@ export async function sendConnectionReminderEmail(params: {
   return send({ to: recipientEmail, subject: c.subject, html });
 }
 
+/** Intro nudge — nudge connected users who haven't requested their first intro */
+export async function sendIntroNudgeEmail(
+  user: { email: string; name: string },
+  ping: 1 | 2 | 3,
+): Promise<EmailResult> {
+  const firstName = escapeHtml(user.name.split(' ')[0]) || 'there';
+
+  const content: Record<1 | 2 | 3, { subject: string; heading: string; body: string; preheader: string }> = {
+    1: {
+      subject: `${firstName}, try your first intro request`,
+      heading: `Try your first intro request`,
+      body: `
+        <p>You're connected on ${APP_NAME} &mdash; now put it to work.</p>
+        <p>Type what you're looking for in the search bar &mdash; a role, a company, an industry. ${APP_NAME} shows you who in your network can get you there. Tap <span class="highlight">Request Intro</span>, and your connection gets notified instantly.</p>
+        <p>That's it. No cold emails, no guesswork.</p>
+      `,
+      preheader: `Type what you're looking for, hit request, done.`,
+    },
+    2: {
+      subject: `One search. One request. One intro.`,
+      heading: `One search. One request. One intro.`,
+      body: `
+        <p>Here's how fast it works:</p>
+        <div style="margin: 20px 0;">
+          <div class="step">
+            <div class="step-num">1</div>
+            <div class="step-text"><span class="highlight">Search</span> &mdash; type a company name, role, or industry</div>
+          </div>
+          <div class="step">
+            <div class="step-num">2</div>
+            <div class="step-text"><span class="highlight">Request</span> &mdash; tap "Request Intro" on any company card</div>
+          </div>
+          <div class="step">
+            <div class="step-num">3</div>
+            <div class="step-text"><span class="highlight">Connected</span> &mdash; your contact checks with their person and makes the intro</div>
+          </div>
+        </div>
+        <p>The whole thing takes 10 seconds. Your connections are waiting to help &mdash; they just need to know what you're looking for.</p>
+      `,
+      preheader: `Your connections can't help if they don't know what you need.`,
+    },
+    3: {
+      subject: `${firstName}, your network is going unused`,
+      heading: `Your network is going unused`,
+      body: `
+        <p>You've done the hard part &mdash; connected your calendar, linked up with people you trust. But you haven't requested a single intro yet.</p>
+        <p>Search for any company or role you care about. If someone in your network has a path there, you'll see it instantly. One request, one intro &mdash; no cold outreach needed.</p>
+      `,
+      preheader: `One warm intro is worth 100 cold emails.`,
+    },
+  };
+
+  const c = content[ping];
+
+  const html = baseLayout(`
+    <h1>${c.heading}</h1>
+    ${c.body}
+    <div style="margin-top: 24px;">
+      <a href="${FRONTEND_URL}/home" class="btn">${ping === 3 ? 'Open ' + APP_NAME : ping === 2 ? 'Find an Intro' : 'Request Your First Intro'}</a>
+    </div>
+    <hr class="divider" />
+    <p class="muted">You received this because you're connected on ${APP_NAME} but haven't requested an intro yet. Change your email preferences anytime in <a href="${FRONTEND_URL}/home?panel=settings" style="color: #71717a;">Settings</a>.</p>
+  `, { preheader: c.preheader });
+
+  return send({ to: user.email, subject: c.subject, html });
+}
+
 /** 1:1 invite reminder — nudge non-users who were invited but haven't signed up */
 export async function sendInviteReminderEmail(params: {
   recipientEmail: string;

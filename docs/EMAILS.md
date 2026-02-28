@@ -161,7 +161,40 @@ This sequence is **gated behind calendar connection**. The flow for an invited u
 
 ---
 
-### 7. Intro Offer Email
+### 7. Intro Nudge Reminders (3-ping sequence)
+
+| Field       | Value |
+|-------------|-------|
+| **Function**    | `sendIntroNudgeEmail()` |
+| **File**        | `services/email.ts` |
+| **Triggered by**| Background cron job (`backgroundIntroNudgeReminders`) checking every 1 hour |
+| **Trigger location** | `index.ts` — scheduled task |
+| **Recipient**   | Users who have at least one accepted 1:1 connection or approved space membership, but have never created an intro request |
+| **Preference**  | Respects `notifications` preference (skipped if `false`) |
+| **Tracked by**  | `user.introRemindersSent` (0–3) |
+| **Stops when**  | User creates their first intro request OR all 3 pings have been sent |
+| **Scope**       | **First connection/space only** — the sequence only starts when the user's total accepted connections + approved spaces = 1. If they already have multiple, it's not their first and the sequence is skipped. |
+| **Gate**        | Requires calendar connected (`googleAccessToken` set) |
+| **Sequence start** | Earliest of `DirectConnection.updatedAt` (accepted) or `SpaceMember.joinedAt` (approved) |
+
+#### Ping schedule
+
+| Ping | Timing | Subject | Content |
+|------|--------|---------|---------|
+| 1 | 1 day after first connection/space | `{firstName}, try your first intro request` | Explains search → request → intro flow. Emphasizes simplicity: type what you need, tap request, done. |
+| 2 | 3 days after first connection/space | `One search. One request. One intro.` | Three numbered steps: Search, Request, Connected. Reinforces that connections need to know what you're looking for. |
+| 3 | 7 days after first connection/space | `{firstName}, your network is going unused` | Final nudge. Acknowledges they've done the hard part. One request, one intro — no cold outreach. |
+
+#### Sequencing with other reminders
+
+This sequence only fires after the user has:
+1. Connected their calendar (calendar reminder sequence is done)
+2. Accepted a connection or joined a space (connection acceptance sequence is done)
+3. Not yet created any intro request
+
+---
+
+### 8. Intro Offer Email
 
 | Field       | Value |
 |-------------|-------|
@@ -177,7 +210,7 @@ This sequence is **gated behind calendar connection**. The flow for an invited u
 
 ---
 
-### 8. Double Intro Email (3-way Introduction)
+### 9. Double Intro Email (3-way Introduction)
 
 | Field       | Value |
 |-------------|-------|
@@ -194,7 +227,7 @@ This sequence is **gated behind calendar connection**. The flow for an invited u
 
 ---
 
-### 9. Direct Contact Email
+### 10. Direct Contact Email
 
 | Field       | Value |
 |-------------|-------|
@@ -217,7 +250,7 @@ This sequence is **gated behind calendar connection**. The flow for an invited u
 
 ---
 
-### 10. Notification Email
+### 11. Notification Email
 
 | Field       | Value |
 |-------------|-------|
@@ -255,7 +288,7 @@ This sequence is **gated behind calendar connection**. The flow for an invited u
 
 ---
 
-### 11. Weekly Digest
+### 12. Weekly Digest
 
 | Field       | Value |
 |-------------|-------|
@@ -271,7 +304,7 @@ This sequence is **gated behind calendar connection**. The flow for an invited u
 
 ---
 
-### 12. Daily Morning Briefing
+### 13. Daily Morning Briefing
 
 | Field       | Value |
 |-------------|-------|

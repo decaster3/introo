@@ -24,7 +24,7 @@ import emailRoutes from './routes/email.js';
 import viewsRoutes from './routes/views.js';
 import adminRoutes from './routes/admin.js';
 import embeddingsRoutes from './routes/embeddings.js';
-import { sendWeeklyDigest, sendDailyBriefing, sendCalendarReminderEmail, sendConnectionReminderEmail, sendInviteReminderEmail, sendSpaceInviteReminderEmail } from './services/email.js';
+import { sendWeeklyDigest, sendDailyBriefing, sendCalendarReminderEmail, sendConnectionReminderEmail, sendIntroNudgeEmail, sendInviteReminderEmail, sendSpaceInviteReminderEmail } from './services/email.js';
 import type { BriefingMeeting, BriefingAttendee } from './services/email.js';
 import prisma from './lib/prisma.js';
 
@@ -747,6 +747,123 @@ async function backgroundConnectionReminders() {
   }
 }
 
+// ─── Intro nudge reminders (1d, 3d, 7d — for connected users with 0 intro requests) ─
+
+const INTRO_NUDGE_CHECK_INTERVAL_MS = 60 * 60 * 1000; // check every hour
+
+const INTRO_NUDGE_THRESHOLDS: { ping: 1 | 2 | 3; minMs: number; maxMs: number }[] = [
+  { ping: 1, minMs: 1 * 24 * 60 * 60 * 1000, maxMs: 3 * 24 * 60 * 60 * 1000 },
+  { ping: 2, minMs: 3 * 24 * 60 * 60 * 1000, maxMs: 7 * 24 * 60 * 60 * 1000 },
+  { ping: 3, minMs: 7 * 24 * 60 * 60 * 1000, maxMs: 14 * 24 * 60 * 60 * 1000 },
+];
+
+let introNudgeRunning = false;
+
+async function backgroundIntroNudgeReminders() {
+  if (introNudgeRunning) return;
+  introNudgeRunning = true;
+  try {
+    // Users who have calendar connected, haven't maxed out nudges, and have 0 intro requests
+    const candidates = await prisma.user.findMany({
+      where: {
+        googleAccessToken: { not: null },
+        introRemindersSent: { lt: 3 },
+        introRequests: { none: {} },
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        introRemindersSent: true,
+        emailPreferences: true,
+        // First accepted 1:1 connection (as recipient)
+        receivedConnections: {
+          where: { status: 'accepted' },
+          orderBy: { updatedAt: 'asc' },
+          take: 1,
+          select: { updatedAt: true },
+        },
+        // First approved space membership
+        spaceMemberships: {
+          where: { status: 'approved' },
+          orderBy: { joinedAt: 'asc' },
+          take: 1,
+          select: { joinedAt: true },
+        },
+        // Check if this is their first-ever connection/space (for "first only" rule)
+        _count: {
+          select: {
+            receivedConnections: { where: { status: 'accepted' } },
+            spaceMemberships: { where: { status: 'approved' } },
+          },
+        },
+      },
+    });
+
+    const now = Date.now();
+
+    for (const user of candidates) {
+      try {
+        // Must have at least one accepted connection or approved space
+        const firstConnAt = user.receivedConnections[0]?.updatedAt;
+        const firstSpaceAt = user.spaceMemberships[0]?.joinedAt;
+        if (!firstConnAt && !firstSpaceAt) continue;
+
+        // Only for the first connection/space: total count must be exactly 1
+        const totalConnections = user._count.receivedConnections + user._count.spaceMemberships;
+        if (totalConnections > 1 && user.introRemindersSent === 0) {
+          // They already have multiple — not their first rodeo, but if we haven't
+          // started the sequence yet, skip. If we already started (sent >= 1), finish it.
+        }
+        // Stricter: only start the sequence if they have exactly 1 total
+        if (user.introRemindersSent === 0 && totalConnections > 1) continue;
+
+        // Respect email preferences
+        if (user.emailPreferences && typeof user.emailPreferences === 'object') {
+          const prefs = user.emailPreferences as Record<string, boolean>;
+          if (prefs.notifications === false) continue;
+        }
+
+        // Sequence starts from the earliest accepted connection or approved space
+        const connTs = firstConnAt ? new Date(firstConnAt).getTime() : Infinity;
+        const spaceTs = firstSpaceAt ? new Date(firstSpaceAt).getTime() : Infinity;
+        const sequenceStart = Math.min(connTs, spaceTs);
+        const ageMs = now - sequenceStart;
+
+        let currentSent = user.introRemindersSent;
+
+        while (currentSent < 3) {
+          const nextPing = (currentSent + 1) as 1 | 2 | 3;
+          const threshold = INTRO_NUDGE_THRESHOLDS.find(t => t.ping === nextPing);
+          if (!threshold) break;
+          if (ageMs < threshold.minMs) break;
+          if (ageMs < threshold.maxMs) {
+            await sendIntroNudgeEmail({ email: user.email, name: user.name }, nextPing);
+            await prisma.user.update({
+              where: { id: user.id },
+              data: { introRemindersSent: nextPing },
+            });
+            console.log(`[cron] Sent intro nudge #${nextPing} to ${user.email}`);
+            break;
+          }
+          currentSent = nextPing;
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { introRemindersSent: nextPing },
+          });
+          console.log(`[cron] Skipped intro nudge #${nextPing} for ${user.email} (window passed)`);
+        }
+      } catch (err) {
+        console.error(`[cron] Failed intro nudge for ${user.email}:`, (err as Error).message);
+      }
+    }
+  } catch (err) {
+    console.error('[cron] Intro nudge reminders error:', err);
+  } finally {
+    introNudgeRunning = false;
+  }
+}
+
 // Ensure ADMIN_EMAILS users have admin role on startup
 async function ensureAdminUsers() {
   const adminEmails = (process.env.ADMIN_EMAILS || '')
@@ -831,5 +948,9 @@ verifyDatabaseConnection().then(async () => {
     setTimeout(backgroundConnectionReminders, 4 * 60 * 1000); // initial check 4 min after startup
     setInterval(backgroundConnectionReminders, CONN_REMINDER_CHECK_INTERVAL_MS);
     console.log(`[cron] Connection acceptance reminders scheduled every 1 hour (initial run in 4m)`);
+
+    setTimeout(backgroundIntroNudgeReminders, 5 * 60 * 1000); // initial check 5 min after startup
+    setInterval(backgroundIntroNudgeReminders, INTRO_NUDGE_CHECK_INTERVAL_MS);
+    console.log(`[cron] Intro nudge reminders scheduled every 1 hour (initial run in 5m)`);
   });
 });
