@@ -294,8 +294,9 @@ This sequence only fires after the user has:
 |-------------|-------|
 | **Function**    | `sendWeeklyDigest()` |
 | **File**        | `services/email.ts` |
-| **Triggered by**| Background cron job (`backgroundWeeklyDigest`) running every 7 days |
+| **Triggered by**| Background cron job (`backgroundWeeklyDigest`) checking every 15 minutes |
 | **Trigger location** | `index.ts` — scheduled task |
+| **Schedule**    | **Wednesday 10:00–10:14 AM** in the user's local timezone (uses `user.timezone`, falls back to UTC) |
 | **Recipient**   | Each user with Google Calendar connected |
 | **Subject**     | If action items: `{firstName}, {N} things need your attention + your weekly recap` — otherwise: `{firstName}, your week: {N} new contacts & {N} meetings` |
 | **Preference**  | Respects `digests` preference (skipped if `false`) |

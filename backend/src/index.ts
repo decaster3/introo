@@ -293,25 +293,42 @@ async function backgroundCalendarSync() {
   }
 }
 
-// ─── Weekly digest email (every 7 days) ──────────────────────────────────────
+// ─── Weekly digest email (Wednesday 10 AM per user timezone) ─────────────────
 
-const DIGEST_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+const DIGEST_CHECK_INTERVAL_MS = 15 * 60 * 1000; // check every 15 minutes
+
+let digestRunning = false;
 
 async function backgroundWeeklyDigest() {
-  console.log('[cron] Starting weekly digest emails...');
+  if (digestRunning) return;
+  digestRunning = true;
   try {
     const now = Date.now();
     const oneWeekAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
     const twoWeeksAgo = new Date(now - 14 * 24 * 60 * 60 * 1000);
-    const todayStr = new Date().toISOString().slice(0, 10);
 
     const users = await prisma.user.findMany({
       where: { googleAccessToken: { not: null } },
-      select: { id: true, email: true, lastDigestDate: true },
+      select: { id: true, email: true, lastDigestDate: true, timezone: true },
     });
 
     for (const user of users) {
       try {
+        const tz = user.timezone || 'UTC';
+        const parts = new Intl.DateTimeFormat('en-US', {
+          timeZone: tz,
+          year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: 'numeric', hour12: false, weekday: 'short',
+        }).formatToParts(new Date());
+        const get = (type: string) => parts.find(p => p.type === type)?.value || '';
+        const hour = parseInt(get('hour'), 10);
+        const dayName = get('weekday');
+        const todayStr = `${get('year')}-${get('month')}-${get('day')}`;
+        const dayOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(dayName);
+
+        // Only send on Wednesday at 10:00–10:14 local time
+        if (dayOfWeek !== 3 || hour !== 10) continue;
+
         if (user.lastDigestDate === todayStr) continue;
 
         const [
@@ -435,9 +452,11 @@ async function backgroundWeeklyDigest() {
       }
     }
 
-    console.log('[cron] Weekly digest complete');
+    console.log('[cron] Weekly digest check complete');
   } catch (err) {
     console.error('[cron] Weekly digest error:', err);
+  } finally {
+    digestRunning = false;
   }
 }
 
@@ -1062,9 +1081,9 @@ verifyDatabaseConnection().then(async () => {
     setInterval(backgroundCalendarSync, SYNC_INTERVAL_MS);
     console.log(`[cron] Calendar background sync scheduled every ${SYNC_INTERVAL_MS / 3600000}h (initial run in 30s)`);
 
-    setTimeout(backgroundWeeklyDigest, 10 * 60 * 1000); // initial run 10 min after startup
-    setInterval(backgroundWeeklyDigest, DIGEST_INTERVAL_MS);
-    console.log(`[cron] Weekly digest email scheduled every 7 days (initial run in 10m)`);
+    setTimeout(backgroundWeeklyDigest, 5 * 60 * 1000); // initial check 5 min after startup
+    setInterval(backgroundWeeklyDigest, DIGEST_CHECK_INTERVAL_MS);
+    console.log(`[cron] Weekly digest scheduled every 15 min (sends Wednesday 10 AM local)`);
 
     setTimeout(dailyMorningBriefing, 60 * 1000); // initial check 1 min after startup
     setInterval(dailyMorningBriefing, BRIEFING_CHECK_INTERVAL_MS);
