@@ -21,7 +21,7 @@ const STEPS: Step[] = [
   { key: 'connectCalendar', icon: '📅', label: 'Connect Calendar' },
   { key: 'enrichContacts', icon: '✨', label: 'Enrich your contacts' },
   { key: 'openCard', icon: '🏢', label: 'Open a company card' },
-  { key: 'applyFilter', icon: '📊', label: 'Apply a filter' },
+  { key: 'applyFilter', icon: '🔍', label: 'Search for companies' },
   { key: 'acceptConnection', icon: '🤝', label: 'Accept a connection' },
   { key: 'inviteFriend', icon: '👋', label: 'Invite a friend' },
   { key: 'requestIntro', icon: '✉️', label: 'Request an intro' },

@@ -2220,23 +2220,11 @@ export function AIHomePage() {
   }, [enrichStats]);
 
   useEffect(() => {
-    const sf = sidebarFilters;
-    const hasSidebarFilter =
-      sf.categories.length > 0 || sf.aiKeywords.length > 0 || sf.excludeKeywords.length > 0 ||
-      sf.employeeRanges.length > 0 || sf.country || sf.city ||
-      sf.fundingRounds.length > 0 || sf.fundingRecency !== 'any' ||
-      sf.foundedFrom || sf.foundedTo || sf.revenueRanges.length > 0 ||
-      sf.technologies.length > 0 || sf.connectedYears.length > 0 || sf.connectedMonths.length > 0 ||
-      sf.lastContactYears.length > 0 || sf.lastContactMonths.length > 0 ||
-      sf.description;
-    const hasExplicitFilter =
-      hasSidebarFilter || strengthFilter !== 'all' ||
-      tagInclude.length > 0 || tagExclude.length > 0;
-    if (hasExplicitFilter) {
+    if (deepSearchResults && deepSearchResults.length > 0) {
       localStorage.setItem('introo_applied_filter', 'true');
       setObAppliedFilter(true);
     }
-  }, [sidebarFilters, strengthFilter, tagInclude, tagExclude]);
+  }, [deepSearchResults]);
 
   const checklistProgress: ChecklistProgress = useMemo(() => ({
     connectCalendar: isCalendarConnected,
@@ -2255,7 +2243,7 @@ export function AIHomePage() {
       const first = displayCompanies[0] || mergedCompanies[0];
       if (first) setInlinePanel({ type: 'company', company: first });
     },
-    applyFilter: () => { setSidebarOpen(true); setSidebarTab('filters'); },
+    applyFilter: () => { searchRef.current?.focus(); },
     acceptConnection: () => setInlinePanel({ type: 'network-manage' }),
     inviteFriend: () => setInlinePanel({ type: 'network-manage' }),
     requestIntro: () => {
