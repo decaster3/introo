@@ -68,6 +68,7 @@ model CalendarAccount {
   name               String?
   googleAccessToken  String
   googleRefreshToken String?
+  hasCalendarAccess  Boolean   @default(true)
   lastSyncedAt       DateTime?
   isActive           Boolean   @default(true)
   createdAt          DateTime  @default(now())

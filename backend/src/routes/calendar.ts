@@ -74,9 +74,9 @@ router.delete('/accounts/:accountId', async (req, res) => {
 
 // Sync a specific calendar account
 router.post('/accounts/:accountId/sync', async (req, res) => {
+  const { accountId } = req.params;
   try {
     const userId = (req as AuthenticatedRequest).user!.id;
-    const { accountId } = req.params;
     
     console.log('Starting calendar sync for account:', accountId);
     const result = await syncCalendarAccount(userId, accountId);
@@ -93,6 +93,10 @@ router.post('/accounts/:accountId/sync', async (req, res) => {
     console.error('Calendar sync error:', errorMessage);
     
     if (isCalendarAuthError(error)) {
+      await prisma.calendarAccount.update({
+        where: { id: accountId },
+        data: { hasCalendarAccess: false },
+      }).catch(() => {});
       res.status(401).json({
         error: 'Calendar access expired',
         message: 'Please reconnect this calendar account',

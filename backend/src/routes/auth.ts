@@ -106,6 +106,10 @@ router.get('/google/callback', async (req, res, next) => {
       const { tokens } = await oauth2Client.getToken(code);
       oauth2Client.setCredentials(tokens);
 
+      const grantedScopes = (tokens as any).scope || '';
+      const hasCalendarAccess = grantedScopes.includes('calendar');
+      console.log(`[auth] Add-account scopes: calendar=${hasCalendarAccess}, scopes="${grantedScopes}"`);
+
       // Get the email of the Google account just authorized
       const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
       const { data: profile } = await oauth2.userinfo.get();
@@ -151,6 +155,7 @@ router.get('/google/callback', async (req, res, next) => {
             googleAccessToken: encryptToken(tokens.access_token!),
             googleRefreshToken: tokens.refresh_token ? encryptToken(tokens.refresh_token) : existing.googleRefreshToken,
             isActive: true,
+            hasCalendarAccess,
             name: accountName,
           },
         });
@@ -166,6 +171,7 @@ router.get('/google/callback', async (req, res, next) => {
           name: accountName,
           googleAccessToken: encryptToken(tokens.access_token!),
           googleRefreshToken: tokens.refresh_token ? encryptToken(tokens.refresh_token) : undefined,
+          hasCalendarAccess,
         },
       });
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, memo } from 'react';
 
 export interface CompanyLogoProps {
   domain?: string;
@@ -6,11 +6,7 @@ export interface CompanyLogoProps {
   size?: number;
 }
 
-/**
- * Company Logo component with fallback
- * Uses Google Favicons API for logos, falls back to letter initial
- */
-export function CompanyLogo({ domain, name, size = 48 }: CompanyLogoProps) {
+export const CompanyLogo = memo(function CompanyLogo({ domain, name, size = 48 }: CompanyLogoProps) {
   const [hasError, setHasError] = useState(false);
   
   const fallbackLetter = name ? name.charAt(0).toUpperCase() : '?';
@@ -57,4 +53,4 @@ export function CompanyLogo({ domain, name, size = 48 }: CompanyLogoProps) {
       />
     </div>
   );
-}
+});

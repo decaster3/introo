@@ -55,6 +55,7 @@ export interface CalendarAccountInfo {
   id: string;
   email: string;
   name: string | null;
+  hasCalendarAccess: boolean;
   lastSyncedAt: string | null;
   isActive: boolean;
   contactsCount: number;

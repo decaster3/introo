@@ -66,14 +66,20 @@ export function SettingsPanel({
                   </button>
                 )}
               </div>
-              {primaryAcct && (
-                <span className="u-settings-sync-meta">
-                  {primaryAcct.contactsCount} contacts
-                  {primaryAcct.lastSyncedAt && (
-                    <> &middot; last synced {new Date(primaryAcct.lastSyncedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</>
-                  )}
-                </span>
-              )}
+              <span className="u-settings-sync-meta">
+                {primaryAcct ? (
+                  <>
+                    <span className={`u-settings-dot ${primaryAcct.hasCalendarAccess ? 'connected' : 'warning'}`} />
+                    {primaryAcct.hasCalendarAccess ? (
+                      <>Calendar connected &middot; {primaryAcct.contactsCount} contacts{primaryAcct.lastSyncedAt && <> &middot; last synced {new Date(primaryAcct.lastSyncedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</>}</>
+                    ) : (
+                      <>Calendar access not granted</>
+                    )}
+                  </>
+                ) : isCalendarConnected ? (
+                  <><span className="u-settings-dot connected" /> Calendar connected</>
+                ) : null}
+              </span>
             </>
           );
         })()}
@@ -92,14 +98,28 @@ export function SettingsPanel({
               <div className="u-settings-row-info">
                 <span className="u-settings-row-label">{acct.email}</span>
                 <span className="u-settings-row-status">
-                  <span className="u-settings-dot connected" /> {acct.contactsCount} contacts
-                  {acct.lastSyncedAt && <> &middot; synced {new Date(acct.lastSyncedAt).toLocaleDateString()}</>}
+                  {acct.hasCalendarAccess ? (
+                    <>
+                      <span className="u-settings-dot connected" /> {acct.contactsCount} contacts
+                      {acct.lastSyncedAt && <> &middot; synced {new Date(acct.lastSyncedAt).toLocaleDateString()}</>}
+                    </>
+                  ) : (
+                    <>
+                      <span className="u-settings-dot warning" /> Calendar access not granted
+                    </>
+                  )}
                 </span>
               </div>
               <div style={{ display: 'flex', gap: '0.25rem' }}>
-                <button className="u-action-btn" onClick={() => onAccountSync(acct.id)} disabled={syncingAccountId === acct.id}>
-                  {syncingAccountId === acct.id ? 'Syncing...' : 'Sync'}
-                </button>
+                {acct.hasCalendarAccess ? (
+                  <button className="u-action-btn" onClick={() => onAccountSync(acct.id)} disabled={syncingAccountId === acct.id}>
+                    {syncingAccountId === acct.id ? 'Syncing...' : 'Sync'}
+                  </button>
+                ) : (
+                  <button className="u-action-btn" onClick={() => { window.location.href = calendarApi.getAddAccountUrl(); }}>
+                    Reconnect
+                  </button>
+                )}
                 <button className="u-action-btn" style={{ color: 'var(--danger, #e55)' }} onClick={() => onAccountDelete(acct.id)}>
                   Remove
                 </button>

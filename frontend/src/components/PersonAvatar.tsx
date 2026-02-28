@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, memo } from 'react';
 
 export interface PersonAvatarProps {
   email?: string;
@@ -7,11 +7,7 @@ export interface PersonAvatarProps {
   size?: number;
 }
 
-/**
- * Person Avatar component with fallback to initials
- * Safari-friendly: avoids third-party image services that may be blocked
- */
-export function PersonAvatar({ 
+export const PersonAvatar = memo(function PersonAvatar({ 
   email, 
   name, 
   avatarUrl: providedAvatarUrl, 
@@ -62,4 +58,4 @@ export function PersonAvatar({
       />
     </div>
   );
-}
+});

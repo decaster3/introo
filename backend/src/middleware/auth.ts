@@ -168,15 +168,22 @@ export function configurePassport() {
                 googleAccessToken: encryptedAccessToken,
                 ...refreshTokenFields,
                 isActive: true,
+                hasCalendarAccess: true,
               },
               create: {
                 userId: user.id,
                 email,
                 googleAccessToken: encryptedAccessToken,
                 ...refreshTokenFields,
+                hasCalendarAccess: true,
               },
             });
           } else {
+            // Mark existing CalendarAccount as lacking calendar access
+            await prisma.calendarAccount.updateMany({
+              where: { userId: user.id, email },
+              data: { hasCalendarAccess: false },
+            }).catch(() => {});
             console.log(`[auth] Skipping CalendarAccount for ${email} — calendar scope not granted`);
           }
 

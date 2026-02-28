@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { enrichmentApi, type EnrichmentProgress } from '../lib/api';
 
 interface EnrichStats {
@@ -24,16 +24,19 @@ export function useEnrichment(refreshData: () => Promise<void>, storeLoading: bo
     enrichmentApi.getStatus().then(setEnrichStats).catch(() => {});
   }, []);
 
+  const sawRunning = useRef(false);
+
   // Check if enrichment is running on the server
   const checkEnrichmentRunning = useCallback(() => {
     return enrichmentApi.getProgress()
       .then(progress => {
         if (progress.contactsFree && !progress.contactsFree.done) {
+          sawRunning.current = true;
           setEnriching(true);
           setEnrichProgress(progress);
           return true;
         }
-        if (progress.contactsFree?.done) {
+        if (progress.contactsFree?.done && sawRunning.current) {
           refreshStats();
           refreshData();
         }
@@ -49,16 +52,15 @@ export function useEnrichment(refreshData: () => Promise<void>, storeLoading: bo
   }, [checkEnrichmentRunning, refreshStats]);
 
   // After store loads, poll briefly to detect enrichment that may have just started.
-  // Also refreshes stats each attempt so auto-enrich can react once contacts exist.
   useEffect(() => {
     if (storeLoading || enriching) return;
     let attempts = 0;
     const interval = setInterval(async () => {
       attempts++;
-      refreshStats();
       const isRunning = await checkEnrichmentRunning();
       if (isRunning || attempts >= DETECTION_ATTEMPTS) {
         clearInterval(interval);
+        if (!isRunning) refreshStats();
       }
     }, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
@@ -102,6 +104,7 @@ export function useEnrichment(refreshData: () => Promise<void>, storeLoading: bo
   // Start enrichment — only processes never-attempted contacts
   const startEnrichment = useCallback(async () => {
     if (enriching) return;
+    sawRunning.current = true;
     setEnriching(true);
     setEnrichError(null);
     setEnrichProgress({ contacts: null, companies: null, contactsFree: null });
