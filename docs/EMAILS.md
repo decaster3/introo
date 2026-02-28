@@ -31,9 +31,16 @@ Users can opt out of specific email categories via Settings. Preferences are sto
 | **Trigger location** | `routes/auth.ts` — Google OAuth callback |
 | **Recipient**   | The new user |
 | **Subject**     | `Welcome to Introo, {firstName}!` |
-| **Content**     | Greeting, 3-step onboarding explanation (calendar sync, contact enrichment, network map), CTA to open app |
+| **Content**     | Two variants based on whether the user granted calendar access (see below) |
 | **Preference**  | None (always sent) |
 | **Rate limit**  | Once per user (only sent on first sign-up) |
+
+#### Variants
+
+| Variant | Condition | Content | CTA |
+|---------|-----------|---------|-----|
+| **Calendar connected** | User granted calendar scope during OAuth | Greeting, 3-step explanation (calendar sync happening now, contact enrichment, network map) | "Open Introo" |
+| **No calendar** | User declined calendar scope during OAuth | Greeting, 3-step explanation (connect your calendar, enrichment, network map) | "Connect Calendar" |
 
 ---
 
