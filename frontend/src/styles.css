@@ -3020,17 +3020,34 @@ body {
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
-  transition: width 0.25s, opacity 0.25s;
   overflow: hidden;
   position: sticky;
   top: 0;
   height: 100vh;
 }
 
+.sb.open {
+  animation: sbSlideIn 0.2s ease both;
+}
+
 .sb.closed {
   width: 0;
-  opacity: 0;
   border-right: none;
+}
+
+.sb.sb--closing {
+  animation: sbSlideOut 0.25s ease forwards;
+  pointer-events: none;
+}
+
+@keyframes sbSlideIn {
+  from { transform: translateX(-100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes sbSlideOut {
+  from { transform: translateX(0); opacity: 1; }
+  to { transform: translateX(-100%); opacity: 0; }
 }
 
 .sb-header {
@@ -6047,6 +6064,16 @@ body {
   to { transform: translateX(0); opacity: 1; }
 }
 
+.u-panel--closing {
+  animation: panelSlideOut 0.25s ease forwards;
+  pointer-events: none;
+}
+
+@keyframes panelSlideOut {
+  from { transform: translateX(0); opacity: 1; }
+  to { transform: translateX(100%); opacity: 0; }
+}
+
 .u-panel-close {
   position: absolute; top: 1rem; right: 1rem;
   width: 28px; height: 28px;
@@ -6641,6 +6668,39 @@ body {
 .u-network-stats-val {
   color: rgba(255,255,255,0.65);
   font-weight: 600;
+}
+
+/* ── Intro stats row ─────────────────────────────── */
+.u-intro-stats {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.5rem;
+  background: linear-gradient(135deg, rgba(99,102,241,0.08) 0%, rgba(168,85,247,0.06) 100%);
+  border: 1px solid rgba(99,102,241,0.12);
+}
+.u-intro-stats-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+}
+.u-intro-stats-val {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: rgba(165,148,249,0.9);
+}
+.u-intro-stats-val--helped {
+  color: rgba(52,211,153,0.9);
+}
+.u-intro-stats-label {
+  font-size: 0.68rem;
+  color: rgba(255,255,255,0.35);
+}
+.u-intro-stats-divider {
+  width: 1px;
+  height: 16px;
+  background: rgba(255,255,255,0.08);
 }
 
 /* ── Collapsible section header ──────────────────── */
@@ -7312,11 +7372,17 @@ body {
     box-shadow: 4px 0 24px rgba(0,0,0,0.4);
   }
   .sb.open {
+    animation: none;
     transform: translateX(0);
     opacity: 1;
   }
+  .sb.sb--closing {
+    animation: none;
+    pointer-events: none;
+  }
   .sb.closed {
-    width: 300px; /* keep width so the slide anim works */
+    animation: none;
+    width: 300px;
     opacity: 0;
     border-right: none;
   }
@@ -7448,6 +7514,11 @@ body {
     animation: none;
     padding: 1rem;
     padding-bottom: calc(3.5rem + env(safe-area-inset-bottom, 0px));
+  }
+  .u-panel.u-panel--closing {
+    animation: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
   }
 
   .u-canvas.has-panel .u-scroll-area { display: none; }
@@ -9240,6 +9311,45 @@ body {
 
 .u-settings-danger-btn:hover {
   color: rgba(255,255,255,0.7);
+}
+
+.u-settings-footer {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  padding-bottom: 1rem;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  text-align: center;
+}
+.u-settings-footer-links {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.u-settings-footer-links a {
+  font-size: 0.7rem;
+  color: rgba(255,255,255,0.3);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.u-settings-footer-links a:hover {
+  color: rgba(255,255,255,0.6);
+}
+.u-settings-footer-sep {
+  color: rgba(255,255,255,0.12);
+  font-size: 0.7rem;
+}
+.u-settings-footer-email {
+  font-size: 0.7rem;
+  color: rgba(255,255,255,0.25);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.u-settings-footer-email:hover {
+  color: var(--accent-primary);
 }
 
 .u-settings-row {

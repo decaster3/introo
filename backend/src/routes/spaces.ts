@@ -232,7 +232,26 @@ router.get('/:id', async (req, res) => {
         return { ...r, potentialConnectors: Array.from(connectorMap.values()) };
       });
 
-      res.json({ ...space, requests: enrichedRequests, pendingCount });
+      // Per-member stats: contacts, intros requested, intros helped
+      const allMemberUserIds = space.members.map(m => m.user.id);
+      const memberContactCounts = await prisma.contact.groupBy({
+        by: ['userId'],
+        where: { userId: { in: allMemberUserIds }, isApproved: true },
+        _count: true,
+      });
+      const contactCountMap = new Map(memberContactCounts.map(c => [c.userId, c._count]));
+
+      const memberStats: Record<string, { contactCount: number; introsRequested: number; introsHelped: number }> = {};
+      for (const m of space.members) {
+        const uid = m.user.id;
+        memberStats[uid] = {
+          contactCount: contactCountMap.get(uid) || 0,
+          introsRequested: space.requests.filter(r => r.requesterId === uid).length,
+          introsHelped: space.requests.filter(r => r.offers.some(o => o.introducerId === uid)).length,
+        };
+      }
+
+      res.json({ ...space, requests: enrichedRequests, pendingCount, memberStats });
       return;
     }
 

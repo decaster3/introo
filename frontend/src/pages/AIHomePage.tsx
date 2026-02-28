@@ -221,8 +221,43 @@ export function AIHomePage() {
   const [expandedMeetingIdx, setExpandedMeetingIdx] = useState<number | null>(null);
   const [contactsExpanded, setContactsExpanded] = useState(false);
   const [aboutExpanded, setAboutExpanded] = useState(false);
-  const [inlinePanel, setInlinePanel] = useState<InlinePanel | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [inlinePanel, setInlinePanelRaw] = useState<InlinePanel | null>(null);
+  const [panelClosing, setPanelClosing] = useState(false);
+  const panelCloseTimer = useRef<ReturnType<typeof setTimeout>>();
+  const setInlinePanel = useCallback((panelOrUpdater: InlinePanel | null | ((prev: InlinePanel | null) => InlinePanel | null)) => {
+    if (typeof panelOrUpdater === 'function') {
+      setInlinePanelRaw(panelOrUpdater);
+      return;
+    }
+    const panel = panelOrUpdater;
+    if (panel === null && inlinePanel && !panelClosing) {
+      setPanelClosing(true);
+      panelCloseTimer.current = setTimeout(() => {
+        setInlinePanelRaw(null);
+        setPanelClosing(false);
+      }, 250);
+    } else if (panel !== null) {
+      if (panelCloseTimer.current) clearTimeout(panelCloseTimer.current);
+      setPanelClosing(false);
+      setInlinePanelRaw(panel);
+    }
+  }, [inlinePanel, panelClosing]);
+  const [sidebarOpen, setSidebarOpenRaw] = useState(false);
+  const [sidebarClosing, setSidebarClosing] = useState(false);
+  const sidebarCloseTimer = useRef<ReturnType<typeof setTimeout>>();
+  const setSidebarOpen = useCallback((open: boolean) => {
+    if (!open && sidebarOpen && !sidebarClosing) {
+      setSidebarClosing(true);
+      sidebarCloseTimer.current = setTimeout(() => {
+        setSidebarOpenRaw(false);
+        setSidebarClosing(false);
+      }, 250);
+    } else if (open) {
+      if (sidebarCloseTimer.current) clearTimeout(sidebarCloseTimer.current);
+      setSidebarClosing(false);
+      setSidebarOpenRaw(true);
+    }
+  }, [sidebarOpen, sidebarClosing]);
   const [sidebarTab, setSidebarTab] = useState<'filters' | 'views'>('filters');
   const [editingViewId, setEditingViewId] = useState<string | null>(null);
   const [editingViewName, setEditingViewName] = useState('');
@@ -236,6 +271,7 @@ export function AIHomePage() {
   const [notifications, setNotifications] = useState<Awaited<ReturnType<typeof notificationsApi.getAll>>>([]);
   const [myIntroRequests, setMyIntroRequests] = useState<Awaited<ReturnType<typeof requestsApi.getMine>>>([]);
   const [spaceRequests, setSpaceRequests] = useState<Record<string, { id: string; rawText: string; status: string; createdAt: string; normalizedQuery: Record<string, unknown>; requester: { id: string; name: string; email?: string; avatar: string | null } }[]>>({});
+  const [spaceMemberStats, setSpaceMemberStats] = useState<Record<string, Record<string, { contactCount: number; introsRequested: number; introsHelped: number }>>>({});
   const [networkTab, setNetworkTab] = useState<'network' | 'intros'>('network');
   const [spacesCollapsed, setSpacesCollapsed] = useState(false);
   const [connectionsCollapsed, setConnectionsCollapsed] = useState(false);
@@ -327,6 +363,8 @@ export function AIHomePage() {
 
   // Accept-connection confirmation modal
   const [acceptModalConnectionId, setAcceptModalConnectionId] = useState<string | null>(null);
+  // Remove-member confirmation modal
+  const [removeMemberModal, setRemoveMemberModal] = useState<{ spaceId: string; userId: string; userName: string } | null>(null);
   const acceptModalConnection = acceptModalConnectionId
     ? connections.find(c => c.id === acceptModalConnectionId) ?? null
     : null;
@@ -2068,6 +2106,9 @@ export function AIHomePage() {
           if (data?.requests) {
             setSpaceRequests(prev => ({ ...prev, [sid]: data.requests }));
           }
+          if (data?.memberStats) {
+            setSpaceMemberStats(prev => ({ ...prev, [sid]: data.memberStats }));
+          }
         })
         .catch(() => {});
     }
@@ -2273,7 +2314,7 @@ export function AIHomePage() {
 
       <div className="u-layout">
         {/* ═══════ LEFT SIDEBAR ═══════ */}
-        <aside className={`sb ${sidebarOpen ? 'open' : 'closed'}`}>
+        <aside className={`sb ${sidebarOpen ? (sidebarClosing ? 'sb--closing' : 'open') : 'closed'}`}>
           <div className="sb-header">
             <div className="sb-tabs">
               <button className={`sb-tab ${sidebarTab === 'filters' ? 'sb-tab--active' : ''}`} onClick={() => setSidebarTab('filters')}>
@@ -4443,7 +4484,7 @@ export function AIHomePage() {
 
       {/* ── Inline Panel ────────────────────────────────────────────── */}
       {inlinePanel && (
-        <div className="u-panel">
+        <div className={`u-panel ${panelClosing ? 'u-panel--closing' : ''}`}>
             <button className="u-panel-close" onClick={() => setInlinePanel(null)}>×</button>
 
             {/* Universal back button */}
@@ -5102,7 +5143,11 @@ export function AIHomePage() {
                   <span className="u-panel-space-emoji">{space.emoji}</span>
                   <div style={{ flex: 1 }}>
                     <h2>{space.name}</h2>
-                    <span className="u-panel-space-meta">{space.memberCount} members · {spaceCompanyCount} companies</span>
+                    <span className="u-panel-space-meta">{space.memberCount} members · {spaceCompanyCount} companies{isOwner && thisSpaceRequests.length > 0 ? (() => {
+                      const totalRequested = thisSpaceRequests.length;
+                      const totalMade = thisSpaceRequests.filter((r: any) => r.status === 'accepted').length;
+                      return ` · ${totalRequested} intro${totalRequested !== 1 ? 's' : ''} requested · ${totalMade} made`;
+                    })() : ''}</span>
                   </div>
                   {isOwner && (
                     <button
@@ -5123,8 +5168,10 @@ export function AIHomePage() {
                 <div className="u-panel-section">
                   <h4 className="u-panel-section-h">Members</h4>
                   <div className="u-panel-contact-list">
-                    {(space.members || []).map(m => (
-                      <div key={m.id} className="u-panel-contact-row">
+                    {(space.members || []).map(m => {
+                      const stats = isOwner ? spaceMemberStats[space.id]?.[m.user.id] : null;
+                      return (
+                      <div key={m.id} className="u-panel-contact-row" style={stats ? { flexWrap: 'wrap' } : undefined}>
                         <PersonAvatar email={m.user.email} name={m.user.name} avatarUrl={m.user.avatar} size={28} />
                         <div className="u-panel-contact-info">
                           <span className="u-panel-contact-name">{m.user.name}</span>
@@ -5135,12 +5182,20 @@ export function AIHomePage() {
                           <button
                             className="u-notif-reject-btn"
                             style={{ fontSize: '0.6rem', padding: '0.1rem 0.35rem', flexShrink: 0 }}
-                            onClick={() => { if (window.confirm(`Remove ${m.user.name} from this space?`)) removeSpaceMember(space.id, m.user.id); }}
+                            onClick={() => setRemoveMemberModal({ spaceId: space.id, userId: m.user.id, userName: m.user.name })}
                             title="Remove member"
                           >×</button>
                         )}
+                        {stats && (
+                          <div style={{ width: '100%', paddingLeft: '36px', marginTop: '-0.15rem', marginBottom: '0.25rem' }}>
+                            <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.35)' }}>
+                              {stats.contactCount.toLocaleString()} {stats.contactCount === 1 ? 'contact' : 'contacts'} · {stats.introsRequested} requested · {stats.introsHelped} helped
+                            </span>
+                          </div>
+                        )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -5489,7 +5544,9 @@ export function AIHomePage() {
                     ...mergedCompanies.map(c => c.domain),
                     ...connectionCompanies.map(cc => cc.domain),
                   ]).size;
-                  return (
+                  const introsRequested = (myIntroRequests || []).length;
+                  const introsHelped = (incomingRequests || []).filter(r => r.offers?.some(o => o.introducer?.id === currentUser?.id)).length;
+                  return (<>
                     <div className="u-network-stats">
                       <span><span className="u-network-stats-val">{spaces.length}</span> {spaces.length === 1 ? 'space' : 'spaces'}</span>
                       <span className="u-network-stats-sep">·</span>
@@ -5497,7 +5554,18 @@ export function AIHomePage() {
                       <span className="u-network-stats-sep">·</span>
                       <span><span className="u-network-stats-val">{totalCompanies.toLocaleString()}</span> companies</span>
                     </div>
-                  );
+                    <div className="u-intro-stats">
+                      <div className="u-intro-stats-item">
+                        <span className="u-intro-stats-val">{introsRequested}</span>
+                        <span className="u-intro-stats-label">{introsRequested === 1 ? 'intro requested' : 'intros requested'}</span>
+                      </div>
+                      <div className="u-intro-stats-divider" />
+                      <div className="u-intro-stats-item">
+                        <span className="u-intro-stats-val u-intro-stats-val--helped">{introsHelped}</span>
+                        <span className="u-intro-stats-label">{introsHelped === 1 ? 'intro helped' : 'intros helped'}</span>
+                      </div>
+                    </div>
+                  </>);
                 })()}
 
                 {/* ── Spaces section (collapsible) ── */}
@@ -6547,7 +6615,7 @@ export function AIHomePage() {
                       {isSent && !isPendingReview && (() => {
                         const spaceObj = req.space;
                         const spaceData = spaceObj ? spaces.find(s => s.id === spaceObj.id) : null;
-                        const memberCount = spaceData ? (spaceData.memberCount || 1) - 1 : 0;
+                        const memberCount = (req as any).notifiedCount ?? (spaceData ? (spaceData.memberCount || 1) - 1 : 0);
                         const pendingConnPeerId = nq.connectionPeerId as string | undefined;
                         const pendingConn = pendingConnPeerId ? connections.find(c => c.peer.id === pendingConnPeerId) : undefined;
                         return (
@@ -6785,6 +6853,20 @@ export function AIHomePage() {
                   {isOpen && (isSent || (!isPendingReview && (myContactsAtCompany.length > 0 || is1to1Received))) && (
                     <div className="u-intro-detail-actions">
                       {isSent ? (
+                        <>
+                        <button
+                          className="u-action-btn u-action-btn--primary"
+                          onClick={async () => {
+                            try {
+                              await requestsApi.updateStatus(req.id, 'completed');
+                              setMyIntroRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'completed' } : r));
+                              setIntroToast('Request marked as done');
+                              setTimeout(() => setIntroToast(null), 3000);
+                            } catch { setIntroToast('Failed to mark as done'); setTimeout(() => setIntroToast(null), 3000); }
+                          }}
+                        >
+                          Mark as Done
+                        </button>
                         <button
                           className="u-action-btn u-action-btn--danger"
                           onClick={async () => {
@@ -6804,6 +6886,7 @@ export function AIHomePage() {
                         >
                           Withdraw Request
                         </button>
+                        </>
                       ) : (
                         <>
                           {/* Option cards shown directly */}
@@ -7629,6 +7712,42 @@ export function AIHomePage() {
               </button>
               <button className="accept-modal-btn-primary" onClick={confirmAcceptConnection}>
                 Accept Connection
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Remove Member Confirmation Modal ── */}
+      {removeMemberModal && (
+        <div className="accept-modal-overlay" onClick={() => setRemoveMemberModal(null)}>
+          <div className="accept-modal" onClick={e => e.stopPropagation()} style={{ width: 400 }}>
+            <div className="accept-modal-glow" style={{ background: 'radial-gradient(circle, rgba(239,68,68,0.18) 0%, transparent 70%)' }} />
+            <button className="accept-modal-close" onClick={() => setRemoveMemberModal(null)}>×</button>
+
+            <div className="accept-modal-header">
+              <div className="accept-modal-icon">👋</div>
+              <h2 className="accept-modal-title">
+                Remove {removeMemberModal.userName}?
+              </h2>
+              <p className="accept-modal-subtitle">
+                They will lose access to this space and its shared contacts
+              </p>
+            </div>
+
+            <div className="accept-modal-actions">
+              <button className="accept-modal-btn-secondary" onClick={() => setRemoveMemberModal(null)}>
+                Cancel
+              </button>
+              <button
+                className="accept-modal-btn-primary"
+                style={{ background: '#ef4444' }}
+                onClick={() => {
+                  removeSpaceMember(removeMemberModal.spaceId, removeMemberModal.userId);
+                  setRemoveMemberModal(null);
+                }}
+              >
+                Remove
               </button>
             </div>
           </div>

@@ -110,6 +110,23 @@ router.get('/user/mine', authMiddleware, async (req, res) => {
       orderBy: { createdAt: 'desc' },
     });
 
+    // Batch-fetch notified connector counts per request from stored notifications
+    const spaceRequestIds = requests.filter(r => r.spaceId).map(r => r.id);
+    const notifiedCountMap = new Map<string, number>();
+    if (spaceRequestIds.length > 0) {
+      const notifs = await prisma.notification.findMany({
+        where: {
+          type: 'intro_request',
+          OR: spaceRequestIds.map(id => ({ data: { path: ['requestId'], equals: id } })),
+        },
+        select: { data: true },
+      });
+      for (const n of notifs) {
+        const rid = (n.data as Record<string, unknown>)?.requestId as string;
+        if (rid) notifiedCountMap.set(rid, (notifiedCountMap.get(rid) || 0) + 1);
+      }
+    }
+
     const enriched = await Promise.all(requests.map(async (r) => {
       const nq = (r.normalizedQuery as Record<string, unknown>) || {};
       const connPeerId = nq.connectionPeerId as string | undefined;
@@ -123,7 +140,8 @@ router.get('/user/mine', authMiddleware, async (req, res) => {
       const declinedByName = (r.declinedBy && !r.spaceId) ? r.declinedBy.name : undefined;
       const detailsRequestedByName = r.detailsRequestedBy?.name || undefined;
       const detailsRequestedById = r.detailsRequestedById || undefined;
-      return { ...r, connectionPeerName, declinedByName, detailsRequestedByName, detailsRequestedById, declinedBy: undefined, detailsRequestedBy: undefined };
+      const notifiedCount = r.spaceId ? (notifiedCountMap.get(r.id) || 0) : (connPeerId ? 1 : 0);
+      return { ...r, connectionPeerName, declinedByName, detailsRequestedByName, detailsRequestedById, notifiedCount, declinedBy: undefined, detailsRequestedBy: undefined };
     }));
 
     res.json(enriched);

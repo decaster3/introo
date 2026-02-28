@@ -272,6 +272,15 @@ export function SettingsPanel({
           Log out
         </button>
       </div>
+
+      <div className="u-settings-footer">
+        <div className="u-settings-footer-links">
+          <a href="https://introo.app/privacy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
+          <span className="u-settings-footer-sep">·</span>
+          <a href="https://introo.app/terms" target="_blank" rel="noopener noreferrer">Terms of Service</a>
+        </div>
+        <a className="u-settings-footer-email" href="mailto:hi@introo.app">hi@introo.app</a>
+      </div>
     </div>
   );
 }

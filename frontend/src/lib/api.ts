@@ -197,6 +197,11 @@ export const requestsApi = {
     request<IntroRequestResponse>(`/api/requests/${id}/done`, {
       method: 'PATCH',
     }),
+  updateStatus: (id: string, status: string) =>
+    request<IntroRequestResponse>(`/api/requests/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    }),
   adminReview: (id: string, action: 'approve' | 'reject', reason?: string) =>
     request<IntroRequestResponse>(`/api/requests/${id}/admin-review`, {
       method: 'PATCH',
