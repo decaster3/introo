@@ -263,6 +263,9 @@ export function AIHomePage() {
   const [showTagTip, setShowTagTip] = useState(false);
   const [showViewPrompt, setShowViewPrompt] = useState(false);
   const [viewPromptDismissed, setViewPromptDismissed] = useState(() => !!localStorage.getItem('introo_view_prompt_dismissed'));
+  const [obExploredCompany, setObExploredCompany] = useState(() => !!localStorage.getItem('introo_explored_company'));
+  const [obEnrichedContacts, setObEnrichedContacts] = useState(() => !!localStorage.getItem('introo_enriched_contacts'));
+  const [obAppliedFilter, setObAppliedFilter] = useState(() => !!localStorage.getItem('introo_applied_filter'));
   
 
   // ─── Add contact panel state ──────────────────────────────────────────────────
@@ -2205,12 +2208,14 @@ export function AIHomePage() {
   useEffect(() => {
     if (inlinePanel?.type === 'company' || inlinePanel?.type === 'person') {
       localStorage.setItem('introo_explored_company', 'true');
+      setObExploredCompany(true);
     }
   }, [inlinePanel?.type]);
 
   useEffect(() => {
     if (enrichStats && enrichStats.contacts.enriched > 0) {
       localStorage.setItem('introo_enriched_contacts', 'true');
+      setObEnrichedContacts(true);
     }
   }, [enrichStats]);
 
@@ -2229,19 +2234,20 @@ export function AIHomePage() {
       tagInclude.length > 0 || tagExclude.length > 0;
     if (hasExplicitFilter) {
       localStorage.setItem('introo_applied_filter', 'true');
+      setObAppliedFilter(true);
     }
   }, [sidebarFilters, strengthFilter, tagInclude, tagExclude]);
 
   const checklistProgress: ChecklistProgress = useMemo(() => ({
     connectCalendar: isCalendarConnected,
-    enrichContacts: !!localStorage.getItem('introo_enriched_contacts'),
-    openCard: !!localStorage.getItem('introo_explored_company'),
-    applyFilter: !!localStorage.getItem('introo_applied_filter'),
+    enrichContacts: obEnrichedContacts,
+    openCard: obExploredCompany,
+    applyFilter: obAppliedFilter,
     saveView: savedViews.length > 0,
     acceptConnection: connections.filter(c => c.status === 'accepted').length > 0,
     inviteFriend: connections.length > 0 || pendingInvites.length > 0,
     requestIntro: (myIntroRequests || []).length > 0,
-  }), [isCalendarConnected, savedViews.length, connections, pendingInvites.length, spaces.length, myIntroRequests]);
+  }), [isCalendarConnected, obEnrichedContacts, obExploredCompany, obAppliedFilter, savedViews.length, connections, pendingInvites.length, myIntroRequests]);
 
   const checklistActions: ChecklistActions = useMemo(() => ({
     connectCalendar: () => setInlinePanel({ type: 'settings' }),
