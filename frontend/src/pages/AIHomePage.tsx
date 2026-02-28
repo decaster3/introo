@@ -2232,9 +2232,8 @@ export function AIHomePage() {
     openCard: obExploredCompany,
     applyFilter: obAppliedFilter,
     acceptConnection: connections.filter(c => c.status === 'accepted').length > 0,
-    inviteFriend: connections.length > 0 || pendingInvites.length > 0,
     requestIntro: (myIntroRequests || []).length > 0,
-  }), [isCalendarConnected, obEnrichedContacts, obExploredCompany, obAppliedFilter, connections, pendingInvites.length, myIntroRequests]);
+  }), [isCalendarConnected, obEnrichedContacts, obExploredCompany, obAppliedFilter, connections, myIntroRequests]);
 
   const checklistActions: ChecklistActions = useMemo(() => ({
     connectCalendar: () => setInlinePanel({ type: 'settings' }),
@@ -2245,7 +2244,6 @@ export function AIHomePage() {
     },
     applyFilter: () => { searchRef.current?.focus(); },
     acceptConnection: () => setInlinePanel({ type: 'network-manage' }),
-    inviteFriend: () => setInlinePanel({ type: 'network-manage' }),
     requestIntro: () => {
       const reachable = mergedCompanies.find(c => c.spaceCount > 0);
       if (reachable) {

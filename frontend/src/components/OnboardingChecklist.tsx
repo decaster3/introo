@@ -9,7 +9,6 @@ export type StepKey =
   | 'openCard'
   | 'applyFilter'
   | 'acceptConnection'
-  | 'inviteFriend'
   | 'requestIntro';
 
 export type ChecklistProgress = Record<StepKey, boolean>;
@@ -23,7 +22,6 @@ const STEPS: Step[] = [
   { key: 'openCard', icon: '🏢', label: 'Open a company card' },
   { key: 'applyFilter', icon: '🔍', label: 'Search for companies' },
   { key: 'acceptConnection', icon: '🤝', label: 'Accept a connection' },
-  { key: 'inviteFriend', icon: '👋', label: 'Invite a friend' },
   { key: 'requestIntro', icon: '✉️', label: 'Request an intro' },
 ];
 
