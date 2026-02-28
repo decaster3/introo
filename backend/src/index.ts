@@ -768,9 +768,43 @@ async function ensureAdminUsers() {
   }
 }
 
+// One-time backfill: set calendarConnectedAt for existing users so connection
+// reminder sequence starts fresh (first email at ~9 AM CET next morning).
+// Idempotent — only touches users where the field is still NULL.
+async function backfillCalendarConnectedAt() {
+  try {
+    // Target: 9 AM CET tomorrow = 08:00 UTC tomorrow
+    // Set calendarConnectedAt to 08:00 UTC today so 24h later = 9 AM CET tomorrow
+    const tomorrow9amCET = new Date();
+    tomorrow9amCET.setUTCHours(8, 0, 0, 0);
+    // If it's already past 8 AM UTC today, target tomorrow
+    if (tomorrow9amCET.getTime() <= Date.now()) {
+      tomorrow9amCET.setUTCDate(tomorrow9amCET.getUTCDate() + 1);
+    }
+    const backfillTimestamp = new Date(tomorrow9amCET.getTime() - 24 * 60 * 60 * 1000);
+
+    const result = await prisma.user.updateMany({
+      where: {
+        googleAccessToken: { not: null },
+        calendarConnectedAt: null,
+      },
+      data: {
+        calendarConnectedAt: backfillTimestamp,
+      },
+    });
+
+    if (result.count > 0) {
+      console.log(`[backfill] Set calendarConnectedAt for ${result.count} existing user(s) → first connection reminder at ~9 AM CET`);
+    }
+  } catch (err) {
+    console.error('[backfill] calendarConnectedAt backfill error:', (err as Error).message);
+  }
+}
+
 // Start server
 verifyDatabaseConnection().then(async () => {
   await ensureAdminUsers();
+  await backfillCalendarConnectedAt();
   server = app.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
 
