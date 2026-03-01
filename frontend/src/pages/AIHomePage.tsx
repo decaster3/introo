@@ -4484,7 +4484,7 @@ export function AIHomePage() {
 
       {/* ── Inline Panel ────────────────────────────────────────────── */}
       {inlinePanel && (
-        <div className={`u-panel ${panelClosing ? 'u-panel--closing' : ''}`}>
+        <div className={`u-panel ${panelClosing ? 'u-panel--closing' : ''} ${inlinePanel.type === 'network-manage' || inlinePanel.type === 'spaces-manage' || inlinePanel.type === 'connections-manage' || inlinePanel.type === 'notifications' || inlinePanel.type === 'settings' ? 'u-panel--main-tabs' : ''}`}>
             <button className="u-panel-close" onClick={() => setInlinePanel(null)}>×</button>
 
             {/* Universal back button */}
@@ -4551,7 +4551,6 @@ export function AIHomePage() {
               const dc = 'connectionStrength' in c ? (c as DisplayContact) : null;
               const co = inlinePanel.company;
               const isMyContact = !!dc;
-              const isInNetwork = isMyContact || connections.some(conn => conn.peer.email === c.email && conn.status === 'accepted');
               return (
               <div className="u-panel-person">
                 {dc && (
@@ -4690,34 +4689,28 @@ export function AIHomePage() {
                   </div>
                 )}
 
-                <div className="u-panel-actions">
-                  {dc?.linkedinUrl && (
-                    <a
-                      className="u-action-btn"
-                      href={dc.linkedinUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      LinkedIn
-                    </a>
-                  )}
-                  {!isInNetwork && co && (
+                {isMyContact && c.email && (
+                  <div className="u-panel-invite-section">
+                    <p className="u-panel-invite-desc">Invite {c.name?.split(' ')[0] || 'them'} to Introo so you can share your networks and make warm intros for each other.</p>
                     <button
-                      className="u-primary-btn"
+                      className="u-panel-link-btn u-panel-link-btn--intro"
+                      onClick={() => sendConnectionRequest(c.email)}
+                    >
+                      ✨ Invite to connect
+                    </button>
+                  </div>
+                )}
+                {!isMyContact && co && (
+                  <div className="u-panel-invite-section">
+                    <p className="u-panel-invite-desc">Request a warm intro to {co.name} through your network.</p>
+                    <button
+                      className="u-panel-link-btn u-panel-link-btn--intro"
                       onClick={() => openIntroPanel(co, undefined, inlinePanel.fromSpaceId || undefined)}
                     >
-                      ✨ Request Intro
+                      ✨ Request intro to {co.name}
                     </button>
-                  )}
-                  {isMyContact && (
-                    <a
-                      className="u-action-btn"
-                      href={`mailto:${c.email}?subject=${encodeURIComponent(`Hi ${c.name || 'there'}`)}&body=${encodeURIComponent(`Hi ${c.name || 'there'},\n\nI wanted to reach out and connect.\n\nBest,\n${currentUser?.name || ''}`)}`}
-                    >
-                      ✉ Email
-                    </a>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
               );
             })()}
@@ -7201,7 +7194,7 @@ export function AIHomePage() {
               co.spaceIds.forEach(sid => {
                 const sp = spaces.find(s => s.id === sid);
                 const data = spaceContactData[sid] || { count: 0, titles: [] };
-                if (sp) introOptions.push({ type: 'space', id: sid, label: sp.name, emoji: sp.emoji || '🫛', count: data.count, titles: data.titles });
+                if (sp && data.count > 0) introOptions.push({ type: 'space', id: sid, label: sp.name, emoji: sp.emoji || '🫛', count: data.count, titles: data.titles });
               });
 
               // Collect contacts per connection from the raw connectionCompanies data
@@ -7215,7 +7208,7 @@ export function AIHomePage() {
                 cc?.contacts.forEach(c => {
                   if (c.title && !titles.includes(c.title)) titles.push(c.title);
                 });
-                introOptions.push({ type: 'connection', id: cid, label: conn.peer.name, peerId: conn.peer.id, peerEmail: conn.peer.email, count, titles });
+                if (count > 0) introOptions.push({ type: 'connection', id: cid, label: conn.peer.name, peerId: conn.peer.id, peerEmail: conn.peer.email, count, titles });
               });
 
               // Auto-select: if filtered to a specific connection, pre-select it; if filtered to a space, pre-select it; otherwise first option

@@ -4870,7 +4870,7 @@ body {
 
 .u-omni-input-row input {
   flex: 1; background: none; border: none;
-  color: var(--text-primary); font-size: 0.9rem; outline: none;
+  color: var(--text-primary); font-size: max(16px, 0.9rem); outline: none;
   min-width: 0;
 }
 .u-omni-input-row input::placeholder { color: var(--text-muted); }
@@ -7035,6 +7035,19 @@ body {
   line-height: 1.5;
   margin: 0 0 0.5rem;
 }
+.u-panel-invite-section {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+.u-panel-invite-desc {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0 0 0.5rem;
+}
 
 .u-panel-intro-learn {
   display: inline-block;
@@ -7520,6 +7533,9 @@ body {
     opacity: 0;
     transition: opacity 0.15s ease;
   }
+
+  .u-panel--main-tabs .u-panel-close,
+  .u-panel--main-tabs .u-panel-back { display: none; }
 
   .u-canvas.has-panel .u-scroll-area { display: none; }
   .u-canvas.has-panel .u-topbar { display: none; }
