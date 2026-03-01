@@ -265,7 +265,7 @@ export function AIHomePage() {
   const [introRequestSending, setIntroRequestSending] = useState(false);
   const [introRequestSent, setIntroRequestSent] = useState(false);
   const [introSelectedThrough, setIntroSelectedThrough] = useState<string | null>(null);
-  const [introTipOpen, setIntroTipOpen] = useState(false);
+
   const [connMenuOpen, setConnMenuOpen] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
   const [notifications, setNotifications] = useState<Awaited<ReturnType<typeof notificationsApi.getAll>>>([]);
@@ -7301,13 +7301,13 @@ export function AIHomePage() {
                     onChange={e => setIntroRequestText(e.target.value)}
                     disabled={introRequestSending || introRequestSent}
                   />
-                  <span className="u-panel-textarea-hint" onClick={() => setIntroTipOpen(!introTipOpen)}>?</span>
-                  {introTipOpen && (
-                    <div className="u-panel-textarea-tooltip">
-                      Be specific about what you need. Mention what's in it for them — rev share, partnership, deal %. Keep it to 2-3 sentences.
-                    </div>
-                  )}
                 </div>
+                <ul className="u-intro-tips">
+                  <li>Briefly explain who you are and what you do</li>
+                  <li>State your goal concretely — selling services, looking for a vendor, fundraising, co-investing, hiring, etc.</li>
+                  <li>Mention what's in it for the connector if the intro succeeds — % of the deal, fixed fee, reciprocal intro, or other value</li>
+                  <li>Keep it short but concrete</li>
+                </ul>
 
                 {introRequestSent ? (
                   <div className="u-panel-actions">

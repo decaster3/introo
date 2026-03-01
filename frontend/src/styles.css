@@ -7321,6 +7321,25 @@ body {
   border-color: var(--accent-primary);
   background: rgba(91,141,239,0.08);
 }
+.u-intro-tips {
+  margin: 0.5rem 0 0;
+  padding: 0 0 0 1.1rem;
+  list-style: none;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.u-intro-tips li {
+  position: relative;
+  padding: 0.15rem 0;
+}
+.u-intro-tips li::before {
+  content: '→';
+  position: absolute;
+  left: -1rem;
+  color: var(--text-muted);
+  opacity: 0.5;
+}
 .u-panel-textarea-tooltip {
   position: absolute;
   top: 0;
